@@ -70,7 +70,7 @@ def render_portfolio_builder(api_key, is_pro=False):
         </div>
         """, unsafe_allow_html=True)
         if st.button("Upgrade to Pro", type="primary", key="upgrade_portfolio"):
-            st.session_state["show_payment"] = True
+            st.session_state["show_payment"] = False
             st.rerun()
         return
 
