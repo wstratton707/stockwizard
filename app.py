@@ -351,7 +351,7 @@ with tab1:
                             StockWizard produces to be something a professional quant would stand behind."
                         </div>
                         <div class="founder-name">Nicholas Carriello</div>
-                        <div class="founder-role">Co-Founder & Quant Lead</div>
+                        <div class="founder-role">Co-Founder & Quantitative Lead</div>
                         <div class="founder-school">Bucknell University</div>
                     </div>
                 </div>
