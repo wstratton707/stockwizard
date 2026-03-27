@@ -359,14 +359,14 @@ elif run_btn or ticker_input:
 
     with st.spinner(f"Validating {ticker_input}..."):
         valid, info = validate_ticker(ticker_input, POLYGON_API_KEY)
-if not valid:
-    # Try fetching price directly as fallback validation
-    live_check = get_live_price(ticker_input, POLYGON_API_KEY)
-    if not live_check or not live_check.get("price"):
-        st.error(f"❌ Ticker '{ticker_input}' not found. Check the symbol and try again.")
-        st.stop()
 
-    # ── LIVE PRICE TICKER (always shown, auto-refreshes) ─────────────────────
+    if not valid:
+        live_check = get_live_price(ticker_input, POLYGON_API_KEY)
+        if not live_check or not live_check.get("price"):
+            st.error(f"❌ Ticker '{ticker_input}' not found. Check the symbol and try again.")
+            st.stop()
+
+    # ── LIVE PRICE TICKER
     live = get_live_price(ticker_input, POLYGON_API_KEY)
     if live:
         color    = "#22c55e" if live["change"] >= 0 else "#ef4444"
