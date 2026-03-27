@@ -54,25 +54,12 @@ def render_portfolio_builder(api_key, is_pro=False):
     """Main entry point — renders the full portfolio builder UI."""
 
     if not is_pro:
-        st.markdown("""
-        <div style="background:#0f172a;border:1px solid #334155;border-radius:16px;
-                    padding:2.5rem;text-align:center;margin:1rem 0">
-            <div style="font-size:1.75rem;margin-bottom:0.75rem">📊</div>
-            <div style="color:#fff;font-weight:600;font-size:1.2rem;margin-bottom:0.5rem">
-                Portfolio Builder is a Pro Feature
-            </div>
-            <div style="color:#94a3b8;font-size:0.9rem;margin-bottom:1.5rem;max-width:480px;margin-left:auto;margin-right:auto">
-                Build custom portfolios with backtesting, efficient frontier optimisation,
-                Monte Carlo simulation, and full Excel report export.
-            </div>
-            <div style="color:#38bdf8;font-size:1.1rem;font-weight:600">$9.99 / month</div>
-            <div style="color:#64748b;font-size:0.8rem;margin-top:4px">Cancel anytime</div>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("Upgrade to Pro", type="primary", key="upgrade_portfolio"):
-            st.session_state["show_payment"] = True
-            st.rerun()
-        return
+        st.info(
+            "🎉 **Free Trial** — You're using Portfolio Builder for free. "
+            "Upgrade to Pro for unlimited access.",
+            icon="ℹ️"
+        )
+        # No return — free users continue into the full builder below
 
     st.markdown("""
     <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border:1px solid #334155;
