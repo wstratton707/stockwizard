@@ -7,7 +7,8 @@ from datetime import datetime
 
 from portfolio_data import (
     fetch_portfolio_prices, build_candidate_universe,
-    get_ticker_info, SECTOR_UNIVERSE, SECTOR_ETFS
+    get_ticker_info, SECTOR_UNIVERSE, SECTOR_ETFS,
+    BOND_UNIVERSE, BOND_ETFS,
 )
 from portfolio_analysis import (
     compute_stock_metrics, compute_correlation_matrix,
@@ -26,7 +27,8 @@ AMBER  = "#f59e0b"
 PURPLE = "#8b5cf6"
 MUTED  = "#94a3b8"
 
-ALL_SECTORS = list(SECTOR_UNIVERSE.keys())
+ALL_SECTORS        = list(SECTOR_UNIVERSE.keys())
+ALL_BOND_CATEGORIES = list(BOND_UNIVERSE.keys())
 
 
 def _metric_card(label, value, color=DARK, subtitle=None):
@@ -146,6 +148,20 @@ def render_portfolio_builder(api_key, is_pro=False):
                 if st.checkbox(sector, value=True, key=f"sector_{sector}"):
                     included_sectors.append(sector)
 
+        _section_header("Bond Preferences")
+        st.markdown("<div style='font-size:0.85rem;color:#64748b;margin-bottom:0.75rem'>"
+                    "Select bond categories to include in your portfolio:</div>",
+                    unsafe_allow_html=True)
+
+        # Default to including bonds for conservative/moderate risk profiles
+        default_bond = risk <= 6
+        bond_grid = st.columns(3)
+        included_bond_categories = []
+        for i, category in enumerate(ALL_BOND_CATEGORIES):
+            with bond_grid[i % 3]:
+                if st.checkbox(category, value=default_bond, key=f"bond_{category}"):
+                    included_bond_categories.append(category)
+
         _section_header("Exclusions")
         col1, col2 = st.columns(2)
         with col1:
@@ -162,15 +178,16 @@ def render_portfolio_builder(api_key, is_pro=False):
         st.markdown("---")
         if st.button("Next → Build Universe", type="primary", key="step0_next"):
             st.session_state["port_prefs"] = {
-                "risk_tolerance":        risk,
-                "horizon":               horizon,
-                "starting_capital":      starting_capital,
-                "monthly_contribution":  monthly_contribution,
-                "target_value":          target_value if target_value > 0 else None,
-                "include_sectors":       included_sectors,
-                "exclude_sectors":       excluded_sectors,
-                "user_tickers":          [],
-                "exclude_tickers":       [],
+                "risk_tolerance":          risk,
+                "horizon":                 horizon,
+                "starting_capital":        starting_capital,
+                "monthly_contribution":    monthly_contribution,
+                "target_value":            target_value if target_value > 0 else None,
+                "include_sectors":         included_sectors,
+                "exclude_sectors":         excluded_sectors,
+                "include_bond_categories": included_bond_categories,
+                "user_tickers":            [],
+                "exclude_tickers":         [],
             }
             st.session_state["port_step"] = 1
             st.rerun()

@@ -8,8 +8,9 @@ import time
 
 from data import (
     validate_ticker, fetch_stock_data, fetch_company_details,
-    fetch_news, fetch_peer_comparison, fetch_sector_data,
+    fetch_news, fetch_peer_comparison, fetch_sector_data, fetch_bond_data,
 )
+from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP
 from analysis import (
     detect_support_resistance, build_correlation_matrix,
     run_monte_carlo, generate_summary_paragraph
@@ -238,7 +239,7 @@ if st.session_state["show_payment"] and not st.session_state["is_pro"]:
     st.markdown("---")
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2 = st.tabs(["📈  Stock Analysis", "💼  Portfolio Builder"])
+tab1, tab2, tab3 = st.tabs(["📈  Stock Analysis", "💼  Portfolio Builder", "🏦  Bond Analysis"])
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 1 — STOCK ANALYSIS
@@ -791,3 +792,176 @@ with tab1:
 # ═════════════════════════════════════════════════════════════════════════════
 with tab2:
     render_portfolio_builder(POLYGON_API_KEY, is_pro=st.session_state.get("is_pro", False))
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 3 — BOND ANALYSIS
+# ═════════════════════════════════════════════════════════════════════════════
+with tab3:
+
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border:1px solid #334155;
+                border-radius:14px;padding:1.5rem 2rem;margin-bottom:1.5rem">
+        <div style="font-family:'DM Mono',monospace;color:#38bdf8;font-size:1.1rem;
+                    font-weight:500;margin-bottom:4px">🏦 Bond Analysis</div>
+        <div style="color:#94a3b8;font-size:0.85rem">
+            Analyse bond ETFs · Price history · Volatility · Drawdown · Yield proxy
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Bond universe browser ─────────────────────────────────────────────────
+    st.markdown('<div class="section-header">Bond Universe</div>', unsafe_allow_html=True)
+    st.markdown("<div style='font-size:0.85rem;color:#64748b;margin-bottom:0.75rem'>"
+                "Browse available bond ETFs by category:</div>", unsafe_allow_html=True)
+
+    bond_cat_cols = st.columns(3)
+    for i, (category, tickers) in enumerate(BOND_UNIVERSE.items()):
+        with bond_cat_cols[i % 3]:
+            ticker_list = "  ·  ".join(tickers[:5])
+            st.markdown(f"""
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+                        padding:0.85rem 1rem;margin-bottom:0.75rem">
+                <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.5px;
+                            text-transform:uppercase;color:#64748b;margin-bottom:0.35rem">{category}</div>
+                <div style="font-family:'DM Mono',monospace;font-size:0.78rem;color:#0f172a">{ticker_list}</div>
+            </div>""", unsafe_allow_html=True)
+
+    # ── Analysis form ─────────────────────────────────────────────────────────
+    st.markdown('<div class="section-header">Analyse a Bond ETF</div>', unsafe_allow_html=True)
+    b_col1, b_col2, b_col3 = st.columns([2, 1, 1])
+    with b_col1:
+        bond_ticker = st.text_input("Bond ETF Ticker", placeholder="e.g. TLT, AGG, HYG",
+                                    key="bond_ticker_input").strip().upper()
+    with b_col2:
+        bond_period = st.radio("Period", ["1y", "2y", "5y", "10y"], index=2,
+                               horizontal=True, key="bond_period")
+    with b_col3:
+        bond_benchmark = st.selectbox("Benchmark", ["None", "AGG", "TLT", "BND"],
+                                      key="bond_benchmark")
+
+    run_bond = st.button("▶  Analyse Bond", type="primary", key="run_bond_btn")
+
+    if run_bond and bond_ticker:
+        benchmarks = [bond_benchmark] if bond_benchmark != "None" and bond_benchmark != bond_ticker else []
+        with st.spinner(f"Fetching data for {bond_ticker}..."):
+            try:
+                bdf = fetch_bond_data(bond_ticker, period=bond_period,
+                                      benchmark_tickers=benchmarks or None,
+                                      api_key=POLYGON_API_KEY)
+            except Exception as e:
+                st.error(f"❌ {e}")
+                st.stop()
+
+        # ── Key metrics ───────────────────────────────────────────────────────
+        st.markdown('<div class="section-header">Key Metrics</div>', unsafe_allow_html=True)
+        latest       = bdf.iloc[-1]
+        ret_1y       = bdf["Close"].pct_change(252).iloc[-1] * 100
+        vol_20d      = bdf["Volatility_20d"].iloc[-1] * 100
+        drawdown_60d = bdf["Drawdown_60d"].iloc[-1] * 100
+        sharpe       = bdf["Sharpe_Ratio"].iloc[-1]
+        duration_lbl = bdf["Duration_Bucket"].iloc[-1]
+        pct_52w_high = bdf["Pct_From_52W_High"].iloc[-1] * 100
+
+        m_cols = st.columns(6)
+        for col, label, value, color in [
+            (m_cols[0], "Price",          f"${latest['Close']:,.2f}",        "#0f172a"),
+            (m_cols[1], "1Y Return",      f"{ret_1y:+.1f}%",                 "#16a34a" if ret_1y > 0 else "#dc2626"),
+            (m_cols[2], "Ann. Volatility",f"{vol_20d:.1f}%",                 "#0f172a"),
+            (m_cols[3], "60d Drawdown",   f"{drawdown_60d:.1f}%",            "#dc2626" if drawdown_60d < -5 else "#f59e0b"),
+            (m_cols[4], "Sharpe Ratio",   f"{sharpe:.2f}" if not pd.isna(sharpe) else "N/A",
+                                                                              "#16a34a" if not pd.isna(sharpe) and sharpe > 1 else "#f59e0b"),
+            (m_cols[5], "vs 52W High",    f"{pct_52w_high:+.1f}%",           "#16a34a" if pct_52w_high > -5 else "#dc2626"),
+        ]:
+            with col:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-label">{label}</div>
+                    <div class="metric-value" style="color:{color}">{value}</div>
+                </div>""", unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
+                    padding:0.6rem 1rem;margin-top:0.75rem;font-size:0.85rem;color:#1e40af">
+            <strong>Duration:</strong> {duration_lbl} &nbsp;·&nbsp;
+            <strong>Ticker:</strong> {bond_ticker} &nbsp;·&nbsp;
+            <strong>Period:</strong> {bond_period}
+        </div>""", unsafe_allow_html=True)
+
+        # ── Price chart with MAs ──────────────────────────────────────────────
+        st.markdown('<div class="section-header">Price History</div>', unsafe_allow_html=True)
+        fig_price = go.Figure()
+        fig_price.add_trace(go.Scatter(x=bdf["Date"], y=bdf["Close"],
+                                       line=dict(color="#0f172a", width=1.5), name="Price"))
+        for ma, color in [(20, "#38bdf8"), (50, "#f59e0b"), (200, "#8b5cf6")]:
+            col_name = f"MA{ma}"
+            if col_name in bdf.columns:
+                fig_price.add_trace(go.Scatter(x=bdf["Date"], y=bdf[col_name],
+                                               line=dict(color=color, width=1, dash="dot"),
+                                               name=f"{ma}d MA"))
+        if benchmarks:
+            bench_col = f"{benchmarks[0]}_Cumulative"
+            if bench_col in bdf.columns:
+                # Rescale benchmark to start at same price as bond
+                scale = bdf["Close"].iloc[0] / (bdf[bench_col].iloc[0] / 100)
+                fig_price.add_trace(go.Scatter(
+                    x=bdf["Date"], y=bdf[bench_col] / 100 * scale,
+                    line=dict(color="#94a3b8", width=1, dash="dash"),
+                    name=benchmarks[0],
+                ))
+        fig_price.update_layout(height=380, template="plotly_white",
+                                margin=dict(l=0, r=0, t=10, b=0),
+                                yaxis_title="Price ($)", font=dict(family="DM Sans"),
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(fig_price, use_container_width=True)
+
+        # ── Drawdown chart ────────────────────────────────────────────────────
+        st.markdown('<div class="section-header">Drawdown</div>', unsafe_allow_html=True)
+        fig_dd = go.Figure()
+        fig_dd.add_trace(go.Scatter(x=bdf["Date"], y=bdf["Drawdown_60d"] * 100,
+                                    fill="tozeroy", fillcolor="rgba(220,38,38,0.15)",
+                                    line=dict(color="#dc2626", width=1.5), name="60d Drawdown"))
+        fig_dd.add_trace(go.Scatter(x=bdf["Date"], y=bdf["Drawdown_20d"] * 100,
+                                    line=dict(color="#f59e0b", width=1, dash="dot"),
+                                    name="20d Drawdown"))
+        fig_dd.update_layout(height=220, template="plotly_white",
+                             margin=dict(l=0, r=0, t=10, b=0),
+                             yaxis_title="Drawdown (%)", font=dict(family="DM Sans"))
+        st.plotly_chart(fig_dd, use_container_width=True)
+
+        # ── Volatility & momentum ─────────────────────────────────────────────
+        v_col1, v_col2 = st.columns(2)
+        with v_col1:
+            st.markdown('<div class="section-header">Rolling Volatility (20d)</div>',
+                        unsafe_allow_html=True)
+            fig_vol = go.Figure()
+            fig_vol.add_trace(go.Scatter(x=bdf["Date"], y=bdf["Volatility_20d"] * 100,
+                                         line=dict(color="#8b5cf6", width=1.5), name="Volatility"))
+            fig_vol.update_layout(height=220, template="plotly_white",
+                                  margin=dict(l=0, r=0, t=5, b=0),
+                                  yaxis_title="Ann. Vol (%)", font=dict(family="DM Sans"))
+            st.plotly_chart(fig_vol, use_container_width=True)
+
+        with v_col2:
+            st.markdown('<div class="section-header">20d Price Momentum</div>',
+                        unsafe_allow_html=True)
+            mom = bdf["Price_Momentum_20d"] * 100
+            fig_mom = go.Figure()
+            fig_mom.add_trace(go.Bar(x=bdf["Date"], y=mom,
+                                     marker_color=["#16a34a" if v >= 0 else "#dc2626" for v in mom],
+                                     name="Momentum"))
+            fig_mom.add_hline(y=0, line_color="#94a3b8", line_width=1)
+            fig_mom.update_layout(height=220, template="plotly_white",
+                                  margin=dict(l=0, r=0, t=5, b=0),
+                                  yaxis_title="Return (%)", font=dict(family="DM Sans"))
+            st.plotly_chart(fig_mom, use_container_width=True)
+
+        st.markdown("""
+        <div class="disclaimer">
+            ⚠ Bond ETF analysis is for informational purposes only and does not constitute
+            financial advice. Data provided by Polygon.io. Past performance is not indicative
+            of future results.
+        </div>
+        """, unsafe_allow_html=True)
+
+    elif run_bond and not bond_ticker:
+        st.warning("Please enter a bond ETF ticker.")

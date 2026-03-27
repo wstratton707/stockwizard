@@ -159,7 +159,7 @@ def backtest_portfolio(close_df, weights, starting_capital, monthly_contribution
     shares      = {t: (starting_capital * w_dict[t]) / init_prices[t] for t in avail}
 
     portfolio_values = []
-    contributions    = [starting_capital]
+    contributions    = []
     total_contrib    = starting_capital
     last_month       = dates[0].month
     last_rebal_q     = (dates[0].month - 1) // 3

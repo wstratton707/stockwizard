@@ -29,6 +29,50 @@ SECTOR_ETFS = {
     "Real Estate":"XLRE","Utilities":"XLU","Communication Services":"XLC",
 }
 
+BOND_UNIVERSE = {
+    "Government":          ["TLT","IEF","SHY","GOVT","VGLT","VGIT","VGSH","TBT","TMF","BIL"],
+    "Corporate":           ["LQD","VCIT","VCSH","HYG","JNK","USHY","ANGL","FALN","FLOT","SJNK"],
+    "Inflation-Protected": ["TIP","STIP","SCHP","VTIP","PBTP","RINF","TDTT","FISR","LTPZ","WIP"],
+    "Municipal":           ["MUB","VTEB","HYD","ITM","SHM","CMF","TFI","HYMB","IBMK","MAIM"],
+    "International":       ["BNDX","EMB","PCY","VWOB","IGOV","ISHG","PICB","EMHY","EBND","IAGG"],
+    "Broad Market":        ["AGG","BND","BNDW","FBND","IUSB","GBF","SCHZ","SPAB","BOND","TOTL"],
+}
+
+BOND_ETFS = {
+    "Government":          "TLT",
+    "Corporate":           "LQD",
+    "Inflation-Protected": "TIP",
+    "Municipal":           "MUB",
+    "International":       "BNDX",
+    "Broad Market":        "AGG",
+}
+
+# Approximate duration bucket per ticker (years)
+BOND_DURATION_MAP = {
+    # Government
+    "TLT":"Long (20+ yr)","IEF":"Intermediate (7-10 yr)","SHY":"Short (1-3 yr)",
+    "GOVT":"Broad","VGLT":"Long (20+ yr)","VGIT":"Intermediate (5-10 yr)",
+    "VGSH":"Short (1-3 yr)","BIL":"Ultra-Short (<1 yr)","TBT":"Long (20+ yr)","TMF":"Long (20+ yr)",
+    # Corporate
+    "LQD":"Intermediate (7-10 yr)","VCIT":"Intermediate (5-10 yr)","VCSH":"Short (1-5 yr)",
+    "HYG":"Intermediate (3-5 yr)","JNK":"Intermediate (3-5 yr)","USHY":"Intermediate (3-5 yr)",
+    "ANGL":"Intermediate (3-7 yr)","FALN":"Intermediate (3-7 yr)",
+    "FLOT":"Ultra-Short (<1 yr)","SJNK":"Short (1-3 yr)",
+    # Inflation-Protected
+    "TIP":"Intermediate (7-10 yr)","STIP":"Short (0-5 yr)","SCHP":"Intermediate (5-10 yr)",
+    "VTIP":"Short (0-5 yr)","PBTP":"Long (15+ yr)","RINF":"Long (30 yr)",
+    "TDTT":"Short (3 yr)","LTPZ":"Long (15+ yr)",
+    # Municipal
+    "MUB":"Intermediate (6-9 yr)","VTEB":"Intermediate (5-10 yr)","HYD":"Intermediate (8-12 yr)",
+    "ITM":"Intermediate (6-10 yr)","SHM":"Short (1-5 yr)","CMF":"Intermediate","TFI":"Intermediate",
+    # International
+    "BNDX":"Intermediate (5-10 yr)","EMB":"Intermediate (7-12 yr)","PCY":"Intermediate (7-12 yr)",
+    "VWOB":"Intermediate (7-10 yr)","IGOV":"Intermediate (7-10 yr)",
+    # Broad Market
+    "AGG":"Intermediate (6-8 yr)","BND":"Intermediate (6-8 yr)","BNDW":"Intermediate (6-8 yr)",
+    "FBND":"Intermediate","IUSB":"Intermediate","SCHZ":"Intermediate (5-7 yr)",
+}
+
 
 def _fetch_ohlcv(ticker, start, end, api_key):
     cache_key = f"{ticker}_{start}_{end}"
@@ -109,6 +153,7 @@ def build_candidate_universe(preferences, api_key, log=print):
     excluded_sectors = preferences.get("exclude_sectors", [])
     user_tickers     = [t.upper().strip() for t in preferences.get("user_tickers", [])]
     risk_tolerance   = preferences.get("risk_tolerance", 5)
+    included_bonds   = preferences.get("include_bond_categories", [])
 
     for t in user_tickers:
         candidates.add(t)
@@ -123,6 +168,16 @@ def build_candidate_universe(preferences, api_key, log=print):
         for s in stocks[:n]:
             candidates.add(s)
 
+    # Add bond ETFs based on user-selected bond categories
+    for category in included_bonds:
+        if category in BOND_ETFS:
+            candidates.add(BOND_ETFS[category])
+        bonds = BOND_UNIVERSE.get(category, [])
+        # Conservative: more bonds; aggressive: just the category ETF
+        n_bonds = 3 if risk_tolerance <= 3 else (2 if risk_tolerance <= 6 else 1)
+        for b in bonds[:n_bonds]:
+            candidates.add(b)
+
     if risk_tolerance <= 3:
         candidates.update(["SPY","GLD","TLT","VNQ"])
     elif risk_tolerance <= 6:
@@ -133,6 +188,6 @@ def build_candidate_universe(preferences, api_key, log=print):
     excluded_tickers = [t.upper() for t in preferences.get("exclude_tickers", [])]
     candidates -= set(excluded_tickers)
 
-    result = list(candidates)[:25]
+    result = list(candidates)[:30]
     log(f"   Built universe of {len(result)} candidates")
     return result

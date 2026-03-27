@@ -222,6 +222,71 @@ def fetch_peer_comparison(ticker, peer_tickers, api_key, log=print):
     return pd.DataFrame(rows) if rows else None
 
 
+def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print):
+    """Fetch and enrich bond ETF data.  Mirrors fetch_stock_data but uses
+    bond-relevant metrics (duration label, yield proxy, spread proxy) instead
+    of equity-focused indicators like MACD / RSI."""
+    from portfolio_data import BOND_DURATION_MAP
+
+    df = fetch_ohlcv(ticker, period, api_key, log=log)
+
+    df["Daily_Return"]     = df["Close"].pct_change()
+    df["Cumulative_Index"] = (1 + df["Daily_Return"].fillna(0)).cumprod() * 100
+
+    for ma in [20, 50, 200]:
+        df[f"MA{ma}"]          = df["Close"].rolling(ma).mean()
+        df[f"Close_vs_MA{ma}"] = (df["Close"] / df[f"MA{ma}"] - 1).where(df[f"MA{ma}"].notna())
+
+    df["Vol_MA20"]      = df["Volume"].rolling(20).mean()
+    df["Volume_vs_Avg"] = np.where(df["Vol_MA20"] > 0, df["Volume"] / df["Vol_MA20"], np.nan)
+
+    df["Volatility_20d"] = df["Daily_Return"].rolling(20).std() * np.sqrt(252)
+    df["Drawdown_20d"]   = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(20).max() - 1
+    df["Drawdown_60d"]   = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(60).max() - 1
+    df["52W_High"]       = df["Close"].rolling(252).max()
+    df["52W_Low"]        = df["Close"].rolling(252).min()
+    df["Pct_From_52W_High"] = df["Close"] / df["52W_High"] - 1
+    df["Pct_From_52W_Low"]  = df["Close"] / df["52W_Low"]  - 1
+
+    # Annualised price return as a rough total-return yield proxy
+    df["Return_1Y_Proxy"] = df["Close"].pct_change(252)
+
+    # Rolling 20-day price momentum vs volatility (carry-like signal for bonds)
+    df["Price_Momentum_20d"] = df["Close"].pct_change(20)
+
+    # Duration label from static map
+    df["Duration_Bucket"] = BOND_DURATION_MAP.get(ticker.upper(), "Unknown")
+
+    if benchmark_tickers:
+        for bench in benchmark_tickers:
+            log(f"   Benchmark: {bench}")
+            try:
+                bdf = fetch_ohlcv(bench, period, api_key, log=lambda m: None)
+                bdf[f"{bench}_Return"]     = bdf["Close"].pct_change()
+                bdf[f"{bench}_Cumulative"] = (1 + bdf[f"{bench}_Return"].fillna(0)).cumprod() * 100
+                df = pd.merge(df, bdf[["Date", f"{bench}_Return", f"{bench}_Cumulative"]],
+                              on="Date", how="left")
+            except Exception as e:
+                log(f"   Benchmark {bench} failed: {e}")
+
+        first_b = benchmark_tickers[0]
+        col_b   = f"{first_b}_Return"
+        if col_b in df.columns:
+            df["Rolling_Beta_60d"] = (
+                df["Daily_Return"].rolling(60).cov(df[col_b]) /
+                df[col_b].rolling(60).var()
+            )
+
+    ret      = df["Daily_Return"].dropna()
+    ann_ret  = ret.mean() * 252
+    ann_std  = ret.std() * np.sqrt(252)
+    downside = ret[ret < 0].std() * np.sqrt(252)
+    df["Sharpe_Ratio"]  = ann_ret / ann_std  if ann_std  else np.nan
+    df["Sortino_Ratio"] = ann_ret / downside if downside else np.nan
+
+    return df.sort_values("Date").reset_index(drop=True)
+
+
 def fetch_sector_data(ticker, period, api_key, sector, log=print):
     etf = SECTOR_ETF_MAP.get(sector)
     if not etf:
