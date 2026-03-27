@@ -358,7 +358,7 @@ elif run_btn or ticker_input:
         st.stop()
 
     with st.spinner(f"Validating {ticker_input}..."):
-    valid, info = validate_ticker(ticker_input, POLYGON_API_KEY)
+        valid, info = validate_ticker(ticker_input, POLYGON_API_KEY)
 if not valid:
     # Try fetching price directly as fallback validation
     live_check = get_live_price(ticker_input, POLYGON_API_KEY)
