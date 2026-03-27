@@ -123,7 +123,16 @@ def fetch_portfolio_prices(tickers, period_years=3, api_key="", log=print):
 
     closes = {t: df.set_index("Date")["Close"].rename(t)
               for t, df in price_dict.items()}
-    close_df   = pd.DataFrame(closes).fillna(method="ffill").dropna()
+    close_df = pd.DataFrame(closes)
+    # Drop tickers whose history is too short (starts >60 days after the majority)
+    earliest_common = close_df.apply(lambda s: s.first_valid_index()).max()
+    short_tickers   = [t for t in close_df.columns
+                       if close_df[t].first_valid_index() > earliest_common - pd.Timedelta(days=60)]
+    if short_tickers and len(short_tickers) < len(close_df.columns):
+        log(f"   ⚠ Dropping late-start tickers to preserve history: {short_tickers}")
+        close_df = close_df.drop(columns=short_tickers)
+        failed.extend(short_tickers)
+    close_df   = close_df.ffill().dropna()
     returns_df = close_df.pct_change().dropna()
 
     log(f"   ✅ {len(price_dict)} tickers, {len(returns_df)} trading days")
@@ -178,10 +187,12 @@ def build_candidate_universe(preferences, api_key, log=print):
         for b in bonds[:n_bonds]:
             candidates.add(b)
 
+    # SPY always included so the backtest benchmark is available
+    candidates.add("SPY")
     if risk_tolerance <= 3:
-        candidates.update(["SPY","GLD","TLT","VNQ"])
+        candidates.update(["GLD","TLT","VNQ"])
     elif risk_tolerance <= 6:
-        candidates.update(["SPY","QQQ"])
+        candidates.add("QQQ")
     else:
         candidates.add("QQQ")
 

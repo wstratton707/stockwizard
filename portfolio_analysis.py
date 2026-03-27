@@ -67,7 +67,9 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None):
     Returns weights dict for max Sharpe, min vol, and target return portfolios.
     """
     n      = len(returns_df.columns)
-    bounds = [(0.02, 0.40)] * n          # 2% min, 40% max per asset
+    # Scale min weight down so n * min_w never exceeds 1.0; keep max at 40%
+    min_w  = min(0.02, 0.80 / n)
+    bounds = [(min_w, 0.40)] * n
     constraints = [{"type":"eq","fun": lambda w: np.sum(w) - 1}]
 
     # Add target return constraint if specified
@@ -288,7 +290,7 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
     sigma    = port_ret.std()
 
     forecast_days = forecast_years * 252
-    np.random.seed(42)
+    np.random.seed(None)
 
     rand          = np.random.standard_normal((forecast_days, n_simulations))
     daily_factors = np.exp((mu - 0.5 * sigma**2) + sigma * rand)

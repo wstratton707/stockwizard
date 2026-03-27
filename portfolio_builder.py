@@ -520,7 +520,7 @@ def render_portfolio_builder(api_key, is_pro=False):
         for col, label, value, color in [
             (cols[0], "Final Value",      f"${bt_met.get('Final Value',0):,.0f}",    GREEN),
             (cols[1], "Total Return",     f"{bt_met.get('Total Return',0):.1f}%",    GREEN if bt_met.get("Total Return",0)>0 else RED),
-            (cols[2], "vs S&P 500",       f"{bt_met.get('vs S&P 500','N/A')}%",      GREEN if isinstance(bt_met.get('vs S&P 500',0),float) and bt_met.get('vs S&P 500',0)>0 else RED),
+            (cols[2], "vs S&P 500",       f"{bt_met.get('vs S&P 500',0):.1f}%" if isinstance(bt_met.get('vs S&P 500'), float) else "N/A", GREEN if isinstance(bt_met.get('vs S&P 500'), float) and bt_met.get('vs S&P 500',0)>0 else RED),
             (cols[3], "Sharpe Ratio",     f"{bt_met.get('Sharpe Ratio',0):.2f}",     GREEN if bt_met.get("Sharpe Ratio",0)>1 else AMBER),
         ]:
             with col:
@@ -582,7 +582,8 @@ def render_portfolio_builder(api_key, is_pro=False):
         if hmap is not None and not hmap.empty:
             month_names = ["Jan","Feb","Mar","Apr","May","Jun",
                            "Jul","Aug","Sep","Oct","Nov","Dec"]
-            hmap.columns = [month_names[c-1] if c <= 12 else str(c) for c in hmap.columns]
+            hmap = hmap.copy()
+            hmap.columns = [month_names[int(c)-1] if str(c).isdigit() and int(c) <= 12 else str(c) for c in hmap.columns]
             fig_hmap = px.imshow(
                 hmap.fillna(0),
                 text_auto=".1f",
