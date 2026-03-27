@@ -113,7 +113,7 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 """, unsafe_allow_html=True)
 
 # ── Session state init ────────────────────────────────────────────────────────
-if "is_pro"        not in st.session_state: st.session_state["is_pro"]        = False
+if "is_pro"        not in st.session_state: st.session_state["is_pro"]        = True
 if "user_email"    not in st.session_state: st.session_state["user_email"]    = ""
 if "show_payment"  not in st.session_state: st.session_state["show_payment"]  = False
 if "live_ticker"   not in st.session_state: st.session_state["live_ticker"]   = ""
