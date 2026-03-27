@@ -321,37 +321,41 @@ with tab1:
         fc1, fc2 = st.columns(2)
         with fc1:
             st.markdown("""
-            <div class="founder-card">
-                <div class="founder-quote">
-                    "I built StockWizard because I was tired of spending hours pulling financial
-                    data into spreadsheets manually. I wanted a tool that gives any trader —
-                    beginner or pro — a professional report in seconds."
+                <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
+                    <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0434.jpeg"
+                         style="width:72px;height:72px;border-radius:50%;object-fit:cover;
+                            flex-shrink:0;border:2px solid #e2e8f0;margin-top:4px">
+                    <div>
+                        <div class="founder-quote">
+                            "I built StockWizard because I was tired of spending hours pulling financial
+                            data into spreadsheets manually. I wanted a tool that gives any trader —
+                            beginner or pro — a professional report in seconds."
+                        </div>
+                        <div class="founder-name">Wyatt Stratton</div>
+                        <div class="founder-role">Founder</div>
+                        <div class="founder-school">Indiana University Bloomington</div>
+                    </div>
                 </div>
-                <div class="founder-name">Wyatt Stratton</div>
-                <div class="founder-role">Founder</div>
-                <div class="founder-school">Indiana University Bloomington</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with fc2:
-            st.markdown("""
-            <div class="founder-card">
-                <div class="founder-quote">
-                    "My role was making sure the analysis was rigorous and the experience was seamless.
-                    From Monte Carlo simulation to the overall architecture, I wanted every number
-                    StockWizard produces to be something a professional quant would stand behind."
+                """, unsafe_allow_html=True)
+            
+            with fc2:
+                st.markdown("""
+                <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
+                    <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0433.jpeg"
+                         style="width:72px;height:72px;border-radius:50%;object-fit:cover;
+                                flex-shrink:0;border:2px solid #e2e8f0;margin-top:4px">
+                    <div>
+                        <div class="founder-quote">
+                            "My role was making sure the analysis was rigorous and the experience was seamless.
+                            From Monte Carlo simulation to the overall architecture, I wanted every number
+                            StockWizard produces to be something a professional quant would stand behind."
+                        </div>
+                        <div class="founder-name">Nicholas Carriello</div>
+                        <div class="founder-role">Co-Founder & Quant Lead</div>
+                        <div class="founder-school">Bucknell University</div>
+                    </div>
                 </div>
-                <div class="founder-name">Nicholas Carriello</div>
-                <div class="founder-role">Co-Founder & Quant Lead</div>
-                <div class="founder-school">Bucknell University</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("""
-        <div class="disclaimer">
-            ⚠ This tool is for informational purposes only and does not constitute financial advice.
-            Data provided by Polygon.io. Past performance is not indicative of future results.
-        </div>
-        """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
     # ── Analysis (ticker entered or run clicked) ──────────────────────────────
     elif run_btn or ticker_input:
