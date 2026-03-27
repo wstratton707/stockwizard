@@ -1,0 +1,543 @@
+import io
+import math
+import numpy as np
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.chart import LineChart, Reference
+from openpyxl.formatting.rule import ColorScaleRule, CellIsRule
+from openpyxl.drawing.image import Image as XLImage
+from datetime import datetime
+
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    MPL_AVAILABLE = True
+except ImportError:
+    MPL_AVAILABLE = False
+
+# ── Colours ───────────────────────────────────────────────────────────────────
+DARK_BLUE  = "1F4E79"
+MID_BLUE   = "2E75B6"
+GREEN_OK   = "70AD47"
+RED_BAD    = "FF0000"
+WHITE      = "FFFFFF"
+GREY_ROW   = "F2F2F2"
+
+
+def _border():
+    t = Side(style="thin")
+    return Border(left=t, right=t, top=t, bottom=t)
+
+
+def _hdr_cell(cell, bg=DARK_BLUE, fg=WHITE):
+    cell.font      = Font(bold=True, color=fg, name="Arial", size=10)
+    cell.fill      = PatternFill("solid", fgColor=bg)
+    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell.border    = _border()
+
+
+def style_header_row(ws, bg=DARK_BLUE):
+    for cell in ws[1]:
+        _hdr_cell(cell, bg=bg)
+
+
+def auto_col_width(ws, max_w=28):
+    from openpyxl.cell.cell import Cell
+    for col in ws.columns:
+        real_cells = [c for c in col if isinstance(c, Cell)]
+        if not real_cells:
+            continue
+        best = max((len(str(c.value or "")) for c in real_cells), default=10)
+        ws.column_dimensions[real_cells[0].column_letter].width = min(best + 3, max_w)
+
+
+def make_sparkline(values, color="#2E75B6", width=2.2, height=0.45):
+    if not MPL_AVAILABLE:
+        return None
+    vals = [v for v in values if v is not None and not (isinstance(v, float) and math.isnan(v))]
+    if len(vals) < 2:
+        return None
+    fig, ax = plt.subplots(figsize=(width, height))
+    ax.plot(vals, color=color, linewidth=1.2)
+    ax.fill_between(range(len(vals)), vals, min(vals), alpha=0.15, color=color)
+    ax.set_axis_off()
+    fig.patch.set_alpha(0)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=72, bbox_inches="tight", transparent=True, pad_inches=0)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+# ── Cover page ────────────────────────────────────────────────────────────────
+def _build_cover(wb, ticker, period, sheetnames):
+    ws = wb.create_sheet("Cover", 0)
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 6
+    ws.column_dimensions["B"].width = 44
+    ws.column_dimensions["C"].width = 28
+
+    ws.merge_cells("B2:C3")
+    c = ws["B2"]
+    c.value     = f"{ticker}  —  Stock Analysis Report"
+    c.font      = Font(size=22, bold=True, color=MID_BLUE, name="Arial")
+    c.alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[2].height = 30
+
+    ws.merge_cells("B4:C4")
+    c = ws["B4"]
+    c.value     = f"Period: {period}   |   Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}   |   Data: Polygon.io"
+    c.font      = Font(size=9, italic=True, color="888888", name="Arial")
+    c.alignment = Alignment(horizontal="left")
+
+    ws["B6"] = "TABLE OF CONTENTS"
+    ws["B6"].font = Font(bold=True, size=12, color=DARK_BLUE, name="Arial")
+
+    for i, name in enumerate(sheetnames, 7):
+        cell = ws.cell(row=i, column=2, value=name.replace("_", " "))
+        cell.font      = Font(name="Arial", size=10, color=MID_BLUE, underline="single")
+        cell.hyperlink = f"#{name}!A1"
+        ws.row_dimensions[i].height = 16
+
+    ws["B2"].fill = PatternFill("solid", fgColor="F0F7FF")
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+def _build_dashboard(wb, ticker, df, company_details, mc_summary,
+                     resistance_levels, support_levels, summary_text):
+    ws = wb.create_sheet("Dashboard")
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 24
+    ws.column_dimensions["C"].width = 18
+    ws.column_dimensions["D"].width = 10
+
+    latest     = df.iloc[-1]
+    first      = df.iloc[0]
+    period_ret = (latest["Close"] / first["Close"] - 1) * 100
+
+    ret      = df["Daily_Return"].dropna()
+    ann_ret  = ret.mean() * 252
+    ann_std  = ret.std() * np.sqrt(252)
+    downside = ret[ret < 0].std() * np.sqrt(252)
+    sharpe   = ann_ret / ann_std  if ann_std  else np.nan
+    sortino  = ann_ret / downside if downside else np.nan
+
+    try:
+        rsi_val = float(latest.get("RSI14", np.nan))
+    except Exception:
+        rsi_val = np.nan
+
+    ws.merge_cells("A1:D1")
+    ws["A1"] = f"{ticker} — Professional Stock Analysis"
+    ws["A1"].font      = Font(size=18, bold=True, color=DARK_BLUE, name="Arial")
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 34
+
+    ws.merge_cells("A2:D2")
+    ws["A2"] = f"Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}  |  Data source: Polygon.io"
+    ws["A2"].font      = Font(italic=True, color="888888", name="Arial", size=9)
+    ws["A2"].alignment = Alignment(horizontal="center")
+
+    def sec_hdr(row, label, col_end="D"):
+        ws.merge_cells(f"A{row}:{col_end}{row}")
+        c = ws.cell(row=row, column=1, value=label)
+        c.font      = Font(bold=True, color=WHITE, name="Arial", size=11)
+        c.fill      = PatternFill("solid", fgColor=DARK_BLUE)
+        c.alignment = Alignment(horizontal="left", vertical="center")
+        ws.row_dimensions[row].height = 20
+
+    def kv(row, label, value, fmt=None, rag=None):
+        cl = ws.cell(row=row, column=1, value=label)
+        cv = ws.cell(row=row, column=2, value=value)
+        cl.font      = Font(name="Arial", size=10)
+        cv.font      = Font(name="Arial", size=10, bold=True)
+        cv.alignment = Alignment(horizontal="right")
+        cl.border    = cv.border = _border()
+        if fmt and isinstance(value, (int, float)):
+            cv.number_format = fmt
+        if rag and isinstance(value, (int, float)):
+            direction, thresh = rag
+            colour = (GREEN_OK if value > thresh else RED_BAD) if direction == "gt" \
+                     else (RED_BAD if value < thresh else GREEN_OK)
+            cv.fill = PatternFill("solid", fgColor=colour)
+            cv.font = Font(name="Arial", size=10, bold=True, color=WHITE)
+        bg = GREY_ROW if row % 2 == 0 else WHITE
+        for col in [1, 2]:
+            c = ws.cell(row=row, column=col)
+            if not c.fill or c.fill.fgColor.rgb in ("00000000", "FFFFFFFF", WHITE):
+                c.fill = PatternFill("solid", fgColor=bg)
+
+    sec_hdr(4, "Price & Performance")
+    kv(5,  "Current Price ($)",        latest["Close"],              fmt='_($* #,##0.00_)')
+    kv(6,  "Period Return",            period_ret / 100,             fmt="0.00%", rag=("gt", 0))
+    kv(7,  "52-Week High ($)",         latest.get("52W_High"),       fmt='_($* #,##0.00_)')
+    kv(8,  "52-Week Low ($)",          latest.get("52W_Low"),        fmt='_($* #,##0.00_)')
+    kv(9,  "% from 52W High",          latest.get("Pct_From_52W_High"), fmt="0.00%", rag=("gt", -0.10))
+    kv(10, "20-Day MA ($)",            latest.get("MA20"),           fmt='_($* #,##0.00_)')
+    kv(11, "50-Day MA ($)",            latest.get("MA50"),           fmt='_($* #,##0.00_)')
+    kv(12, "200-Day MA ($)",           latest.get("MA200"),          fmt='_($* #,##0.00_)')
+    kv(13, "Price vs 50-Day MA",       latest.get("Close_vs_MA50"),  fmt="0.00%", rag=("gt", 0))
+
+    if "BB_Upper" in df.columns:
+        sec_hdr(15, "Bollinger Bands (20-day, 2σ)")
+        kv(16, "BB Upper ($)",  latest.get("BB_Upper"),  fmt='_($* #,##0.00_)')
+        kv(17, "BB Middle ($)", latest.get("BB_Middle"), fmt='_($* #,##0.00_)')
+        kv(18, "BB Lower ($)",  latest.get("BB_Lower"),  fmt='_($* #,##0.00_)')
+        kv(19, "BB Width",      latest.get("BB_Width"),  fmt="0.0000")
+        kv(20, "BB %B",         latest.get("BB_Pct"),    fmt="0.00%")
+        risk_start = 22
+    else:
+        risk_start = 15
+
+    sec_hdr(risk_start, "Risk & Return Metrics")
+    kv(risk_start+1, "20-Day Ann. Volatility",  latest.get("Volatility_20d"), fmt="0.00%")
+    kv(risk_start+2, "60-Day Max Drawdown",      df["Drawdown_60d"].min(),     fmt="0.00%", rag=("gt", -0.20))
+    kv(risk_start+3, "RSI (14)",
+       round(rsi_val, 1) if pd.notna(rsi_val) else "N/A",
+       rag=("lt", 70) if pd.notna(rsi_val) and rsi_val > 70 else
+           ("gt", 30) if pd.notna(rsi_val) and rsi_val < 30 else None)
+    kv(risk_start+4, "Sharpe Ratio",  round(sharpe, 2)  if pd.notna(sharpe)  else "N/A", rag=("gt", 1))
+    kv(risk_start+5, "Sortino Ratio", round(sortino, 2) if pd.notna(sortino) else "N/A", rag=("gt", 1))
+
+    row_cursor = risk_start + 7
+
+    if resistance_levels or support_levels:
+        sec_hdr(row_cursor, "Support & Resistance Levels")
+        row_cursor += 1
+        kv(row_cursor,   "Resistance", "  |  ".join([f"${r:,.2f}" for r in (resistance_levels or [])]))
+        kv(row_cursor+1, "Support",    "  |  ".join([f"${s:,.2f}" for s in (support_levels or [])]))
+        row_cursor += 3
+
+    if mc_summary:
+        sec_hdr(row_cursor, "Monte Carlo Forecast")
+        row_cursor += 1
+        for k, v in mc_summary.items():
+            kv(row_cursor, k, str(v))
+            row_cursor += 1
+        row_cursor += 1
+
+    if company_details:
+        sec_hdr(row_cursor, "Company Information")
+        row_cursor += 1
+        for k, v in company_details.items():
+            if k != "Description":
+                kv(row_cursor, k, str(v))
+                row_cursor += 1
+        row_cursor += 1
+
+    sec_hdr(row_cursor, "Automated Analysis Summary", col_end="D")
+    row_cursor += 1
+    ws.merge_cells(f"A{row_cursor}:D{row_cursor + 4}")
+    sc = ws.cell(row=row_cursor, column=1, value=summary_text)
+    sc.font      = Font(name="Arial", size=10, italic=True)
+    sc.alignment = Alignment(wrap_text=True, vertical="top")
+    sc.border    = _border()
+    ws.row_dimensions[row_cursor].height = 90
+    row_cursor += 6
+
+    if MPL_AVAILABLE:
+        ws.column_dimensions["E"].width = 18
+        spark_data = [
+            ("Price",      df["Close"].tolist(),          "#2E75B6"),
+            ("Volume",     df["Volume"].tolist(),         "#70AD47"),
+            ("Daily Ret",  df["Daily_Return"].tolist(),   "#FF6B35"),
+            ("Volatility", df["Volatility_20d"].tolist(), "#7030A0"),
+            ("Drawdown",   df["Drawdown_60d"].tolist(),   "#C00000"),
+        ]
+        ws.cell(row=4, column=5, value="SPARKLINES").font = Font(bold=True, color=WHITE, name="Arial")
+        ws.cell(row=4, column=5).fill = PatternFill("solid", fgColor=MID_BLUE)
+        for i, (label, vals, col) in enumerate(spark_data):
+            row = 5 + i * 3
+            ws.cell(row=row, column=5, value=label).font = Font(name="Arial", size=9, bold=True)
+            buf = make_sparkline(vals, color=col)
+            if buf:
+                img = XLImage(buf)
+                img.width, img.height = 130, 35
+                ws.add_image(img, f"E{row+1}")
+            ws.row_dimensions[row+1].height = 28
+
+    return ws
+
+
+# ── Price & Indicators sheet ──────────────────────────────────────────────────
+def _build_price_sheet(wb, df):
+    price_cols = ["Date","Open","High","Low","Close","Volume",
+                  "Daily_Return","MA20","MA50","MA200",
+                  "Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
+                  "Volatility_20d","Drawdown_20d","Drawdown_60d",
+                  "52W_High","52W_Low","Pct_From_52W_High","Pct_From_52W_Low"]
+    if "RSI14" in df.columns:
+        price_cols += ["RSI14","MACD","MACD_Signal","MACD_Hist"]
+    if "BB_Upper" in df.columns:
+        price_cols += ["BB_Upper","BB_Middle","BB_Lower","BB_Width","BB_Pct"]
+    if "Rolling_Beta_60d" in df.columns:
+        price_cols += ["Rolling_Beta_60d"]
+    price_cols += [c for c in df.columns if c.endswith("_Cumulative")]
+
+    export_df = df[[c for c in price_cols if c in df.columns]].copy()
+    ws_p = wb.create_sheet("Price_Indicators")
+    for r in dataframe_to_rows(export_df, index=False, header=True):
+        ws_p.append(r)
+    style_header_row(ws_p)
+    auto_col_width(ws_p)
+    ws_p.freeze_panes = "A2"
+    ws_p.auto_filter.ref = f"A1:{get_column_letter(ws_p.max_column)}1"
+
+    col_map    = {c[0].column_letter: c[0].value for c in ws_p.iter_cols(1, ws_p.max_column, 1, 1)}
+    price_hdrs = {"Open","High","Low","Close","MA20","MA50","MA200",
+                  "BB_Upper","BB_Middle","BB_Lower","52W_High","52W_Low"}
+    pct_hdrs   = {"Daily_Return","Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
+                  "Volatility_20d","Drawdown_20d","Drawdown_60d","BB_Pct",
+                  "Pct_From_52W_High","Pct_From_52W_Low"}
+
+    for row in ws_p.iter_rows(min_row=2):
+        for cell in row:
+            h = col_map.get(cell.column_letter)
+            if   h == "Date":         cell.number_format = "yyyy-mm-dd"
+            elif h == "Volume":       cell.number_format = "#,##0"
+            elif h in price_hdrs:     cell.number_format = '_($* #,##0.00_)'
+            elif h in pct_hdrs:       cell.number_format = "0.00%"
+
+    dr_col = next((l for l, h in col_map.items() if h == "Daily_Return"), None)
+    if dr_col:
+        ws_p.conditional_formatting.add(
+            f"{dr_col}2:{dr_col}{ws_p.max_row}",
+            ColorScaleRule(start_type="num", start_value=-0.05, start_color="FFAAAA",
+                           mid_type="num",   mid_value=0,        mid_color="FFFFFF",
+                           end_type="num",   end_value=0.05,     end_color="AAFFAA"))
+    rsi_col = next((l for l, h in col_map.items() if h == "RSI14"), None)
+    if rsi_col:
+        rng = f"{rsi_col}2:{rsi_col}{ws_p.max_row}"
+        ws_p.conditional_formatting.add(rng, CellIsRule(operator="greaterThan", formula=["70"],
+            fill=PatternFill("solid", fgColor="FF9999")))
+        ws_p.conditional_formatting.add(rng, CellIsRule(operator="lessThan", formula=["30"],
+            fill=PatternFill("solid", fgColor="99FF99")))
+    return ws_p, export_df
+
+
+# ── News sheet ────────────────────────────────────────────────────────────────
+def _build_news_sheet(wb, news_list):
+    if not news_list:
+        return
+    ws_n = wb.create_sheet("News_Headlines")
+    ws_n.append(["Date","Headline","Publisher","URL"])
+    style_header_row(ws_n)
+    for ni, item in enumerate(news_list, 2):
+        for ci, key in enumerate(["Date","Headline","Publisher","URL"], 1):
+            c = ws_n.cell(row=ni, column=ci, value=item.get(key,""))
+            c.font = Font(name="Arial", size=10)
+            c.border = _border()
+            if ni % 2 == 0:
+                c.fill = PatternFill("solid", fgColor=GREY_ROW)
+    ws_n.column_dimensions["A"].width = 18
+    ws_n.column_dimensions["B"].width = 80
+    ws_n.column_dimensions["C"].width = 22
+    ws_n.column_dimensions["D"].width = 60
+    ws_n.freeze_panes = "A2"
+    ws_n.auto_filter.ref = "A1:D1"
+
+
+# ── Peer comparison sheet ─────────────────────────────────────────────────────
+def _build_peer_sheet(wb, peer_df):
+    if peer_df is None or peer_df.empty:
+        return
+    ws_peer = wb.create_sheet("Peer_Comparison")
+    for r in dataframe_to_rows(peer_df, index=False, header=True):
+        ws_peer.append(r)
+    style_header_row(ws_peer, bg=MID_BLUE)
+    auto_col_width(ws_peer)
+    ws_peer.freeze_panes = "A2"
+    ws_peer.auto_filter.ref = f"A1:{get_column_letter(ws_peer.max_column)}1"
+    for ri, row in enumerate(ws_peer.iter_rows(min_row=2), 2):
+        bg = "D6E4F0" if ri == 2 else (GREY_ROW if ri % 2 == 0 else WHITE)
+        for cell in row:
+            cell.font   = Font(name="Arial", size=10, bold=(ri == 2))
+            cell.border = _border()
+            cell.fill   = PatternFill("solid", fgColor=bg)
+
+
+# ── Sector comparison sheet ───────────────────────────────────────────────────
+def _build_sector_sheet(wb, ticker, df, sector_df):
+    if sector_df is None:
+        return None
+    merged = pd.merge(df[["Date","Cumulative_Index"]], sector_df, on="Date", how="inner")
+    merged = merged.rename(columns={"Cumulative_Index": f"{ticker}_Cumulative"})
+    ws_s = wb.create_sheet("Sector_Comparison")
+    for r in dataframe_to_rows(merged, index=False, header=True):
+        ws_s.append(r)
+    style_header_row(ws_s)
+    auto_col_width(ws_s)
+    ws_s.freeze_panes = "A2"
+    ws_s.auto_filter.ref = f"A1:{get_column_letter(ws_s.max_column)}1"
+    for row in ws_s.iter_rows(min_row=2):
+        for cell in row:
+            cell.number_format = "yyyy-mm-dd" if cell.column == 1 else "0.00"
+    return ws_s
+
+
+# ── Correlation matrix sheet ──────────────────────────────────────────────────
+def _build_correlation_sheet(wb, corr_matrix):
+    if corr_matrix is None:
+        return
+    ws_corr = wb.create_sheet("Correlation_Matrix")
+    labels  = list(corr_matrix.columns)
+    ws_corr.cell(row=1, column=1, value="Correlation Matrix (Daily Returns)")
+    ws_corr.cell(row=1, column=1).font = Font(bold=True, size=12, color=DARK_BLUE, name="Arial")
+    ws_corr.merge_cells(f"A1:{get_column_letter(len(labels)+1)}1")
+    for ci, lbl in enumerate(labels, 2):
+        _hdr_cell(ws_corr.cell(row=2, column=ci, value=lbl), bg=MID_BLUE)
+    for ri, lbl in enumerate(labels, 3):
+        _hdr_cell(ws_corr.cell(row=ri, column=1, value=lbl), bg=MID_BLUE)
+        for ci, col_lbl in enumerate(labels, 2):
+            val  = corr_matrix.loc[lbl, col_lbl]
+            cell = ws_corr.cell(row=ri, column=ci, value=round(float(val), 4))
+            cell.number_format = "0.0000"
+            cell.font          = Font(name="Arial", size=10)
+            cell.border        = _border()
+            cell.alignment     = Alignment(horizontal="center")
+    ws_corr.conditional_formatting.add(
+        f"B3:{get_column_letter(len(labels)+1)}{len(labels)+2}",
+        ColorScaleRule(start_type="num", start_value=-1, start_color="FF9999",
+                       mid_type="num",   mid_value=0,    mid_color="FFFFFF",
+                       end_type="num",   end_value=1,    end_color="99CCFF"))
+    auto_col_width(ws_corr)
+
+
+# ── Monte Carlo sheet ─────────────────────────────────────────────────────────
+def _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary):
+    if mc_sim_df is None:
+        return None, None, None
+    pct_col_start = 53
+    ws_mc = wb.create_sheet("Monte_Carlo")
+    ws_mc["A1"] = "Monte Carlo Simulation Summary"
+    ws_mc["A1"].font = Font(bold=True, size=13, color=DARK_BLUE, name="Arial")
+    ws_mc["A2"] = "Field"
+    ws_mc["B2"] = "Value"
+    for cell in ws_mc[2]:
+        _hdr_cell(cell, bg=MID_BLUE)
+    for i, (k, v) in enumerate(mc_summary.items(), 3):
+        ws_mc.cell(row=i, column=1, value=k).font      = Font(name="Arial", size=10)
+        ws_mc.cell(row=i, column=2, value=str(v)).font = Font(name="Arial", size=10, bold=True)
+    summary_end  = 3 + len(mc_summary)
+    start_row_mc = summary_end + 2
+    ws_mc.cell(row=start_row_mc, column=1, value="Day")
+    for j in range(50):
+        ws_mc.cell(row=start_row_mc, column=j+2, value=f"Sim {j+1}")
+    for day_idx, row_data in enumerate(mc_sim_df.iloc[:, :50].itertuples(index=False)):
+        r = start_row_mc + 1 + day_idx
+        ws_mc.cell(row=r, column=1, value=day_idx)
+        for j, price in enumerate(row_data):
+            ws_mc.cell(row=r, column=j+2, value=round(price, 2)).number_format = '_($* #,##0.00_)'
+    pct_labels = ["P5 (Bear)","P25 (Low)","P50 (Median)","P75 (Bull)","P95 (Best)"]
+    ws_mc.cell(row=start_row_mc, column=pct_col_start, value="Day")
+    for j, lbl in enumerate(pct_labels):
+        _hdr_cell(ws_mc.cell(row=start_row_mc, column=pct_col_start+j+1, value=lbl), bg=MID_BLUE)
+    for day_idx in range(len(mc_sim_df)):
+        row_prices = mc_sim_df.iloc[day_idx].values
+        ws_mc.cell(row=start_row_mc+1+day_idx, column=pct_col_start, value=day_idx)
+        for j, pct in enumerate([5,25,50,75,95]):
+            ws_mc.cell(row=start_row_mc+1+day_idx, column=pct_col_start+j+1,
+                       value=round(np.percentile(row_prices, pct), 2)).number_format = '_($* #,##0.00_)'
+    ws_mc.freeze_panes = f"A{start_row_mc+1}"
+    return ws_mc, start_row_mc, pct_col_start
+
+
+# ── Charts sheet ──────────────────────────────────────────────────────────────
+def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data):
+    ws_ch = wb.create_sheet("Charts")
+    max_r = ws_p.max_row
+
+    chart1 = LineChart()
+    chart1.title = f"{ticker} — Price & Moving Averages"
+    chart1.y_axis.title = "Price ($)"
+    chart1.height, chart1.width, chart1.style = 16, 32, 2
+    for col_name in ["Close","MA20","MA50","MA200"]:
+        idx = next((i for i, c in enumerate(export_df.columns, 1) if c == col_name), None)
+        if idx:
+            chart1.add_data(Reference(ws_p, min_col=idx, min_row=1, max_row=max_r), titles_from_data=True)
+    chart1.set_categories(Reference(ws_p, min_col=1, min_row=2, max_row=max_r))
+    ws_ch.add_chart(chart1, "A1")
+
+    if "BB_Upper" in export_df.columns:
+        chart_bb = LineChart()
+        chart_bb.title = f"{ticker} — Bollinger Bands"
+        chart_bb.y_axis.title = "Price ($)"
+        chart_bb.height, chart_bb.width, chart_bb.style = 16, 32, 2
+        for col_name in ["Close","BB_Upper","BB_Middle","BB_Lower"]:
+            idx = next((i for i, c in enumerate(export_df.columns, 1) if c == col_name), None)
+            if idx:
+                chart_bb.add_data(Reference(ws_p, min_col=idx, min_row=1, max_row=max_r), titles_from_data=True)
+        chart_bb.set_categories(Reference(ws_p, min_col=1, min_row=2, max_row=max_r))
+        ws_ch.add_chart(chart_bb, "A35")
+
+    if ws_mc_data and ws_mc_data[0]:
+        ws_mc, start_row_mc, pct_col_start = ws_mc_data
+        chart_mc = LineChart()
+        chart_mc.title = f"{ticker} — Monte Carlo Percentile Forecast"
+        chart_mc.y_axis.title = "Price ($)"
+        chart_mc.height, chart_mc.width, chart_mc.style = 16, 32, 10
+        n_rows = min(253, ws_mc.max_row - start_row_mc)
+        for j in range(5):
+            chart_mc.add_data(
+                Reference(ws_mc, min_col=pct_col_start+j+1,
+                          min_row=start_row_mc, max_row=start_row_mc+n_rows),
+                titles_from_data=True)
+        chart_mc.set_categories(Reference(ws_mc, min_col=pct_col_start,
+                                           min_row=start_row_mc+1, max_row=start_row_mc+n_rows))
+        ws_ch.add_chart(chart_mc, "A69")
+
+    if ws_s is not None:
+        chart_s = LineChart()
+        chart_s.title = f"{ticker} vs Sector ETF — Cumulative Return"
+        chart_s.y_axis.title = "Index (100 = start)"
+        chart_s.height, chart_s.width, chart_s.style = 16, 32, 3
+        chart_s.add_data(Reference(ws_s, min_col=2, min_row=1, max_row=ws_s.max_row), titles_from_data=True)
+        chart_s.add_data(Reference(ws_s, min_col=3, min_row=1, max_row=ws_s.max_row), titles_from_data=True)
+        chart_s.set_categories(Reference(ws_s, min_col=1, min_row=2, max_row=ws_s.max_row))
+        ws_ch.add_chart(chart_s, "A103")
+
+
+# ── Master orchestrator ───────────────────────────────────────────────────────
+def build_excel(ticker, df, period,
+                company_details=None, sector_df=None,
+                mc_sim_df=None, mc_summary=None,
+                news_list=None, peer_df=None,
+                corr_matrix=None,
+                resistance_levels=None, support_levels=None,
+                summary_text=""):
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    ws_dash = _build_dashboard(wb, ticker, df, company_details, mc_summary,
+                                resistance_levels, support_levels, summary_text)
+    ws_p, export_df = _build_price_sheet(wb, df)
+    _build_news_sheet(wb, news_list)
+    _build_peer_sheet(wb, peer_df)
+    ws_s       = _build_sector_sheet(wb, ticker, df, sector_df)
+    _build_correlation_sheet(wb, corr_matrix)
+    ws_mc_data = _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary)
+    _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data)
+
+    # Cover last so it knows all sheet names
+    sheets_so_far = [s for s in wb.sheetnames]
+    _build_cover(wb, ticker, period, sheets_so_far)
+
+    desired = ["Cover","Dashboard","Price_Indicators","News_Headlines",
+               "Peer_Comparison","Sector_Comparison","Correlation_Matrix",
+               "Monte_Carlo","Charts"]
+    existing = wb.sheetnames
+    ordered  = [s for s in desired if s in existing]
+    extras   = [s for s in existing if s not in ordered]
+    for i, name in enumerate(ordered + extras):
+        wb.move_sheet(name, offset=wb.sheetnames.index(name) - i)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
