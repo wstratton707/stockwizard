@@ -407,6 +407,7 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
         type="primary",
+        key="download_top",
     )
 
     st.markdown("---")
@@ -614,6 +615,7 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
         type="primary",
+        key="download_top",
     )
 
     st.markdown("""
