@@ -304,29 +304,49 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
         if t % monthly_days == 0:
             paths[t] += monthly_contribution
 
-    # Milestone percentiles
+    def _total_invested(yr):
+        """Total capital put in by the end of `yr` years (contributions are monthly)."""
+        months = yr * 12
+        return starting_capital + monthly_contribution * months
+
+    # Milestone percentiles + per-milestone probabilities
     milestones = {}
-    for yr in [1, 3, 5, 10]:
-        day = min(yr * 252, forecast_days)
+    milestone_years = [yr for yr in [1, 3, 5, 10] if yr <= forecast_years]
+    if forecast_years not in milestone_years:
+        milestone_years.append(forecast_years)
+    for yr in milestone_years:
+        day  = yr * 252  # guaranteed <= forecast_days since yr <= forecast_years
         vals = paths[day]
         pcts = np.percentile(vals, [5, 25, 50, 75, 95])
+        tot_invested = _total_invested(yr)
         milestones[f"{yr}yr"] = {
-            "P5":  round(pcts[0], 2), "P25": round(pcts[1], 2),
-            "P50": round(pcts[2], 2), "P75": round(pcts[3], 2),
-            "P95": round(pcts[4], 2),
+            "P5":              round(pcts[0], 2),
+            "P25":             round(pcts[1], 2),
+            "P50":             round(pcts[2], 2),
+            "P75":             round(pcts[3], 2),
+            "P95":             round(pcts[4], 2),
+            "total_invested":  round(tot_invested, 2),
+            "prob_gain":       f"{(vals > tot_invested).mean()*100:.1f}%",
+            "prob_double":     f"{(vals > starting_capital * 2).mean()*100:.1f}%",
+            "prob_loss_20":    f"{(vals < tot_invested * 0.8).mean()*100:.1f}%",
         }
+        if target_value:
+            milestones[f"{yr}yr"]["prob_goal"] = f"{(vals > target_value).mean()*100:.1f}%"
 
-    fp   = paths[-1]
-    pcts = np.percentile(fp, [5, 25, 50, 75, 95])
+    fp           = paths[-1]
+    pcts         = np.percentile(fp, [5, 25, 50, 75, 95])
+    tot_invested = _total_invested(forecast_years)
 
-    prob_gain    = (fp > starting_capital).mean() * 100
+    # Probabilities compare against total invested (starting capital + all contributions)
+    prob_gain    = (fp > tot_invested).mean() * 100
     prob_double  = (fp > starting_capital * 2).mean() * 100
-    prob_loss_20 = (fp < starting_capital * 0.8).mean() * 100
+    prob_loss_20 = (fp < tot_invested * 0.8).mean() * 100
     prob_goal    = (fp > target_value).mean() * 100 if target_value else None
 
     summary = {
         "Starting Capital":        round(starting_capital, 2),
         "Monthly Contribution":    round(monthly_contribution, 2),
+        "Total Invested":          round(tot_invested, 2),
         "Forecast Horizon":        f"{forecast_years} years",
         "Simulations":             n_simulations,
         "Bear Case (P5)":          round(pcts[0], 2),

@@ -657,22 +657,62 @@ def render_portfolio_builder(api_key, is_pro=False):
 
         _section_header("Monte Carlo Forecast Results")
 
+        # ── Timeline selector for probability metrics ──────────────────────────
+        horizon_map = {"1 year": "1yr", "3 years": "3yr", "5 years": "5yr", "10 years": "10yr"}
+        available_horizons = [lbl for lbl, key in horizon_map.items() if key in milestones]
+        # Add the full forecast horizon as an option
+        forecast_horizon_label = mc_summary.get("Forecast Horizon", "10 years")
+        full_horizon_yr = forecast_horizon_label.replace(" years","yr").replace(" year","yr")
+        horizon_options = available_horizons + (
+            [f"{forecast_horizon_label} (full)"]
+            if full_horizon_yr not in [horizon_map.get(h) for h in available_horizons]
+            else []
+        )
+        if not horizon_options:
+            horizon_options = [forecast_horizon_label]
+
+        sel_horizon = st.selectbox(
+            "Show probabilities at horizon:",
+            options=horizon_options,
+            index=min(2, len(horizon_options)-1),  # default to 5yr if available
+            key="mc_horizon_select",
+            help="Choose the time horizon for the probability metrics below.",
+        )
+
+        # Resolve which probability data to use
+        sel_key = horizon_map.get(sel_horizon.replace(" (full)",""))
+        if sel_key and sel_key in milestones:
+            ms_data = milestones[sel_key]
+            prob_gain_val    = ms_data.get("prob_gain",    "—")
+            prob_double_val  = ms_data.get("prob_double",  "—")
+            prob_loss_val    = ms_data.get("prob_loss_20", "—")
+            prob_goal_val    = ms_data.get("prob_goal")
+            tot_invested_val = ms_data.get("total_invested", mc_summary.get("Total Invested", 0))
+        else:
+            prob_gain_val    = mc_summary.get("Prob. of Any Gain",   "—")
+            prob_double_val  = mc_summary.get("Prob. of Doubling",   "—")
+            prob_loss_val    = mc_summary.get("Prob. of >20% Loss",  "—")
+            prob_goal_val    = mc_summary.get("Prob. of Reaching Goal")
+            tot_invested_val = mc_summary.get("Total Invested", start_cap)
+
+        st.caption(
+            f"Probabilities at **{sel_horizon}** · "
+            f"Total invested by then: **${tot_invested_val:,.0f}** · "
+            f"'Any Gain' = portfolio exceeds total invested · "
+            f"'Doubling' = exceeds 2× initial capital"
+        )
+
         # Probability gauges
         cols = st.columns(3)
-        prob_items = [
-            (cols[0], "Prob. of Any Gain",    mc_summary.get("Prob. of Any Gain","—"),    GREEN),
-            (cols[1], "Prob. of Doubling",     mc_summary.get("Prob. of Doubling","—"),    BLUE),
-            (cols[2], "Prob. of >20% Loss",    mc_summary.get("Prob. of >20% Loss","—"),   RED),
-        ]
-        if "Prob. of Reaching Goal" in mc_summary:
-            prob_items.append((None, "Prob. of Reaching Goal",
-                               mc_summary["Prob. of Reaching Goal"], PURPLE))
-
-        for col, label, value, color in prob_items[:3]:
+        for col, label, value, color in [
+            (cols[0], "Prob. of Any Gain",   prob_gain_val,   GREEN),
+            (cols[1], "Prob. of Doubling",    prob_double_val, BLUE),
+            (cols[2], "Prob. of >20% Loss",   prob_loss_val,   RED),
+        ]:
             with col:
                 st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
 
-        if "Prob. of Reaching Goal" in mc_summary:
+        if prob_goal_val is not None:
             st.markdown(f"""
             <div style="background:#f8fafc;border:2px solid #8b5cf6;border-radius:12px;
                         padding:1rem;text-align:center;margin-top:0.75rem">
@@ -680,10 +720,10 @@ def render_portfolio_builder(api_key, is_pro=False):
                             text-transform:uppercase;color:{MUTED}">Prob. of Reaching Your Goal</div>
                 <div style="font-family:'DM Mono',monospace;font-size:2rem;
                             font-weight:500;color:{PURPLE};margin-top:4px">
-                    {mc_summary["Prob. of Reaching Goal"]}
+                    {prob_goal_val}
                 </div>
                 <div style="font-size:0.78rem;color:{MUTED};margin-top:4px">
-                    Target: ${prefs.get('target_value',0):,.0f}
+                    Target: ${prefs.get('target_value',0):,.0f} by {sel_horizon}
                 </div>
             </div>""", unsafe_allow_html=True)
 
