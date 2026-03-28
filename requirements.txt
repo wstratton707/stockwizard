@@ -10,3 +10,4 @@ plotly>=5.18.0
 stripe>=7.0.0
 python-dotenv>=1.0.0
 streamlit-autorefresh>=1.0.1
+python-pptx>=0.6.21

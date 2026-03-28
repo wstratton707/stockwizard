@@ -276,38 +276,34 @@ def _build_annual_summary(wb, df):
     ws_a["A1"].alignment = Alignment(horizontal="center", vertical="center")
     ws_a.row_dimensions[1].height = 26
 
-    headers = ["Year","Open","Close","Annual Return","High","Low","Max Drawdown","Avg Daily Vol"]
+    headers = ["Year","Annual Return","Max Drawdown","Ann. Volatility","Sharpe (approx)"]
     for ci, h in enumerate(headers, 1):
         _hdr_cell(ws_a.cell(row=2, column=ci, value=h), bg=MID_BLUE)
 
-    tmp = df[["Date","Open","Close","Daily_Return","High","Low","Volume","Drawdown_60d"]].copy()
+    tmp = df[["Date","Daily_Return","Drawdown_60d"]].copy()
     tmp["Year"] = pd.to_datetime(tmp["Date"]).dt.year
 
     for ri, (year, grp) in enumerate(tmp.groupby("Year"), 3):
-        yr_open     = grp["Open"].iloc[0]
-        yr_close    = grp["Close"].iloc[-1]
-        yr_return   = (yr_close / yr_open - 1)
-        yr_high     = grp["High"].max()
-        yr_low      = grp["Low"].min()
+        ret         = grp["Daily_Return"].dropna()
+        yr_return   = (1 + ret).prod() - 1
         yr_drawdown = grp["Drawdown_60d"].min()
-        yr_vol      = grp["Volume"].mean()
+        yr_vol      = ret.std() * np.sqrt(252)
+        yr_sharpe   = (ret.mean() * 252) / yr_vol if yr_vol else np.nan
 
-        row_vals = [year, yr_open, yr_close, yr_return, yr_high, yr_low, yr_drawdown, yr_vol]
+        row_vals = [year, yr_return, yr_drawdown, yr_vol, round(yr_sharpe, 2) if pd.notna(yr_sharpe) else "N/A"]
         bg = GREY_ROW if ri % 2 == 0 else WHITE
         for ci, val in enumerate(row_vals, 1):
             c = ws_a.cell(row=ri, column=ci, value=val)
             c.font   = Font(name="Arial", size=10)
             c.border = _border()
             c.fill   = PatternFill("solid", fgColor=bg)
-            if ci == 1:   c.number_format = "0"
-            elif ci in (2,3,5,6): c.number_format = '_($* #,##0.00_)'
-            elif ci in (4,7):
+            if ci == 1: c.number_format = "0"
+            elif ci in (2, 3, 4):
                 c.number_format = "0.00%"
                 if isinstance(val, float):
-                    good = val > 0 if ci == 4 else val > -0.15
+                    good = val > 0 if ci == 2 else val > -0.15
                     c.fill = PatternFill("solid", fgColor=GREEN_OK if good else "FFAAAA")
                     c.font = Font(name="Arial", size=10, bold=True)
-            elif ci == 8: c.number_format = "#,##0"
 
     auto_col_width(ws_a)
     ws_a.freeze_panes = "A3"
@@ -317,7 +313,7 @@ def _build_annual_summary(wb, df):
 
 # ── Price & Indicators sheet ──────────────────────────────────────────────────
 def _build_price_sheet(wb, df, bar_size="day"):
-    price_cols = ["Date","Open","High","Low","Close","Volume",
+    price_cols = ["Date",
                   "Daily_Return","Cumulative_Index","MA20","MA50","MA200",
                   "Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
                   "Vol_MA20","Volume_vs_Avg",
@@ -367,10 +363,9 @@ def _build_price_sheet(wb, df, bar_size="day"):
 
     col_map    = {c[0].column_letter: c[0].value
                   for c in ws_p.iter_cols(1, ws_p.max_column, hdr_row, hdr_row)}
-    price_hdrs = {"Open","High","Low","Close","MA20","MA50","MA200",
-                  "BB_Upper","BB_Middle","BB_Lower","52W_High","52W_Low"}
-    pct_hdrs   = {"Daily_Return","Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
-                  "Volatility_20d","Drawdown_20d","Drawdown_60d","BB_Pct",
+    price_hdrs = {"MA20","MA50","MA200","BB_Upper","BB_Middle","BB_Lower","52W_High","52W_Low"}
+    pct_hdrs   = {"Daily_Return","Cumulative_Index","Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
+                  "Volatility_20d","Drawdown_20d","Drawdown_60d","BB_Pct","Vol_MA20","Volume_vs_Avg",
                   "Pct_From_52W_High","Pct_From_52W_Low"}
 
     for row in ws_p.iter_rows(min_row=data_start):
@@ -576,17 +571,16 @@ def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data):
     _chart_style(ax, f"{ticker} — Price & Moving Averages")
     _add_mpl_image(ws_ch, _mpl_chart(fig), "A1")
 
-    # ── Chart 2: Volume ───────────────────────────────────────────────────────
-    if "Volume" in export_df.columns:
+    # ── Chart 2: Volume (relative — uses Vol_MA20 proxy) ─────────────────────
+    if "Vol_MA20" in export_df.columns:
         fig, ax = plt.subplots(figsize=(13, 3.5))
         colors = ["#2ECC71" if r >= 0 else "#E74C3C"
-                  for r in export_df.get("Daily_Return", [0]*len(export_df)).fillna(0)]
-        ax.bar(dates, export_df["Volume"], color=colors, width=1.5, alpha=0.75)
-        if "Vol_MA20" in export_df.columns:
-            ax.plot(dates, export_df["Vol_MA20"], color="#1F4E79", linewidth=1.2,
-                    linestyle="--", label="20-Day Avg")
+                  for r in export_df.get("Daily_Return", pd.Series([0]*len(export_df))).fillna(0)]
+        ax.bar(dates, export_df["Vol_MA20"], color=colors, width=1.5, alpha=0.75)
+        ax.plot(dates, export_df["Vol_MA20"], color="#1F4E79", linewidth=1.2,
+                linestyle="--", label="20-Day Avg Volume")
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M"))
-        _chart_style(ax, f"{ticker} — Volume", ylabel="Volume")
+        _chart_style(ax, f"{ticker} — Volume (20-Day Moving Average)", ylabel="Volume")
         _add_mpl_image(ws_ch, _mpl_chart(fig), "A22", height_px=280)
 
     # ── Chart 3: Bollinger Bands ──────────────────────────────────────────────

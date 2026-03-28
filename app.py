@@ -31,6 +31,7 @@ from analysis import (
     run_monte_carlo, generate_summary_paragraph
 )
 from excel_builder import build_excel
+from pptx_builder import build_stock_pptx, build_portfolio_pptx, PPTX_AVAILABLE
 from live_data import get_live_price, get_intraday_data, get_top_movers
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
@@ -676,7 +677,7 @@ with tab1:
                 summary_text = generate_summary_paragraph(
                     ticker_input, df, company_details, mc_summary, sharpe, sortino)
 
-                progress.progress(92, text="Building Excel report...")
+                progress.progress(90, text="Building Excel report...")
                 excel_buf = build_excel(
                     ticker_input, df, period_label,
                     company_details=company_details, sector_df=sector_df,
@@ -687,6 +688,20 @@ with tab1:
                     summary_text=summary_text,
                     bar_size=bar_size,
                 )
+
+                pptx_buf = None
+                if PPTX_AVAILABLE:
+                    progress.progress(96, text="Building PowerPoint report...")
+                    try:
+                        pptx_buf = build_stock_pptx(
+                            ticker_input, df, period_label,
+                            company_details=company_details,
+                            mc_sim_df=mc_sim_df, mc_summary=mc_summary,
+                            news_list=news_list,
+                            summary_text=summary_text,
+                        )
+                    except Exception:
+                        pptx_buf = None
 
                 progress.progress(100, text="Complete!")
                 time.sleep(0.3)
@@ -705,13 +720,24 @@ with tab1:
             period_ret = (latest["Close"] / first["Close"] - 1) * 100
             pos_neg    = lambda v: "positive" if v > 0 else ("negative" if v < 0 else "neutral")
 
-            st.download_button(
-                label=f"⬇  Download Excel Report — {ticker_input}_{period_label}_Analysis.xlsx",
-                data=excel_buf,
-                file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True, type="primary", key="download_top",
-            )
+            _dl_col1, _dl_col2 = st.columns(2)
+            with _dl_col1:
+                st.download_button(
+                    label="⬇  Export to Excel",
+                    data=excel_buf,
+                    file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, type="primary", key="download_top",
+                )
+            with _dl_col2:
+                if pptx_buf:
+                    st.download_button(
+                        label="⬇  Export to PowerPoint",
+                        data=pptx_buf,
+                        file_name=f"{ticker_input}_{period_label}_Analysis.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        use_container_width=True, type="primary", key="download_pptx_top",
+                    )
             st.markdown("---")
 
             st.markdown('<div class="section-header">Key Metrics</div>', unsafe_allow_html=True)
@@ -989,13 +1015,25 @@ with tab1:
 
             st.markdown("---")
             excel_buf.seek(0)
-            st.download_button(
-                label=f"⬇  Download Excel Report — {ticker_input}_{period_label}_Analysis.xlsx",
-                data=excel_buf,
-                file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True, type="primary", key="download_bottom",
-            )
+            _dl2_col1, _dl2_col2 = st.columns(2)
+            with _dl2_col1:
+                st.download_button(
+                    label="⬇  Export to Excel",
+                    data=excel_buf,
+                    file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, type="primary", key="download_bottom",
+                )
+            with _dl2_col2:
+                if pptx_buf:
+                    pptx_buf.seek(0)
+                    st.download_button(
+                        label="⬇  Export to PowerPoint",
+                        data=pptx_buf,
+                        file_name=f"{ticker_input}_{period_label}_Analysis.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        use_container_width=True, type="primary", key="download_pptx_bottom",
+                    )
 
         st.markdown("""
         <div class="disclaimer">

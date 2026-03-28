@@ -18,6 +18,7 @@ from portfolio_analysis import (
     compute_diversification_score, get_rebalancing_recommendations
 )
 from portfolio_excel import build_portfolio_excel
+from pptx_builder import build_portfolio_pptx, PPTX_AVAILABLE
 
 DARK   = "#0f172a"
 BLUE   = "#38bdf8"
@@ -841,47 +842,89 @@ def render_portfolio_builder(api_key, is_pro=False):
             })
         st.dataframe(pd.DataFrame(ms_rows), use_container_width=True, hide_index=True)
 
-        # Excel download
+        # Export downloads
         _section_header("Download Full Portfolio Report")
-        if st.button("📊 Generate Excel Report", type="primary", key="gen_excel"):
-            with st.spinner("Building Excel report..."):
-                try:
-                    bt_data    = st.session_state.get("port_backtest", {})
-                    opt_data   = st.session_state.get("port_optimised", {})
-                    stock_mets = opt_data.get("stock_metrics", {})
-                    corr_mat   = opt_data.get("corr_matrix")
-                    div_sc     = opt_data.get("div_score", 5)
-                    t_info     = opt_data.get("ticker_info", {})
 
-                    excel_buf = build_portfolio_excel(
-                        preferences         = prefs,
-                        final_weights       = weights,
-                        stock_metrics       = stock_mets,
-                        backtest_df         = bt_data.get("df"),
-                        backtest_metrics    = bt_data.get("metrics", {}),
-                        heatmap_df          = bt_data.get("heatmap"),
-                        mc_sim_df           = mc_sim_df,
-                        mc_summary          = mc_summary,
-                        milestones          = milestones,
-                        corr_matrix         = corr_mat,
-                        diversification_score = div_sc,
-                        ticker_info         = t_info,
-                    )
-                    st.session_state["port_excel"] = excel_buf
-                except Exception as e:
-                    st.error(f"❌ Excel build failed: {e}")
-                    st.exception(e)
+        _gen_col1, _gen_col2 = st.columns(2)
+        with _gen_col1:
+            if st.button("📊 Generate Excel Report", type="primary",
+                         use_container_width=True, key="gen_excel"):
+                with st.spinner("Building Excel report..."):
+                    try:
+                        bt_data    = st.session_state.get("port_backtest", {})
+                        opt_data   = st.session_state.get("port_optimised", {})
+                        stock_mets = opt_data.get("stock_metrics", {})
+                        corr_mat   = opt_data.get("corr_matrix")
+                        div_sc     = opt_data.get("div_score", 5)
+                        t_info     = opt_data.get("ticker_info", {})
+                        excel_buf  = build_portfolio_excel(
+                            preferences           = prefs,
+                            final_weights         = weights,
+                            stock_metrics         = stock_mets,
+                            backtest_df           = bt_data.get("df"),
+                            backtest_metrics      = bt_data.get("metrics", {}),
+                            heatmap_df            = bt_data.get("heatmap"),
+                            mc_sim_df             = mc_sim_df,
+                            mc_summary            = mc_summary,
+                            milestones            = milestones,
+                            corr_matrix           = corr_mat,
+                            diversification_score = div_sc,
+                            ticker_info           = t_info,
+                        )
+                        st.session_state["port_excel"] = excel_buf
+                    except Exception as e:
+                        st.error(f"❌ Excel build failed: {e}")
+                        st.exception(e)
 
-        if "port_excel" in st.session_state:
-            st.download_button(
-                label="⬇  Download Portfolio Report (.xlsx)",
-                data=st.session_state["port_excel"],
-                file_name=f"StockWizard_Portfolio_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                type="primary",
-                key="download_portfolio",
-            )
+        with _gen_col2:
+            if PPTX_AVAILABLE and st.button("📑 Generate PowerPoint Report", type="primary",
+                                             use_container_width=True, key="gen_pptx"):
+                with st.spinner("Building PowerPoint report..."):
+                    try:
+                        bt_data    = st.session_state.get("port_backtest", {})
+                        opt_data   = st.session_state.get("port_optimised", {})
+                        stock_mets = opt_data.get("stock_metrics", {})
+                        corr_mat   = opt_data.get("corr_matrix")
+                        div_sc     = opt_data.get("div_score", 5)
+                        t_info     = opt_data.get("ticker_info", {})
+                        pptx_buf   = build_portfolio_pptx(
+                            preferences           = prefs,
+                            final_weights         = weights,
+                            stock_metrics         = stock_mets,
+                            backtest_df           = bt_data.get("df"),
+                            backtest_metrics      = bt_data.get("metrics", {}),
+                            mc_sim_df             = mc_sim_df,
+                            mc_summary            = mc_summary,
+                            milestones            = milestones,
+                            corr_matrix           = corr_mat,
+                            diversification_score = div_sc,
+                            ticker_info           = t_info,
+                        )
+                        st.session_state["port_pptx"] = pptx_buf
+                    except Exception as e:
+                        st.error(f"❌ PowerPoint build failed: {e}")
+                        st.exception(e)
+
+        _dl_col1, _dl_col2 = st.columns(2)
+        with _dl_col1:
+            if "port_excel" in st.session_state:
+                st.download_button(
+                    label="⬇  Download Portfolio Report (.xlsx)",
+                    data=st.session_state["port_excel"],
+                    file_name=f"StockWizard_Portfolio_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, type="primary", key="download_portfolio",
+                )
+        with _dl_col2:
+            if "port_pptx" in st.session_state:
+                st.session_state["port_pptx"].seek(0)
+                st.download_button(
+                    label="⬇  Download Portfolio Report (.pptx)",
+                    data=st.session_state["port_pptx"],
+                    file_name=f"StockWizard_Portfolio_{datetime.now().strftime('%Y%m%d')}.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    use_container_width=True, type="primary", key="download_portfolio_pptx",
+                )
 
         st.markdown("---")
         col1, col2 = st.columns(2)
