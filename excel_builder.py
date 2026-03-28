@@ -318,8 +318,9 @@ def _build_annual_summary(wb, df):
 # ── Price & Indicators sheet ──────────────────────────────────────────────────
 def _build_price_sheet(wb, df, bar_size="day"):
     price_cols = ["Date","Open","High","Low","Close","Volume",
-                  "Daily_Return","MA20","MA50","MA200",
+                  "Daily_Return","Cumulative_Index","MA20","MA50","MA200",
                   "Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
+                  "Vol_MA20","Volume_vs_Avg",
                   "Volatility_20d","Drawdown_20d","Drawdown_60d",
                   "52W_High","52W_Low","Pct_From_52W_High","Pct_From_52W_Low"]
     if "RSI14" in df.columns:
@@ -616,7 +617,7 @@ def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data):
 
     # ── Chart 5: Cumulative Return vs Benchmarks ──────────────────────────────
     cum_cols = [c for c in export_df.columns if c.endswith("_Cumulative")]
-    if cum_cols:
+    if "Cumulative_Index" in export_df.columns:
         fig, ax = plt.subplots(figsize=(13, 5))
         ax.plot(dates, export_df["Cumulative_Index"], color="#1F4E79", linewidth=2.0,
                 label=ticker, zorder=3)
