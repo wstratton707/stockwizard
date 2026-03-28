@@ -551,7 +551,7 @@ def _add_mpl_image(ws, buf, anchor, width_px=900, height_px=400):
 
 
 # ── Charts sheet ──────────────────────────────────────────────────────────────
-def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data):
+def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=None):
     ws_ch = wb.create_sheet("Charts")
     ws_ch.sheet_view.showGridLines = False
 
@@ -559,66 +559,71 @@ def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data):
         ws_ch["A1"] = "Charts unavailable — matplotlib not installed."
         return
 
-    dates = pd.to_datetime(export_df["Date"]) if "Date" in export_df.columns else None
+    # Use full_df for charting (has Close/Volume); export_df only has derived metrics
+    chart_df = full_df if full_df is not None else export_df
+    dates = pd.to_datetime(chart_df["Date"]) if "Date" in chart_df.columns else None
 
     # ── Chart 1: Price + Moving Averages ──────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(13, 5))
-    ax.plot(dates, export_df["Close"],  color="#1F4E79", linewidth=1.8, label="Close",  zorder=3)
-    for ma, col, lw in [("MA20","#E8A838",1.2), ("MA50","#2ECC71",1.2), ("MA200","#E74C3C",1.2)]:
-        if ma in export_df.columns:
-            ax.plot(dates, export_df[ma], color=col, linewidth=lw, linestyle="--", label=ma, zorder=2)
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.2f}"))
-    _chart_style(ax, f"{ticker} — Price & Moving Averages")
-    _add_mpl_image(ws_ch, _mpl_chart(fig), "A1")
+    if "Close" in chart_df.columns:
+        fig, ax = plt.subplots(figsize=(13, 5))
+        ax.plot(dates, chart_df["Close"], color="#1F4E79", linewidth=1.8, label="Close", zorder=3)
+        for ma, col, lw in [("MA20","#E8A838",1.2), ("MA50","#2ECC71",1.2), ("MA200","#E74C3C",1.2)]:
+            if ma in chart_df.columns:
+                ax.plot(dates, chart_df[ma], color=col, linewidth=lw, linestyle="--", label=ma, zorder=2)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.2f}"))
+        _chart_style(ax, f"{ticker} — Price & Moving Averages")
+        _add_mpl_image(ws_ch, _mpl_chart(fig), "A1")
 
-    # ── Chart 2: Volume (relative — uses Vol_MA20 proxy) ─────────────────────
-    if "Vol_MA20" in export_df.columns:
+    # ── Chart 2: Volume ───────────────────────────────────────────────────────
+    vol_col = "Volume" if "Volume" in chart_df.columns else ("Vol_MA20" if "Vol_MA20" in chart_df.columns else None)
+    if vol_col:
         fig, ax = plt.subplots(figsize=(13, 3.5))
         colors = ["#2ECC71" if r >= 0 else "#E74C3C"
-                  for r in export_df.get("Daily_Return", pd.Series([0]*len(export_df))).fillna(0)]
-        ax.bar(dates, export_df["Vol_MA20"], color=colors, width=1.5, alpha=0.75)
-        ax.plot(dates, export_df["Vol_MA20"], color="#1F4E79", linewidth=1.2,
-                linestyle="--", label="20-Day Avg Volume")
+                  for r in chart_df.get("Daily_Return", pd.Series([0]*len(chart_df))).fillna(0)]
+        ax.bar(dates, chart_df[vol_col], color=colors, width=1.5, alpha=0.75)
+        if "Vol_MA20" in chart_df.columns and vol_col != "Vol_MA20":
+            ax.plot(dates, chart_df["Vol_MA20"], color="#1F4E79", linewidth=1.2,
+                    linestyle="--", label="20-Day Avg")
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M"))
-        _chart_style(ax, f"{ticker} — Volume (20-Day Moving Average)", ylabel="Volume")
+        _chart_style(ax, f"{ticker} — Volume", ylabel="Volume")
         _add_mpl_image(ws_ch, _mpl_chart(fig), "A22", height_px=280)
 
     # ── Chart 3: Bollinger Bands ──────────────────────────────────────────────
-    if "BB_Upper" in export_df.columns:
+    if "BB_Upper" in chart_df.columns and "Close" in chart_df.columns:
         fig, ax = plt.subplots(figsize=(13, 5))
-        ax.plot(dates, export_df["Close"],     color="#1F4E79", linewidth=1.8, label="Close",    zorder=3)
-        ax.plot(dates, export_df["BB_Upper"],  color="#E74C3C", linewidth=1.0, linestyle="--", label="BB Upper")
-        ax.plot(dates, export_df["BB_Middle"], color="#888888", linewidth=1.0, linestyle="--", label="BB Mid")
-        ax.plot(dates, export_df["BB_Lower"],  color="#2ECC71", linewidth=1.0, linestyle="--", label="BB Lower")
-        ax.fill_between(dates, export_df["BB_Upper"], export_df["BB_Lower"], alpha=0.07, color="#2E75B6")
+        ax.plot(dates, chart_df["Close"],     color="#1F4E79", linewidth=1.8, label="Close",    zorder=3)
+        ax.plot(dates, chart_df["BB_Upper"],  color="#E74C3C", linewidth=1.0, linestyle="--", label="BB Upper")
+        ax.plot(dates, chart_df["BB_Middle"], color="#888888", linewidth=1.0, linestyle="--", label="BB Mid")
+        ax.plot(dates, chart_df["BB_Lower"],  color="#2ECC71", linewidth=1.0, linestyle="--", label="BB Lower")
+        ax.fill_between(dates, chart_df["BB_Upper"], chart_df["BB_Lower"], alpha=0.07, color="#2E75B6")
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.2f}"))
         _chart_style(ax, f"{ticker} — Bollinger Bands (20-day, 2σ)")
         _add_mpl_image(ws_ch, _mpl_chart(fig), "A35")
 
     # ── Chart 4: RSI ──────────────────────────────────────────────────────────
-    if "RSI14" in export_df.columns:
+    if "RSI14" in chart_df.columns:
         fig, ax = plt.subplots(figsize=(13, 3))
-        ax.plot(dates, export_df["RSI14"], color="#6C3483", linewidth=1.4, label="RSI (14)")
+        ax.plot(dates, chart_df["RSI14"], color="#6C3483", linewidth=1.4, label="RSI (14)")
         ax.axhline(70, color="#E74C3C", linewidth=0.8, linestyle="--", alpha=0.7, label="Overbought (70)")
         ax.axhline(30, color="#2ECC71", linewidth=0.8, linestyle="--", alpha=0.7, label="Oversold (30)")
-        ax.fill_between(dates, export_df["RSI14"], 70,
-                        where=export_df["RSI14"] >= 70, alpha=0.15, color="#E74C3C")
-        ax.fill_between(dates, export_df["RSI14"], 30,
-                        where=export_df["RSI14"] <= 30, alpha=0.15, color="#2ECC71")
+        ax.fill_between(dates, chart_df["RSI14"], 70,
+                        where=chart_df["RSI14"] >= 70, alpha=0.15, color="#E74C3C")
+        ax.fill_between(dates, chart_df["RSI14"], 30,
+                        where=chart_df["RSI14"] <= 30, alpha=0.15, color="#2ECC71")
         ax.set_ylim(0, 100)
         _chart_style(ax, f"{ticker} — RSI (14)", ylabel="RSI")
         _add_mpl_image(ws_ch, _mpl_chart(fig), "A56", height_px=240)
 
     # ── Chart 5: Cumulative Return vs Benchmarks ──────────────────────────────
-    cum_cols = [c for c in export_df.columns if c.endswith("_Cumulative")]
-    if "Cumulative_Index" in export_df.columns:
+    cum_cols = [c for c in chart_df.columns if c.endswith("_Cumulative")]
+    if "Cumulative_Index" in chart_df.columns:
         fig, ax = plt.subplots(figsize=(13, 5))
-        ax.plot(dates, export_df["Cumulative_Index"], color="#1F4E79", linewidth=2.0,
+        ax.plot(dates, chart_df["Cumulative_Index"], color="#1F4E79", linewidth=2.0,
                 label=ticker, zorder=3)
         bench_colors = ["#E74C3C", "#2ECC71", "#F39C12", "#8E44AD"]
         for i, col in enumerate(cum_cols):
             label = col.replace("_Cumulative", "")
-            ax.plot(dates, export_df[col], color=bench_colors[i % len(bench_colors)],
+            ax.plot(dates, chart_df[col], color=bench_colors[i % len(bench_colors)],
                     linewidth=1.2, linestyle="--", label=label)
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}"))
         ax.axhline(100, color="#aaaaaa", linewidth=0.7, linestyle=":")
@@ -688,7 +693,7 @@ def build_excel(ticker, df, period,
     ws_s       = _build_sector_sheet(wb, ticker, df, sector_df)
     _build_correlation_sheet(wb, corr_matrix)
     ws_mc_data = _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary)
-    _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data)
+    _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=df)
 
     # Cover last so it knows all sheet names
     sheets_so_far = [s for s in wb.sheetnames]
