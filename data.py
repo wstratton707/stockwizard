@@ -21,6 +21,10 @@ def _get(endpoint, api_key, params=None):
     r = requests.get(f"{POLYGON_BASE}{endpoint}", params=params, timeout=30)
     if r.status_code == 200:
         return r.json()
+    if r.status_code == 429:
+        raise ValueError("Polygon API rate limit hit — wait a moment and try again.")
+    if r.status_code == 403:
+        raise ValueError("Polygon API key invalid or unauthorized (HTTP 403).")
     return None
 
 

@@ -197,26 +197,35 @@ with st.sidebar:
         period_key = st.select_slider("", options=_SLIDER_OPTIONS, value="5Y",
                                       label_visibility="collapsed")
 
-        with st.expander("Custom date range (optional)"):
-            _cc1, _cc2 = st.columns(2)
-            with _cc1:
-                custom_start = st.date_input("From", value=None,
-                                             min_value=datetime(1970,1,1).date(),
-                                             max_value=datetime.today().date(),
-                                             key="custom_start_date")
-            with _cc2:
-                custom_end = st.date_input("To", value=None,
-                                           min_value=datetime(1970,1,1).date(),
-                                           max_value=datetime.today().date(),
-                                           key="custom_end_date")
-
-        # Custom range wins if both dates are filled in and valid
         _today = datetime.today().date()
-        if custom_start and custom_end and custom_start < custom_end:
+        _use_custom = False
+
+        with st.expander("Custom date range (optional)"):
+            _use_custom = st.checkbox("Use custom dates", value=False, key="use_custom_range")
+            if _use_custom:
+                _cc1, _cc2 = st.columns(2)
+                _default_start = _today - timedelta(days=1825)
+                with _cc1:
+                    custom_start = st.date_input("From",
+                                                 value=_default_start,
+                                                 min_value=datetime(1970,1,1).date(),
+                                                 max_value=_today,
+                                                 key="custom_start_date")
+                with _cc2:
+                    custom_end = st.date_input("To",
+                                               value=_today,
+                                               min_value=datetime(1970,1,1).date(),
+                                               max_value=_today,
+                                               key="custom_end_date")
+            else:
+                custom_start = custom_end = None
+
+        # Custom range wins only when checkbox is on and dates are valid
+        if _use_custom and custom_start and custom_end and custom_start < custom_end:
             date_start   = custom_start.strftime("%Y-%m-%d")
             date_end     = custom_end.strftime("%Y-%m-%d")
             _range_days  = (custom_end - custom_start).days
-            period_label = f"{date_start} → {date_end}"
+            period_label = f"{date_start} to {date_end}"
             st.caption(f"✓ Custom range active: {period_label}")
         else:
             _days        = _SLIDER_DAYS[period_key]
