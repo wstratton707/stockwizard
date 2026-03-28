@@ -43,8 +43,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "")
-FMP_API_KEY     = os.environ.get("FMP_API_KEY", "")
+POLYGON_API_KEY  = os.environ.get("POLYGON_API_KEY", "")
+FMP_API_KEY      = os.environ.get("FMP_API_KEY", "")
+SHOW_PRICING     = False  # Set True when ready to accept payments
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -165,17 +166,18 @@ st.markdown("""
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    if st.session_state["is_pro"]:
-        st.markdown("""
-        <div style="background:#0f172a;border:1px solid #38bdf8;border-radius:10px;
-                    padding:0.75rem 1rem;margin-bottom:1rem;text-align:center">
-            <span style="color:#38bdf8;font-weight:600;font-size:0.85rem">◈ Pro Member</span>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        if st.button("⚡ Upgrade to Pro — $9.99/mo", use_container_width=True):
-            st.session_state["show_payment"] = True
-            st.rerun()
+    if SHOW_PRICING:
+        if st.session_state["is_pro"]:
+            st.markdown("""
+            <div style="background:#0f172a;border:1px solid #38bdf8;border-radius:10px;
+                        padding:0.75rem 1rem;margin-bottom:1rem;text-align:center">
+                <span style="color:#38bdf8;font-weight:600;font-size:0.85rem">◈ Pro Member</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            if st.button("⚡ Upgrade to Pro — $9.99/mo", use_container_width=True):
+                st.session_state["show_payment"] = True
+                st.rerun()
 
     st.markdown("### Configure Analysis")
     st.markdown("---")
@@ -306,7 +308,7 @@ with st.sidebar:
             st.error("Please enter a valid email.")
 
 # ── Payment modal ─────────────────────────────────────────────────────────────
-if st.session_state["show_payment"] and not st.session_state["is_pro"]:
+if SHOW_PRICING and st.session_state["show_payment"] and not st.session_state["is_pro"]:
     st.markdown("---")
     st.markdown("### Upgrade to StockWizard Pro")
     col1, col2 = st.columns([2, 1])
@@ -407,7 +409,8 @@ with tab1:
                 </div>
             </div>""", unsafe_allow_html=True)
 
-        render_pricing_section()
+        if SHOW_PRICING:
+            render_pricing_section()
 
         st.markdown('<div class="section-header">Meet the Team</div>', unsafe_allow_html=True)
         fc1, fc2 = st.columns(2)
@@ -626,9 +629,10 @@ with tab1:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            if st.button("Upgrade to Pro — $9.99/month", type="primary", key="upgrade_locked"):
-                st.session_state["show_payment"] = True
-                st.rerun()
+            if SHOW_PRICING:
+                if st.button("Upgrade to Pro — $9.99/month", type="primary", key="upgrade_locked"):
+                    st.session_state["show_payment"] = True
+                    st.rerun()
 
         # ── Investor Mode ─────────────────────────────────────────────────────
         if mode == "Investor Mode":
