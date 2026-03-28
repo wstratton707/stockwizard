@@ -16,7 +16,9 @@ except ImportError:
 from data import (
     validate_ticker, fetch_stock_data, fetch_company_details,
     fetch_news, fetch_peer_comparison, fetch_sector_data, fetch_bond_data,
-    fetch_next_earnings,
+    fetch_next_earnings, detect_asset_type,
+    fetch_crypto_data, fetch_crypto_details, fetch_etf_details,
+    CRYPTO_TICKERS,
 )
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -42,6 +44,7 @@ st.set_page_config(
 )
 
 POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "")
+FMP_API_KEY     = os.environ.get("FMP_API_KEY", "")
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -156,7 +159,7 @@ elif not st.session_state.get("is_pro"):
 st.markdown("""
 <div class="main-header">
     <h1>◈ StockWizard</h1>
-    <p>Professional stock analysis · Monte Carlo simulation · Excel reports · Day trader mode · Portfolio builder · Powered by Polygon.io</p>
+    <p>Stocks · ETFs · Crypto · Monte Carlo simulation · Excel reports · Day trader mode · Portfolio builder · Powered by Polygon.io</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -183,7 +186,7 @@ with st.sidebar:
         mode = "Investor Mode"
 
     ticker_input = st.text_input(
-        "Ticker Symbol", placeholder="e.g. AAPL, TSLA, MSFT"
+        "Ticker Symbol", placeholder="e.g. AAPL, SPY, BTC, ETH"
     ).strip().upper()
 
     if mode == "Investor Mode":
@@ -409,8 +412,26 @@ with tab1:
                 st.stop()
             # Otherwise continue — fetch_stock_data will raise if the ticker is truly invalid
 
+        # Detect asset type (stock / etf / crypto)
+        asset_type = detect_asset_type(ticker_input, POLYGON_API_KEY)
+        is_crypto  = asset_type == "crypto"
+        is_etf     = asset_type == "etf"
+        # For Polygon API calls, crypto needs the X: prefix
+        _poly_ticker = CRYPTO_TICKERS.get(ticker_input, (f"X:{ticker_input}USD", None))[0] \
+                       if is_crypto else ticker_input
+
+        # Asset type badge in UI
+        if is_crypto:
+            st.markdown(f'<span style="background:#f59e0b;color:#0f172a;font-size:0.7rem;font-weight:700;'
+                        f'padding:3px 10px;border-radius:20px;letter-spacing:0.5px">CRYPTO</span>',
+                        unsafe_allow_html=True)
+        elif is_etf:
+            st.markdown(f'<span style="background:#8b5cf6;color:#fff;font-size:0.7rem;font-weight:700;'
+                        f'padding:3px 10px;border-radius:20px;letter-spacing:0.5px">ETF</span>',
+                        unsafe_allow_html=True)
+
         # Live price ticker
-        live = get_live_price(ticker_input, POLYGON_API_KEY)
+        live = get_live_price(_poly_ticker, POLYGON_API_KEY)
         if live:
             sign       = "+" if live["change"] >= 0 else ""
             change_cls = "live-change-pos" if live["change"] >= 0 else "live-change-neg"
@@ -571,13 +592,25 @@ with tab1:
 
             try:
                 progress.progress(10, text="Downloading price data...")
-                df = fetch_stock_data(ticker_input, period=period,
-                                      benchmark_tickers=benchmarks,
-                                      api_key=POLYGON_API_KEY, log=log)
+                if is_crypto:
+                    df = fetch_crypto_data(ticker_input, period=period,
+                                           api_key=POLYGON_API_KEY, log=log)
+                else:
+                    df = fetch_stock_data(ticker_input, period=period,
+                                          benchmark_tickers=benchmarks,
+                                          api_key=POLYGON_API_KEY, log=log)
 
-                progress.progress(25, text="Fetching company details...")
-                company_details = fetch_company_details(ticker_input, POLYGON_API_KEY, log=log)
-                sector = company_details.get("Sector", "Unknown")
+                progress.progress(25, text="Fetching details...")
+                if is_crypto:
+                    company_details = {}
+                    crypto_details  = fetch_crypto_details(ticker_input)
+                    sector          = "Cryptocurrency"
+                else:
+                    company_details = fetch_company_details(ticker_input, POLYGON_API_KEY, log=log)
+                    crypto_details  = {}
+                    sector          = company_details.get("Sector", "Unknown")
+
+                etf_details = fetch_etf_details(ticker_input, FMP_API_KEY) if is_etf else {}
 
                 news_list = []
                 if do_news:
@@ -585,12 +618,12 @@ with tab1:
                     news_list = fetch_news(ticker_input, POLYGON_API_KEY, log=log)
 
                 peer_df = None
-                if do_peers and peers_list:
+                if do_peers and peers_list and not is_crypto:
                     progress.progress(45, text="Fetching peer data...")
                     peer_df = fetch_peer_comparison(ticker_input, peers_list, POLYGON_API_KEY, log=log)
 
                 sector_df = None
-                if do_sector:
+                if do_sector and not is_crypto:
                     progress.progress(50, text="Fetching sector ETF...")
                     sector_df = fetch_sector_data(ticker_input, period, POLYGON_API_KEY, sector, log=log)
 
@@ -658,7 +691,25 @@ with tab1:
             st.markdown("---")
 
             st.markdown('<div class="section-header">Key Metrics</div>', unsafe_allow_html=True)
-            earnings_date = fetch_next_earnings(ticker_input, POLYGON_API_KEY)
+            # Last metric varies by asset type
+            if is_crypto:
+                mc_usd = crypto_details.get("market_cap_usd", 0)
+                if mc_usd > 1e9:
+                    extra_value = f"${mc_usd/1e9:.1f}B"
+                elif mc_usd:
+                    extra_value = f"${mc_usd/1e6:.0f}M"
+                else:
+                    extra_value = "N/A"
+                extra_label = "Market Cap"
+            elif is_etf:
+                exp = (etf_details.get("meta") or {}).get("expense", 0)
+                extra_label = "Expense Ratio"
+                extra_value = f"{exp:.2f}%" if exp else "N/A"
+            else:
+                earnings_date = fetch_next_earnings(ticker_input, POLYGON_API_KEY)
+                extra_label = "Last Earnings"
+                extra_value = earnings_date if earnings_date else "N/A"
+
             col1,col2,col3,col4,col5,col6,col7 = st.columns(7)
             vol_val = df["Volatility_20d"].iloc[-1]
             for col, label, value, cls in [
@@ -668,13 +719,115 @@ with tab1:
                 (col4,"52W Low",         f"${latest.get('52W_Low',0):,.2f}",                   "neutral"),
                 (col5,"Sharpe Ratio",    f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A",       pos_neg(sharpe) if pd.notna(sharpe) else "neutral"),
                 (col6,"Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A","neutral"),
-                (col7,"Last Earnings",   earnings_date if earnings_date else "N/A",             "neutral"),
+                (col7, extra_label,      extra_value,                                           "neutral"),
             ]:
                 with col:
                     st.markdown(f"""
                     <div class="metric-card">
                         <div class="metric-label">{label}</div>
                         <div class="metric-value {cls}">{value}</div>
+                    </div>""", unsafe_allow_html=True)
+
+            # ── ETF Profile Panel ─────────────────────────────────────────────
+            if is_etf:
+                meta     = etf_details.get("meta", {})
+                holdings = etf_details.get("holdings", [])
+                if meta or holdings:
+                    st.markdown('<div class="section-header">ETF Profile</div>', unsafe_allow_html=True)
+                    if meta:
+                        mc1, mc2, mc3, mc4 = st.columns(4)
+                        for col, lbl, val in [
+                            (mc1, "Full Name",      meta.get("name", ticker_input)),
+                            (mc2, "Index Tracked",  meta.get("index", "N/A")),
+                            (mc3, "Category",       meta.get("category", "N/A")),
+                            (mc4, "No. of Holdings",str(meta.get("holdings", "N/A"))),
+                        ]:
+                            with col:
+                                st.markdown(f"""
+                                <div class="metric-card">
+                                    <div class="metric-label">{lbl}</div>
+                                    <div style="font-size:0.88rem;font-weight:500;color:#0f172a;
+                                                margin-top:0.25rem;line-height:1.4">{val}</div>
+                                </div>""", unsafe_allow_html=True)
+                        st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+                        aum = meta.get("aum_b", 0)
+                        exp = meta.get("expense", 0)
+                        st.markdown(f"""
+                        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
+                                    padding:0.6rem 1rem;font-size:0.85rem;color:#1e40af">
+                            <strong>AUM:</strong> ${aum:,.0f}B &nbsp;·&nbsp;
+                            <strong>Expense Ratio:</strong> {exp:.2f}% annually &nbsp;·&nbsp;
+                            <strong>Cost on $10,000:</strong> ${exp*100:.0f}/yr
+                        </div>""", unsafe_allow_html=True)
+
+                    if holdings:
+                        st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
+                        h_col1, h_col2 = st.columns([1, 1])
+                        with h_col1:
+                            st.markdown("**Top Holdings**")
+                            h_rows = [{"Ticker": t, "Weight (%)": f"{w:.2f}%"} for t, w in holdings]
+                            st.dataframe(pd.DataFrame(h_rows), use_container_width=True, hide_index=True)
+                        with h_col2:
+                            fig_h = go.Figure(go.Bar(
+                                x=[w for _, w in holdings],
+                                y=[t for t, _ in holdings],
+                                orientation="h",
+                                marker_color="#0ea5e9",
+                                text=[f"{w:.1f}%" for _, w in holdings],
+                                textposition="outside",
+                            ))
+                            fig_h.update_layout(
+                                height=300, template="plotly_white",
+                                margin=dict(l=0, r=40, t=10, b=0),
+                                xaxis_title="Weight (%)",
+                                yaxis=dict(autorange="reversed"),
+                                font=dict(family="DM Sans"),
+                            )
+                            st.plotly_chart(fig_h, use_container_width=True)
+
+            # ── Crypto Market Data Panel ──────────────────────────────────────
+            if is_crypto and crypto_details:
+                st.markdown('<div class="section-header">Market Data</div>', unsafe_allow_html=True)
+                cc1, cc2, cc3, cc4, cc5, cc6 = st.columns(6)
+                mc_usd   = crypto_details.get("market_cap_usd", 0)
+                vol_24h  = crypto_details.get("volume_24h", 0)
+                ath_val  = crypto_details.get("ath", 0)
+                ath_pct  = crypto_details.get("ath_pct", 0)
+                p7d      = crypto_details.get("price_change_7d", 0)
+                p30d     = crypto_details.get("price_change_30d", 0)
+                circ     = crypto_details.get("circulating_supply", 0)
+                max_sup  = crypto_details.get("max_supply", 0)
+
+                def fmt_large(n):
+                    if not n: return "N/A"
+                    if n > 1e12: return f"${n/1e12:.2f}T"
+                    if n > 1e9:  return f"${n/1e9:.2f}B"
+                    if n > 1e6:  return f"${n/1e6:.1f}M"
+                    return f"${n:,.0f}"
+
+                for col, lbl, val, color in [
+                    (cc1, "Market Cap",     fmt_large(mc_usd),                            "#0f172a"),
+                    (cc2, "24h Volume",     fmt_large(vol_24h),                           "#0f172a"),
+                    (cc3, "All-Time High",  f"${ath_val:,.2f}" if ath_val else "N/A",    "#0f172a"),
+                    (cc4, "vs ATH",         f"{ath_pct:+.1f}%" if ath_pct else "N/A",   "#dc2626" if ath_pct and ath_pct < 0 else "#16a34a"),
+                    (cc5, "7d Change",      f"{p7d:+.1f}%"  if p7d  else "N/A",         "#16a34a" if p7d  and p7d  > 0 else "#dc2626"),
+                    (cc6, "30d Change",     f"{p30d:+.1f}%" if p30d else "N/A",         "#16a34a" if p30d and p30d > 0 else "#dc2626"),
+                ]:
+                    with col:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">{lbl}</div>
+                            <div class="metric-value" style="color:{color}">{val}</div>
+                        </div>""", unsafe_allow_html=True)
+
+                if circ:
+                    sup_pct = f" ({circ/max_sup*100:.1f}% of max supply)" if max_sup else ""
+                    ath_date = crypto_details.get("ath_date", "")
+                    st.markdown(f"""
+                    <div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;
+                                padding:0.6rem 1rem;margin-top:0.75rem;font-size:0.85rem;color:#78350f">
+                        <strong>Circulating Supply:</strong> {circ:,.0f} {ticker_input}{sup_pct}
+                        {"&nbsp;·&nbsp;<strong>ATH Date:</strong> " + ath_date if ath_date else ""}
                     </div>""", unsafe_allow_html=True)
 
             st.markdown('<div class="section-header">Price & Moving Averages</div>', unsafe_allow_html=True)
