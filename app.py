@@ -51,81 +51,311 @@ SHOW_PRICING     = False  # Set True when ready to accept payments
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
-html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
-#MainMenu {visibility:hidden;} footer {visibility:hidden;} .stDeployButton {display:none;}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
+/* ── Reset & base ── */
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+    color: #1e293b;
+}
+#MainMenu {visibility:hidden;} footer {visibility:hidden;} .stDeployButton {display:none;}
+.block-container { padding-top: 1.5rem !important; max-width: 1200px !important; }
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+    background: #0f172a !important;
+    border-right: 1px solid #1e293b;
+}
+[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
+[data-testid="stSidebar"] .stMarkdown h3 { color: #f1f5f9 !important; font-size: 0.8rem !important; font-weight: 600 !important; letter-spacing: 0.8px !important; text-transform: uppercase !important; }
+[data-testid="stSidebar"] label { color: #94a3b8 !important; font-size: 0.82rem !important; }
+[data-testid="stSidebar"] .stCheckbox label { color: #cbd5e1 !important; }
+[data-testid="stSidebar"] hr { border-color: #1e293b !important; }
+[data-testid="stSidebar"] .stButton button {
+    background: linear-gradient(135deg, #0ea5e9, #2563eb) !important;
+    color: white !important; border: none !important; border-radius: 8px !important;
+    font-weight: 600 !important; font-size: 0.82rem !important;
+}
+[data-testid="stSidebar"] .stButton button:hover {
+    background: linear-gradient(135deg, #38bdf8, #3b82f6) !important;
+    transform: translateY(-1px); box-shadow: 0 4px 12px rgba(14,165,233,0.3) !important;
+}
+[data-testid="stSidebar"] [data-testid="stTextInput"] input {
+    background: #1e293b !important; border: 1px solid #334155 !important;
+    color: #f1f5f9 !important; border-radius: 8px !important; font-size: 1rem !important;
+}
+[data-testid="stSidebar"] [data-testid="stTextInput"] input::placeholder { color: #475569 !important; }
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: #f1f5f9; border-radius: 10px; padding: 4px; gap: 2px;
+    border: 1px solid #e2e8f0;
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 7px; font-size: 0.85rem; font-weight: 500;
+    color: #64748b; padding: 0.4rem 1.2rem; border: none !important;
+    background: transparent !important;
+}
+.stTabs [aria-selected="true"] {
+    background: #ffffff !important; color: #0f172a !important;
+    font-weight: 600 !important; box-shadow: 0 1px 4px rgba(0,0,0,0.1) !important;
+}
+.stTabs [data-baseweb="tab-panel"] { padding-top: 1.5rem !important; }
+
+/* ── Main header ── */
 .main-header {
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-    padding: 2rem 2.5rem; border-radius: 16px; margin-bottom: 1.5rem;
-    border: 1px solid #334155;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0f2744 100%);
+    padding: 2.5rem 3rem; border-radius: 20px; margin-bottom: 2rem;
+    border: 1px solid #1e3a5f;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05);
+    position: relative; overflow: hidden;
+}
+.main-header::before {
+    content: ''; position: absolute; top: -50%; right: -10%;
+    width: 400px; height: 400px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(14,165,233,0.08) 0%, transparent 70%);
+    pointer-events: none;
+}
+.main-header-logo {
+    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem;
+}
+.main-header-logo-icon {
+    width: 42px; height: 42px; background: linear-gradient(135deg, #0ea5e9, #2563eb);
+    border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem; font-weight: 700; color: white; flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(14,165,233,0.4);
 }
 .main-header h1 {
-    font-family: 'DM Mono', monospace; color: #38bdf8;
-    font-size: 2rem; margin: 0 0 0.25rem; font-weight: 500; letter-spacing: -0.5px;
+    font-family: 'Inter', sans-serif; color: #f1f5f9;
+    font-size: 1.9rem; margin: 0; font-weight: 700; letter-spacing: -0.5px;
 }
-.main-header p { color: #94a3b8; font-size: 0.9rem; margin: 0; }
+.main-header h1 span { color: #38bdf8; }
+.main-header-sub {
+    color: #64748b; font-size: 0.88rem; margin: 0.4rem 0 0;
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+}
+.main-header-sub .badge {
+    background: rgba(14,165,233,0.12); color: #38bdf8; border: 1px solid rgba(14,165,233,0.2);
+    border-radius: 20px; padding: 2px 10px; font-size: 0.75rem; font-weight: 500;
+}
+.main-header-stats {
+    display: flex; gap: 2rem; margin-top: 1.5rem; padding-top: 1.5rem;
+    border-top: 1px solid #1e293b;
+}
+.main-header-stat { text-align: left; }
+.main-header-stat-val { font-size: 1.4rem; font-weight: 700; color: #f1f5f9; line-height: 1; }
+.main-header-stat-lbl { font-size: 0.72rem; color: #475569; text-transform: uppercase; letter-spacing: 0.6px; margin-top: 3px; }
 
+/* ── Live ticker ── */
 .live-ticker {
-    background: #0f172a; border: 1px solid #334155; border-radius: 12px;
-    padding: 1rem 1.5rem; margin-bottom: 1rem;
+    background: linear-gradient(135deg, #0f172a, #1e293b);
+    border: 1px solid #334155; border-radius: 16px;
+    padding: 1.25rem 1.75rem; margin-bottom: 1.25rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    display: flex; justify-content: space-between; align-items: center;
 }
-.live-price { font-family: 'DM Mono', monospace; font-size: 2rem; font-weight: 500; color: #fff; }
-.live-change-pos { font-family: 'DM Mono', monospace; font-size: 1rem; color: #22c55e; }
-.live-change-neg { font-family: 'DM Mono', monospace; font-size: 1rem; color: #ef4444; }
-.live-dot { width: 8px; height: 8px; background: #22c55e; border-radius: 50%;
-            display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
+.live-price {
+    font-family: 'JetBrains Mono', monospace; font-size: 2.2rem;
+    font-weight: 500; color: #f1f5f9; line-height: 1;
+}
+.live-change-pos { font-family: 'JetBrains Mono', monospace; font-size: 1rem; color: #22c55e; font-weight: 500; }
+.live-change-neg { font-family: 'JetBrains Mono', monospace; font-size: 1rem; color: #ef4444; font-weight: 500; }
+.live-dot {
+    width: 8px; height: 8px; background: #22c55e; border-radius: 50%;
+    display: inline-block; margin-right: 6px; animation: pulse 2s infinite;
+}
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
+/* ── Metric cards ── */
 .metric-card {
-    background: #f8fafc; border: 1px solid #e2e8f0;
-    border-radius: 12px; padding: 0.85rem 0.5rem; text-align: center;
+    background: #ffffff; border: 1px solid #e2e8f0;
+    border-radius: 14px; padding: 1rem 0.75rem; text-align: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    transition: box-shadow 0.2s, transform 0.2s;
+    position: relative; overflow: hidden;
 }
+.metric-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, #0ea5e9, #2563eb);
+    border-radius: 14px 14px 0 0;
+}
+.metric-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-1px); }
 .metric-label {
-    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.6px;
-    text-transform: uppercase; color: #94a3b8; margin-bottom: 0.4rem;
+    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.7px;
+    text-transform: uppercase; color: #94a3b8; margin-bottom: 0.5rem;
 }
-.metric-value { font-family: 'DM Mono', monospace; font-size: clamp(0.8rem, 1.1vw, 1.2rem); font-weight: 500; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.metric-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(0.85rem, 1.1vw, 1.25rem);
+    font-weight: 500; color: #0f172a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .metric-value.positive { color: #16a34a; }
 .metric-value.negative { color: #dc2626; }
 
+/* ── Section headers ── */
 .section-header {
-    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.8px;
-    text-transform: uppercase; color: #64748b;
-    border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem;
-    margin-bottom: 1rem; margin-top: 1.5rem;
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: #0ea5e9;
+    padding: 0.4rem 0 0.5rem;
+    border-bottom: 2px solid #e2e8f0;
+    margin-bottom: 1rem; margin-top: 1.75rem;
+    display: flex; align-items: center; gap: 0.5rem;
+}
+.section-header::before {
+    content: ''; display: inline-block; width: 3px; height: 14px;
+    background: linear-gradient(180deg, #0ea5e9, #2563eb);
+    border-radius: 2px; flex-shrink: 0;
 }
 
+/* ── Feature cards (landing) ── */
+.feature-card {
+    background: #ffffff; border: 1px solid #e2e8f0;
+    border-radius: 16px; padding: 1.5rem; height: 100%;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    transition: box-shadow 0.2s, transform 0.2s;
+}
+.feature-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.1); transform: translateY(-2px); }
+.feature-card-icon {
+    font-size: 1.8rem; margin-bottom: 0.75rem; display: block;
+}
+.feature-card-title {
+    font-size: 1rem; font-weight: 700; color: #0f172a; margin-bottom: 0.35rem;
+}
+.feature-card-subtitle {
+    font-size: 0.78rem; color: #64748b; margin-bottom: 1rem;
+}
+.feature-card-list {
+    font-size: 0.84rem; color: #475569; line-height: 2; list-style: none; padding: 0; margin: 0;
+}
+.feature-card-list li::before { content: "✓ "; color: #0ea5e9; font-weight: 700; }
+
+/* ── Quick-start chips ── */
+.quickstart-bar {
+    display: flex; gap: 0.6rem; flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+.quickstart-chip {
+    background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 20px;
+    padding: 4px 14px; font-size: 0.8rem; font-weight: 600; color: #334155;
+    cursor: pointer; font-family: 'JetBrains Mono', monospace;
+    transition: all 0.15s;
+}
+.quickstart-chip:hover {
+    background: #0ea5e9; border-color: #0ea5e9; color: white;
+}
+
+/* ── Mover cards ── */
+.mover-card {
+    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 0.7rem 1rem; margin-bottom: 0.4rem;
+    display: flex; justify-content: space-between; align-items: center;
+    transition: box-shadow 0.15s;
+}
+.mover-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+
+/* ── Stats bar ── */
+.stats-bar {
+    display: flex; gap: 1px; background: #e2e8f0;
+    border-radius: 12px; overflow: hidden; margin-bottom: 1.5rem;
+    border: 1px solid #e2e8f0;
+}
+.stats-bar-item {
+    flex: 1; background: #ffffff; padding: 0.9rem 1rem; text-align: center;
+}
+.stats-bar-val { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #0f172a; }
+.stats-bar-lbl { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+
+/* ── Pro badge ── */
 .pro-badge {
-    background: #38bdf8; color: #0f172a; font-size: 0.65rem;
-    font-weight: 700; padding: 2px 8px; border-radius: 20px;
+    background: linear-gradient(135deg, #0ea5e9, #2563eb);
+    color: white; font-size: 0.6rem; font-weight: 700;
+    padding: 2px 8px; border-radius: 20px;
     letter-spacing: 0.5px; margin-left: 8px; vertical-align: middle;
 }
 
+/* ── Founder cards ── */
 .founder-card {
-    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px;
-    padding: 1.75rem;
+    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;
+    padding: 1.75rem; box-shadow: 0 1px 4px rgba(0,0,0,0.05);
 }
-.founder-quote { font-size: 0.95rem; color: #334155; line-height: 1.7; font-style: italic; margin-bottom: 1.25rem; }
-.founder-name  { font-weight: 600; color: #0f172a; font-size: 0.95rem; }
-.founder-school{ font-size: 0.82rem; color: #94a3b8; margin-top: 2px; }
-.founder-role  { font-size: 0.78rem; color: #38bdf8; margin-top: 2px; font-weight: 500; }
+.founder-quote { font-size: 0.92rem; color: #475569; line-height: 1.8; font-style: italic; margin-bottom: 1.25rem; border-left: 3px solid #0ea5e9; padding-left: 1rem; }
+.founder-name  { font-weight: 700; color: #0f172a; font-size: 0.95rem; }
+.founder-school{ font-size: 0.8rem; color: #94a3b8; margin-top: 2px; }
+.founder-role  { font-size: 0.78rem; color: #0ea5e9; margin-top: 3px; font-weight: 600; }
 
+/* ── Disclaimer / warning ── */
 .disclaimer {
-    background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px;
+    background: #fffbeb; border: 1px solid #fcd34d; border-radius: 10px;
     padding: 0.75rem 1rem; font-size: 0.78rem; color: #92400e; margin-top: 1.5rem;
 }
 
+/* ── Pro locked ── */
 .pro-locked {
-    background: #0f172a; border: 1px solid #334155; border-radius: 12px;
-    padding: 2rem; text-align: center; margin: 1rem 0;
+    background: linear-gradient(135deg, #0f172a, #1e293b);
+    border: 1px solid #334155; border-radius: 16px;
+    padding: 2.5rem; text-align: center; margin: 1rem 0;
 }
 
-.mover-card {
-    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
-    padding: 0.75rem 1rem; margin-bottom: 0.5rem;
-    display: flex; justify-content: space-between; align-items: center;
+/* ── Tooltip ── */
+.tooltip-wrap { position: relative; display: inline-block; cursor: help; }
+.tooltip-wrap .tooltip-text {
+    visibility: hidden; opacity: 0; background: #1e293b; color: #e2e8f0;
+    font-size: 0.78rem; border-radius: 8px; padding: 0.5rem 0.75rem;
+    position: absolute; z-index: 999; bottom: 125%; left: 50%; transform: translateX(-50%);
+    width: 200px; text-align: left; line-height: 1.5;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    transition: opacity 0.2s; pointer-events: none;
 }
+.tooltip-wrap:hover .tooltip-text { visibility: visible; opacity: 1; }
+
+/* ── Analysis summary ── */
+.summary-box {
+    background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+    border: 1px solid #e2e8f0; border-radius: 14px;
+    padding: 1.5rem; font-size: 0.9rem; color: #334155;
+    line-height: 1.85; border-left: 4px solid #0ea5e9;
+}
+
+/* ── Download buttons ── */
+.stDownloadButton button {
+    border-radius: 10px !important; font-weight: 600 !important;
+    font-size: 0.85rem !important; padding: 0.6rem 1.2rem !important;
+    transition: transform 0.15s, box-shadow 0.15s !important;
+}
+.stDownloadButton button:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 12px rgba(14,165,233,0.3) !important;
+}
+
+/* ── Run button ── */
+[data-testid="stSidebar"] .stButton [kind="primary"] {
+    background: linear-gradient(135deg, #0ea5e9, #2563eb) !important;
+    border: none !important; font-weight: 700 !important;
+    letter-spacing: 0.3px !important; font-size: 0.9rem !important;
+    box-shadow: 0 2px 8px rgba(14,165,233,0.3) !important;
+}
+
+/* ── Sidebar group label ── */
+.sidebar-group {
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: #475569;
+    padding: 0.5rem 0 0.3rem; border-bottom: 1px solid #1e293b;
+    margin-bottom: 0.5rem;
+}
+
+/* ── Page footer ── */
+.page-footer {
+    text-align: center; padding: 2rem 0 1rem;
+    border-top: 1px solid #e2e8f0; margin-top: 3rem;
+    color: #94a3b8; font-size: 0.78rem;
+}
+.page-footer a { color: #0ea5e9; text-decoration: none; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -160,100 +390,154 @@ elif not st.session_state.get("is_pro"):
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="main-header">
-    <h1>◈ StockWizard</h1>
-    <p>Stocks · ETFs · Crypto · Monte Carlo simulation · Excel reports · Day trader mode · Portfolio builder · Powered by Polygon.io</p>
+    <div class="main-header-logo">
+        <div class="main-header-logo-icon">W</div>
+        <h1>Stock<span>Wizard</span></h1>
+    </div>
+    <div class="main-header-sub">
+        <span class="badge">Stocks</span>
+        <span class="badge">ETFs</span>
+        <span class="badge">Crypto</span>
+        <span class="badge">Monte Carlo</span>
+        <span class="badge">Portfolio Builder</span>
+        <span class="badge">Excel &amp; PowerPoint Export</span>
+        <span style="color:#334155;margin-left:0.5rem">· Powered by Polygon.io</span>
+    </div>
+    <div class="main-header-stats">
+        <div class="main-header-stat">
+            <div class="main-header-stat-val">10+</div>
+            <div class="main-header-stat-lbl">Analysis Sheets</div>
+        </div>
+        <div class="main-header-stat">
+            <div class="main-header-stat-val">1,000</div>
+            <div class="main-header-stat-lbl">Monte Carlo Paths</div>
+        </div>
+        <div class="main-header-stat">
+            <div class="main-header-stat-val">15+</div>
+            <div class="main-header-stat-lbl">Technical Indicators</div>
+        </div>
+        <div class="main-header-stat">
+            <div class="main-header-stat-val">Free</div>
+            <div class="main-header-stat-lbl">To Start</div>
+        </div>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    # ── Pro status / upgrade ──────────────────────────────────────────────────
     if SHOW_PRICING:
         if st.session_state["is_pro"]:
             st.markdown("""
-            <div style="background:#0f172a;border:1px solid #38bdf8;border-radius:10px;
-                        padding:0.75rem 1rem;margin-bottom:1rem;text-align:center">
-                <span style="color:#38bdf8;font-weight:600;font-size:0.85rem">◈ Pro Member</span>
+            <div style="background:linear-gradient(135deg,#0c4a6e,#1e3a5f);
+                        border:1px solid #0ea5e9;border-radius:12px;
+                        padding:0.75rem 1rem;margin-bottom:1.25rem;text-align:center">
+                <span style="color:#38bdf8;font-weight:700;font-size:0.82rem;
+                             letter-spacing:0.5px">⚡ PRO MEMBER</span>
             </div>
             """, unsafe_allow_html=True)
         else:
             if st.button("⚡ Upgrade to Pro — $9.99/mo", use_container_width=True):
                 st.session_state["show_payment"] = True
                 st.rerun()
+    else:
+        st.markdown("""
+        <div style="background:linear-gradient(135deg,#0c4a6e,#1e3a5f);
+                    border:1px solid #0ea5e9;border-radius:12px;
+                    padding:0.7rem 1rem;margin-bottom:1.25rem;text-align:center">
+            <span style="color:#38bdf8;font-weight:700;font-size:0.8rem;letter-spacing:0.5px">
+                ⚡ STOCKWIZARD
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
 
-    st.markdown("### Configure Analysis")
-    st.markdown("---")
-
+    # ── Mode ──────────────────────────────────────────────────────────────────
+    st.markdown('<div class="sidebar-group">Mode</div>', unsafe_allow_html=True)
     if st.session_state["is_pro"]:
-        mode = st.radio("Mode", ["Investor Mode", "Day Trader Mode"], horizontal=True)
+        mode = st.radio("", ["Investor Mode", "Day Trader Mode"],
+                        horizontal=True, label_visibility="collapsed")
     else:
         mode = "Investor Mode"
 
+    # ── Ticker ────────────────────────────────────────────────────────────────
+    st.markdown('<div class="sidebar-group" style="margin-top:1rem">Ticker</div>',
+                unsafe_allow_html=True)
     ticker_input = st.text_input(
-        "Ticker Symbol", placeholder="e.g. AAPL, SPY, BTC, ETH"
+        "", placeholder="e.g. AAPL, SPY, BTC, ETH",
+        label_visibility="collapsed"
     ).strip().upper()
 
+    # ── Date range ────────────────────────────────────────────────────────────
     if mode == "Investor Mode":
-        st.markdown("**Date Range**")
+        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Date Range</div>',
+                    unsafe_allow_html=True)
         _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y","5Y"]
         _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730,"5Y":1825}
         period_key = st.select_slider("", options=_SLIDER_OPTIONS, value="1Y",
                                       label_visibility="collapsed")
-
         _today      = datetime.today().date()
         _days       = _SLIDER_DAYS[period_key]
         date_end    = _today.strftime("%Y-%m-%d")
         date_start  = (_today - timedelta(days=_days)).strftime("%Y-%m-%d")
         bar_size    = "day"
         period_label = period_key
-
     else:
         date_start   = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
         date_end     = datetime.today().strftime("%Y-%m-%d")
         bar_size     = "day"
         period_label = "1Y"
+        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Candle Size</div>',
+                    unsafe_allow_html=True)
         tf_options = {"1 Min":"1min","5 Min":"5min","15 Min":"15min","1 Hour":"1hour"}
-        tf_label   = st.radio("Candle Size", list(tf_options.keys()), index=1, horizontal=True)
+        tf_label   = st.radio("", list(tf_options.keys()), index=1,
+                              horizontal=True, label_visibility="collapsed")
         st.session_state["candle_tf"] = tf_options[tf_label]
 
-    st.markdown("---")
-    st.markdown("**Benchmarks**")
+    # ── Benchmarks ────────────────────────────────────────────────────────────
+    st.markdown('<div class="sidebar-group" style="margin-top:1rem">Benchmarks</div>',
+                unsafe_allow_html=True)
     include_spy = st.checkbox("S&P 500 (SPY)", value=True)
     include_qqq = st.checkbox("NASDAQ (QQQ)", value=True)
 
     if mode == "Investor Mode":
-        st.markdown("---")
-        st.markdown("**Peer Comparison**")
-        peers_input = st.text_input("Peer Tickers (optional)", placeholder="e.g. GOOGL, AMZN")
+        # ── Peer comparison ───────────────────────────────────────────────────
+        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Peer Comparison</div>',
+                    unsafe_allow_html=True)
+        peers_input = st.text_input("", placeholder="e.g. GOOGL, AMZN",
+                                    label_visibility="collapsed")
 
-        st.markdown("---")
-        st.markdown("**Report Modules**")
+        # ── Report modules ────────────────────────────────────────────────────
+        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Report Modules</div>',
+                    unsafe_allow_html=True)
         do_mc     = st.checkbox("Monte Carlo Forecast", value=True)
-        do_sector = st.checkbox("Sector Comparison", value=True)
-        do_corr   = st.checkbox("Correlation Matrix", value=True)
+        do_sector = st.checkbox("Sector Comparison",    value=True)
+        do_corr   = st.checkbox("Correlation Matrix",   value=True)
         do_sr     = st.checkbox("Support & Resistance", value=True)
-        do_news   = st.checkbox("News Headlines", value=True)
-        do_peers  = st.checkbox("Peer Comparison", value=True)
+        do_news   = st.checkbox("News Headlines",       value=True)
+        do_peers  = st.checkbox("Peer Comparison",      value=True)
 
         if do_mc:
-            st.markdown("**Monte Carlo Settings**")
-            n_sims    = st.slider("Simulations", 100, 5000, 1000, step=100)
-            n_horizon = st.slider("Horizon (days)", 21, 504, 252, step=21)
+            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Monte Carlo</div>',
+                        unsafe_allow_html=True)
+            n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
+            n_horizon = st.slider("Horizon (days)",  21,  504,  252, step=21)
         else:
-            n_sims    = 1000
-            n_horizon = 252
+            n_sims = 1000; n_horizon = 252
     else:
         peers_input = ""
         do_mc = do_sector = do_corr = do_sr = do_news = do_peers = False
-        n_sims = 1000
-        n_horizon = 252
+        n_sims = 1000; n_horizon = 252
 
-    st.markdown("---")
+    st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
     run_btn = st.button("▶  Run Analysis", type="primary", use_container_width=True)
 
-    st.markdown("---")
-    st.markdown("### Stay Updated")
-    email_input = st.text_input("Get notified about new features", placeholder="your@email.com")
-    if st.button("Join waitlist", use_container_width=True):
+    # ── Waitlist ──────────────────────────────────────────────────────────────
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-group">Stay Updated</div>', unsafe_allow_html=True)
+    email_input = st.text_input("", placeholder="your@email.com",
+                                key="waitlist_email", label_visibility="collapsed")
+    if st.button("Join Waitlist", use_container_width=True):
         if email_input and "@" in email_input:
             import csv, os
             csv_path = os.path.join(os.path.dirname(__file__), "waitlist.csv")
@@ -303,114 +587,224 @@ with tab1:
     # ── Landing page (no ticker entered) ─────────────────────────────────────
     if not run_btn and not ticker_input:
 
+        # ── Quick-start chips ─────────────────────────────────────────────────
+        st.markdown("""
+        <div style="margin-bottom:0.5rem;color:#64748b;font-size:0.82rem;font-weight:500">
+            Try a quick example:
+        </div>
+        <div class="quickstart-bar">
+            <span class="quickstart-chip">AAPL</span>
+            <span class="quickstart-chip">TSLA</span>
+            <span class="quickstart-chip">NVDA</span>
+            <span class="quickstart-chip">SPY</span>
+            <span class="quickstart-chip">BTC</span>
+            <span class="quickstart-chip">AMZN</span>
+            <span class="quickstart-chip">MSFT</span>
+        </div>
+        <div style="font-size:0.78rem;color:#94a3b8;margin-bottom:1.5rem">
+            ↑ Type any ticker in the sidebar and click Run Analysis
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Stats bar ─────────────────────────────────────────────────────────
+        st.markdown("""
+        <div class="stats-bar">
+            <div class="stats-bar-item">
+                <div class="stats-bar-val">15+</div>
+                <div class="stats-bar-lbl">Indicators</div>
+            </div>
+            <div class="stats-bar-item">
+                <div class="stats-bar-val">1,000</div>
+                <div class="stats-bar-lbl">MC Simulations</div>
+            </div>
+            <div class="stats-bar-item">
+                <div class="stats-bar-val">10</div>
+                <div class="stats-bar-lbl">Export Sheets</div>
+            </div>
+            <div class="stats-bar-item">
+                <div class="stats-bar-val">5yr</div>
+                <div class="stats-bar-lbl">History</div>
+            </div>
+            <div class="stats-bar-item">
+                <div class="stats-bar-val">Live</div>
+                <div class="stats-bar-lbl">Price Data</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Market movers ─────────────────────────────────────────────────────
         st.markdown('<div class="section-header">Market Movers Today</div>', unsafe_allow_html=True)
         with st.spinner("Loading market data..."):
             gainers, losers = get_top_movers(POLYGON_API_KEY)
 
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("**Top Gainers**")
+            st.markdown("""
+            <div style="font-size:0.78rem;font-weight:700;color:#16a34a;letter-spacing:0.5px;
+                        text-transform:uppercase;margin-bottom:0.6rem">
+                ▲ Top Gainers
+            </div>""", unsafe_allow_html=True)
             if gainers:
                 for g in gainers:
                     st.markdown(f"""
                     <div class="mover-card">
-                        <span style="font-weight:600;color:#0f172a">{g['Ticker']}</span>
-                        <span style="font-family:'DM Mono',monospace;font-size:0.9rem">{g['Price']}</span>
-                        <span style="color:#16a34a;font-family:'DM Mono',monospace;font-weight:600">{g['Change']}</span>
+                        <span style="font-weight:700;color:#0f172a;font-size:0.9rem">{g['Ticker']}</span>
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:0.85rem;color:#475569">{g['Price']}</span>
+                        <span style="color:#16a34a;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:0.9rem">{g['Change']}</span>
                     </div>
                     """, unsafe_allow_html=True)
             else:
-                st.caption("Market data unavailable")
+                st.markdown("""<div style="color:#94a3b8;font-size:0.82rem;padding:0.5rem">
+                    Market data unavailable</div>""", unsafe_allow_html=True)
 
         with col2:
-            st.markdown("**Top Losers**")
+            st.markdown("""
+            <div style="font-size:0.78rem;font-weight:700;color:#dc2626;letter-spacing:0.5px;
+                        text-transform:uppercase;margin-bottom:0.6rem">
+                ▼ Top Losers
+            </div>""", unsafe_allow_html=True)
             if losers:
                 for l in losers:
                     st.markdown(f"""
                     <div class="mover-card">
-                        <span style="font-weight:600;color:#0f172a">{l['Ticker']}</span>
-                        <span style="font-family:'DM Mono',monospace;font-size:0.9rem">{l['Price']}</span>
-                        <span style="color:#dc2626;font-family:'DM Mono',monospace;font-weight:600">{l['Change']}</span>
+                        <span style="font-weight:700;color:#0f172a;font-size:0.9rem">{l['Ticker']}</span>
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:0.85rem;color:#475569">{l['Price']}</span>
+                        <span style="color:#dc2626;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:0.9rem">{l['Change']}</span>
                     </div>
                     """, unsafe_allow_html=True)
             else:
-                st.caption("Market data unavailable")
+                st.markdown("""<div style="color:#94a3b8;font-size:0.82rem;padding:0.5rem">
+                    Market data unavailable</div>""", unsafe_allow_html=True)
 
+        # ── Feature cards ─────────────────────────────────────────────────────
         st.markdown('<div class="section-header">What You Get</div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
         with c1:
             st.markdown("""
-            <div class="metric-card">
-                <div class="metric-label">Free — Investor Mode</div>
-                <div style="text-align:left;margin-top:0.75rem;font-size:0.88rem;color:#334155;line-height:1.9">
-                ◈ 10-sheet Excel report<br>◈ Monte Carlo simulation<br>
-                ◈ RSI, MACD, Bollinger Bands<br>◈ Support & resistance<br>
-                ◈ Correlation matrix<br>◈ News headlines<br>◈ Up to 5 year history
-                </div>
+            <div class="feature-card">
+                <span class="feature-card-icon">📊</span>
+                <div class="feature-card-title">Investor Mode</div>
+                <div class="feature-card-subtitle">Free · Full technical analysis</div>
+                <ul class="feature-card-list">
+                    <li>10-sheet Excel + PowerPoint export</li>
+                    <li>Monte Carlo simulation</li>
+                    <li>RSI, MACD, Bollinger Bands</li>
+                    <li>Support &amp; resistance levels</li>
+                    <li>Correlation matrix</li>
+                    <li>News headlines</li>
+                    <li>Up to 5 year history</li>
+                </ul>
             </div>""", unsafe_allow_html=True)
         with c2:
             st.markdown("""
-            <div class="metric-card" style="border-color:#38bdf8">
-                <div class="metric-label" style="color:#38bdf8">Pro — Day Trader Mode</div>
-                <div style="text-align:left;margin-top:0.75rem;font-size:0.88rem;color:#334155;line-height:1.9">
-                ◈ Live intraday candlestick charts<br>◈ Real-time price (30s refresh)<br>
-                ◈ 1min 5min 15min 1hr candles<br>◈ Volume spike detection<br>
-                ◈ Pre-market & after-hours<br>◈ Live RSI & MACD<br>◈ 10 year history
-                </div>
+            <div class="feature-card" style="border-color:#0ea5e9;border-top-color:#0ea5e9">
+                <span class="feature-card-icon">⚡</span>
+                <div class="feature-card-title">Day Trader Mode</div>
+                <div class="feature-card-subtitle" style="color:#0ea5e9">Pro · Real-time intraday</div>
+                <ul class="feature-card-list">
+                    <li>Live candlestick charts</li>
+                    <li>Real-time price (30s refresh)</li>
+                    <li>1min / 5min / 15min / 1hr candles</li>
+                    <li>Volume spike detection</li>
+                    <li>Live RSI &amp; MACD overlays</li>
+                    <li>Pre &amp; after-market data</li>
+                </ul>
             </div>""", unsafe_allow_html=True)
         with c3:
             st.markdown("""
-            <div class="metric-card" style="border-color:#8b5cf6">
-                <div class="metric-label" style="color:#8b5cf6">Pro — Portfolio Builder</div>
-                <div style="text-align:left;margin-top:0.75rem;font-size:0.88rem;color:#334155;line-height:1.9">
-                ◈ Mean-variance optimisation<br>◈ Efficient frontier chart<br>
-                ◈ 3-year backtest vs S&P 500<br>◈ Portfolio Monte Carlo<br>
-                ◈ Milestone projections<br>◈ Diversification scoring<br>◈ Full Excel report
-                </div>
+            <div class="feature-card" style="border-color:#8b5cf6;border-top-color:#8b5cf6">
+                <span class="feature-card-icon">💼</span>
+                <div class="feature-card-title">Portfolio Builder</div>
+                <div class="feature-card-subtitle" style="color:#8b5cf6">Pro · Quant-grade optimisation</div>
+                <ul class="feature-card-list">
+                    <li>Mean-variance optimisation</li>
+                    <li>Efficient frontier chart</li>
+                    <li>3-year backtest vs S&amp;P 500</li>
+                    <li>Portfolio Monte Carlo</li>
+                    <li>Milestone projections</li>
+                    <li>Diversification scoring</li>
+                </ul>
             </div>""", unsafe_allow_html=True)
 
         if SHOW_PRICING:
             render_pricing_section()
 
+        # ── How it works ──────────────────────────────────────────────────────
+        st.markdown('<div class="section-header">How It Works</div>', unsafe_allow_html=True)
+        h1, h2, h3, h4 = st.columns(4)
+        for col, num, title, desc in [
+            (h1, "1", "Enter Ticker", "Type any stock, ETF, or crypto symbol in the sidebar"),
+            (h2, "2", "Configure",    "Choose your date range, benchmarks, and analysis modules"),
+            (h3, "3", "Run Analysis", "Click Run — we fetch data and compute 15+ indicators"),
+            (h4, "4", "Export",       "Download a professional Excel or PowerPoint report"),
+        ]:
+            with col:
+                st.markdown(f"""
+                <div style="text-align:center;padding:1.25rem 0.5rem">
+                    <div style="width:44px;height:44px;background:linear-gradient(135deg,#0ea5e9,#2563eb);
+                                border-radius:50%;display:flex;align-items:center;justify-content:center;
+                                margin:0 auto 0.75rem;font-size:1.1rem;font-weight:700;color:white;
+                                box-shadow:0 2px 8px rgba(14,165,233,0.35)">{num}</div>
+                    <div style="font-weight:700;color:#0f172a;font-size:0.9rem;margin-bottom:0.35rem">{title}</div>
+                    <div style="color:#64748b;font-size:0.8rem;line-height:1.5">{desc}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # ── Meet the team ─────────────────────────────────────────────────────
         st.markdown('<div class="section-header">Meet the Team</div>', unsafe_allow_html=True)
         fc1, fc2 = st.columns(2)
         with fc1:
             st.markdown("""
-                <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
-                    <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0434.jpeg"
-                         style="width:72px;height:72px;border-radius:50%;object-fit:cover;
-                            flex-shrink:0;border:2px solid #e2e8f0;margin-top:4px">
-                    <div>
-                        <div class="founder-quote">
-                            "I built StockWizard because I was tired of spending hours pulling financial
-                            data into spreadsheets manually. I wanted a tool that gives any trader —
-                            beginner or pro — a professional report in seconds."
-                        </div>
-                        <div class="founder-name">Wyatt Stratton</div>
-                        <div class="founder-role">Founder</div>
-                        <div class="founder-school">Indiana University Bloomington</div>
+            <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
+                <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0434.jpeg"
+                     style="width:72px;height:72px;border-radius:50%;object-fit:cover;
+                            flex-shrink:0;border:3px solid #0ea5e9;margin-top:4px">
+                <div>
+                    <div class="founder-quote">
+                        "I built StockWizard because I was tired of spending hours pulling financial
+                        data into spreadsheets manually. I wanted a tool that gives any trader —
+                        beginner or pro — a professional report in seconds."
                     </div>
+                    <div class="founder-name">Wyatt Stratton</div>
+                    <div class="founder-role">Founder</div>
+                    <div class="founder-school">Indiana University Bloomington</div>
                 </div>
-                """, unsafe_allow_html=True)
-            
-            with fc2:
-                st.markdown("""
-                <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
-                    <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0433.jpeg"
-                         style="width:72px;height:72px;border-radius:50%;object-fit:cover;
-                                flex-shrink:0;border:2px solid #e2e8f0;margin-top:4px">
-                    <div>
-                        <div class="founder-quote">
-                            "My role was making sure the analysis was rigorous and the experience was seamless.
-                            From Monte Carlo simulation to the overall architecture, I wanted every number
-                            StockWizard produces to be something a professional quant would stand behind."
-                        </div>
-                        <div class="founder-name">Nicholas Carriello</div>
-                        <div class="founder-role">Co-Founder & Quantitative Lead</div>
-                        <div class="founder-school">Bucknell University</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with fc2:
+            st.markdown("""
+            <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
+                <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0433.jpeg"
+                     style="width:72px;height:72px;border-radius:50%;object-fit:cover;
+                            flex-shrink:0;border:3px solid #0ea5e9;margin-top:4px">
+                <div>
+                    <div class="founder-quote">
+                        "My role was making sure the analysis was rigorous and the experience was seamless.
+                        From Monte Carlo simulation to the overall architecture, every number
+                        StockWizard produces is something a professional quant would stand behind."
                     </div>
+                    <div class="founder-name">Nicholas Carriello</div>
+                    <div class="founder-role">Co-Founder &amp; Quantitative Lead</div>
+                    <div class="founder-school">Bucknell University</div>
                 </div>
-                """, unsafe_allow_html=True)
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ── Disclaimer footer ─────────────────────────────────────────────────
+        st.markdown("""
+        <div class="page-footer">
+            <div style="margin-bottom:0.5rem">
+                <strong>StockWizard</strong> &nbsp;·&nbsp;
+                Professional stock analysis tools &nbsp;·&nbsp;
+                Powered by <a href="https://polygon.io" target="_blank">Polygon.io</a>
+            </div>
+            <div>
+                StockWizard provides financial data and analytics for informational purposes only.
+                This is <strong>not investment advice</strong>. Past performance does not guarantee future results.
+                Always consult a licensed financial advisor before making investment decisions.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # ── Analysis (ticker entered or run clicked) ──────────────────────────────
     elif run_btn or ticker_input:
@@ -762,6 +1156,14 @@ with tab1:
 
             col1,col2,col3,col4,col5,col6,col7 = st.columns(7)
             vol_val = df["Volatility_20d"].iloc[-1]
+            _TOOLTIPS = {
+                "Sharpe Ratio":    "Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent. Higher = better return per unit of risk.",
+                "Ann. Volatility": "Annualized standard deviation of daily returns. Higher = more price swings. S&P 500 averages ~15%.",
+                "Period Return":   "Total price return over the selected date range.",
+                "52W High":        "Highest closing price in the last 52 weeks.",
+                "52W Low":         "Lowest closing price in the last 52 weeks.",
+                "Current Price":   "Most recent closing price from Polygon.io.",
+            }
             for col, label, value, cls in [
                 (col1,"Current Price",   f"${latest['Close']:,.2f}",                           "neutral"),
                 (col2,"Period Return",   f"{period_ret:+.1f}%",                                pos_neg(period_ret)),
@@ -771,10 +1173,12 @@ with tab1:
                 (col6,"Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A","neutral"),
                 (col7, extra_label,      extra_value,                                           "neutral"),
             ]:
+                tip = _TOOLTIPS.get(label, "")
+                tip_html = f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{tip}</span></span>' if tip else ""
                 with col:
                     st.markdown(f"""
                     <div class="metric-card">
-                        <div class="metric-label">{label}</div>
+                        <div class="metric-label">{label}{tip_html}</div>
                         <div class="metric-value {cls}">{value}</div>
                     </div>""", unsafe_allow_html=True)
 
@@ -1007,11 +1411,8 @@ with tab1:
 
             st.markdown('<div class="section-header">Automated Analysis Summary</div>', unsafe_allow_html=True)
             st.markdown(f"""
-            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
-                        padding:1.25rem;font-size:0.88rem;color:#334155;
-                        line-height:1.75;font-style:italic">
-                {summary_text}
-            </div>""", unsafe_allow_html=True)
+            <div class="summary-box">{summary_text}</div>
+            """, unsafe_allow_html=True)
 
             st.markdown("---")
             excel_buf.seek(0)
