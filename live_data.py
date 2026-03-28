@@ -34,14 +34,18 @@ def get_live_price(ticker, api_key):
 
 
 def get_prev_close(ticker, api_key):
-    try:
-        yesterday = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-        r = requests.get(f"{POLYGON_BASE}/v1/open-close/{ticker}/{yesterday}",
-                         params={"adjusted": "true", "apiKey": api_key}, timeout=10)
-        if r.status_code == 200:
-            return r.json().get("close", 0)
-    except Exception:
-        pass
+    # Walk back up to 5 days to handle weekends and market holidays
+    for days_back in range(1, 6):
+        try:
+            date_str = (datetime.today() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+            r = requests.get(f"{POLYGON_BASE}/v1/open-close/{ticker}/{date_str}",
+                             params={"adjusted": "true", "apiKey": api_key}, timeout=10)
+            if r.status_code == 200:
+                close = r.json().get("close", 0)
+                if close:
+                    return close
+        except Exception:
+            pass
     return 0
 
 

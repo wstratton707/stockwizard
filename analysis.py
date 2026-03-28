@@ -39,7 +39,6 @@ def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print):
     returns    = df["Daily_Return"].dropna()
     mu, sigma  = returns.mean(), returns.std()
     last_price = df["Close"].iloc[-1]
-    np.random.seed(42)
     rand          = np.random.standard_normal((forecast_days, n_simulations))
     daily_factors = np.exp((mu - 0.5 * sigma ** 2) + sigma * rand)
     paths         = np.zeros((forecast_days + 1, n_simulations))

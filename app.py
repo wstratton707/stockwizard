@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,10 +7,21 @@ import plotly.express as px
 from datetime import datetime
 import time
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from data import (
     validate_ticker, fetch_stock_data, fetch_company_details,
     fetch_news, fetch_peer_comparison, fetch_sector_data, fetch_bond_data,
 )
+try:
+    from streamlit_autorefresh import st_autorefresh
+    _HAS_AUTOREFRESH = True
+except ImportError:
+    _HAS_AUTOREFRESH = False
 from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP
 from analysis import (
     detect_support_resistance, build_correlation_matrix,
@@ -17,7 +29,7 @@ from analysis import (
 )
 from excel_builder import build_excel
 from live_data import get_live_price, get_intraday_data, get_top_movers
-from payments import render_pricing_section, create_checkout_session, verify_session
+from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -28,7 +40,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-POLYGON_API_KEY = "l0p56or_wphBN0EMtK7LYFFs8nETcMEM"
+POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "")
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -124,8 +136,20 @@ if "session_id" in params:
     if ok:
         st.session_state["is_pro"]     = True
         st.session_state["user_email"] = email or ""
+        # Persist email in URL so Pro status survives page refreshes
         st.query_params.clear()
+        if email:
+            st.query_params["email"] = email
         st.success("Welcome to StockWizard Pro!")
+
+# ── Re-verify Pro status on page refresh via saved email ──────────────────────
+elif not st.session_state.get("is_pro"):
+    saved_email = params.get("email", "")
+    if saved_email and not st.session_state.get("_sub_checked"):
+        st.session_state["_sub_checked"] = True
+        if check_subscription(saved_email):
+            st.session_state["is_pro"]     = True
+            st.session_state["user_email"] = saved_email
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -225,7 +249,7 @@ if st.session_state["show_payment"] and not st.session_state["is_pro"]:
         if st.button("Continue to Payment →", type="primary"):
             if email_for_payment and "@" in email_for_payment:
                 base_url = "https://stockwizard-production.up.railway.app"
-                session  = create_checkout_session(base_url, base_url)
+                session  = create_checkout_session(base_url, base_url, email=email_for_payment)
                 if session:
                     st.markdown(f"""
                     <meta http-equiv="refresh" content="0; url={session.url}">
@@ -498,9 +522,8 @@ with tab1:
             else:
                 st.warning("No intraday data available. Market may be closed — showing previous session.")
 
-            st.markdown("""
-            <script>setTimeout(function(){window.location.reload();}, 30000);</script>
-            """, unsafe_allow_html=True)
+            if _HAS_AUTOREFRESH:
+                st_autorefresh(interval=30_000, key="day_trader_refresh")
 
         elif mode == "Day Trader Mode" and not st.session_state["is_pro"]:
             st.markdown("""

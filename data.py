@@ -152,13 +152,13 @@ def fetch_company_details(ticker, api_key, log=print):
 def fetch_financials(ticker, api_key, log=print):
     log(f"Fetching financials for {ticker}...")
     results = {}
-    for statement in ["income_statement", "balance_sheet", "cash_flow_statement"]:
-        try:
-            data = _get("/vX/reference/financials", api_key, params={
-                "ticker": ticker, "timeframe": "annual", "limit": 4,
-                "include_sources": "false"
-            })
-            if data and data.get("results"):
+    try:
+        data = _get("/vX/reference/financials", api_key, params={
+            "ticker": ticker, "timeframe": "annual", "limit": 4,
+            "include_sources": "false"
+        })
+        if data and data.get("results"):
+            for statement in ["income_statement", "balance_sheet", "cash_flow_statement"]:
                 rows = []
                 for r in data["results"]:
                     period_end = r.get("end_date", "")
@@ -170,10 +170,8 @@ def fetch_financials(ticker, api_key, log=print):
                 if rows:
                     results[statement] = pd.DataFrame(rows)
                     log(f"   {statement}: {len(rows)} periods")
-            break
-        except Exception as e:
-            log(f"   Financials skipped: {e}")
-            break
+    except Exception as e:
+        log(f"   Financials skipped: {e}")
     return results
 
 

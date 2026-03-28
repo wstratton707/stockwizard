@@ -1,22 +1,31 @@
+import os
 import stripe
 import streamlit as st
 
-STRIPE_SECRET_KEY      = "sk_test_51TFWQpDP0AV15fG18PdeTXhcWLPwS3CUwk2q2A6I8QN7HL5FRDBR8gKAs82FefBa4ybIIlIEAZDOu1J82RlhPe2000OWmqVPyn"
-STRIPE_PUBLISHABLE_KEY = "pk_test_51TFWQpDP0AV15fG1lpwNLJQSnyc96kgRqQrOlNF4bwnYMxkiIActNwmLj2aASxc0PoH3OEd3PFz9QPR8touTmEtm00jt68GGjl"
-STRIPE_PRICE_ID        = "price_1TFWfuDP0AV15fG1lAa3N6AR"
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_PRICE_ID   = os.environ.get("STRIPE_PRICE_ID", "")
 
 stripe.api_key = STRIPE_SECRET_KEY
 
 
-def create_checkout_session(success_url, cancel_url):
+def create_checkout_session(success_url, cancel_url, email=None):
     try:
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
-            mode="subscription",
-            success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=cancel_url,
-        )
+        kwargs = {
+            "payment_method_types": ["card"],
+            "line_items": [{"price": STRIPE_PRICE_ID, "quantity": 1}],
+            "mode": "subscription",
+            "success_url": success_url + "?session_id={CHECKOUT_SESSION_ID}",
+            "cancel_url": cancel_url,
+        }
+        if email:
+            kwargs["customer_email"] = email
+        session = stripe.checkout.Session.create(**kwargs)
         return session
     except Exception as e:
         st.error(f"Payment error: {e}")

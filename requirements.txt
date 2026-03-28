@@ -8,3 +8,5 @@ matplotlib>=3.7.0
 scipy>=1.11.0
 plotly>=5.18.0
 stripe>=7.0.0
+python-dotenv>=1.0.0
+streamlit-autorefresh>=1.0.1
