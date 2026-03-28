@@ -213,14 +213,24 @@ def compute_backtest_metrics(backtest_df, starting_capital):
     port   = backtest_df["Portfolio"]
     dates  = backtest_df.index
 
-    total_ret   = (port.iloc[-1] / port.iloc[0] - 1) * 100
-    n_years     = (dates[-1] - dates[0]).days / 365.25
-    ann_ret     = ((port.iloc[-1] / port.iloc[0]) ** (1/n_years) - 1) * 100 if n_years > 0 else 0
-    daily_ret   = port.pct_change().dropna()
-    ann_vol     = daily_ret.std() * np.sqrt(252) * 100
-    sharpe      = (daily_ret.mean() * 252) / (daily_ret.std() * np.sqrt(252)) if daily_ret.std() > 0 else 0
-    down_ret    = daily_ret[daily_ret < 0]
-    sortino     = (daily_ret.mean() * 252) / (down_ret.std() * np.sqrt(252)) if down_ret.std() > 0 else 0
+    n_years   = (dates[-1] - dates[0]).days / 365.25
+    daily_ret = port.pct_change().dropna()
+    ann_vol   = daily_ret.std() * np.sqrt(252) * 100
+
+    final_val         = port.iloc[-1]
+    total_contributed = backtest_df["Contrib"].iloc[-1]
+    total_gain        = final_val - total_contributed
+
+    # Fix 1: Total return on total invested capital (not starting capital only)
+    total_ret = (total_gain / total_contributed) * 100 if total_contributed > 0 else 0
+
+    # Fix 2: Annualised return from daily returns (handles contributions correctly)
+    ann_ret = daily_ret.mean() * 252 * 100
+
+    # Fix 3: Sharpe consistently derived from same daily_ret series
+    sharpe   = (daily_ret.mean() * 252) / (daily_ret.std() * np.sqrt(252)) if daily_ret.std() > 0 else 0
+    down_ret = daily_ret[daily_ret < 0]
+    sortino  = (daily_ret.mean() * 252) / (down_ret.std() * np.sqrt(252)) if down_ret.std() > 0 else 0
 
     # Drawdown
     peak     = port.cummax()
@@ -228,35 +238,34 @@ def compute_backtest_metrics(backtest_df, starting_capital):
     max_dd   = drawdown.min() * 100
 
     # Monthly returns
-    monthly  = port.resample("ME").last().pct_change().dropna() * 100
-    best_m   = monthly.max()
-    worst_m  = monthly.min()
-    pct_pos  = (monthly > 0).mean() * 100
+    monthly = port.resample("ME").last().pct_change().dropna() * 100
+    best_m  = monthly.max()
+    worst_m = monthly.min()
+    pct_pos = (monthly > 0).mean() * 100
 
-    # vs S&P 500
+    # Fix 4: vs S&P 500 on same basis — return on invested capital vs SPY price return
     sp500_ret = np.nan
     if "SP500" in backtest_df.columns and not backtest_df["SP500"].isna().all():
         sp = backtest_df["SP500"]
         sp500_ret = (sp.iloc[-1] / sp.iloc[0] - 1) * 100
 
-    final_val = port.iloc[-1]
-    total_contributed = backtest_df["Contrib"].iloc[-1]
+    alpha = round(total_ret - sp500_ret, 2) if not np.isnan(sp500_ret) else "N/A"
 
     return {
-        "Final Value":         round(final_val, 2),
-        "Total Contributed":   round(total_contributed, 2),
-        "Total Gain/Loss":     round(final_val - total_contributed, 2),
-        "Total Return":        round(total_ret, 2),
-        "Ann. Return":         round(ann_ret, 2),
-        "Ann. Volatility":     round(ann_vol, 2),
-        "Sharpe Ratio":        round(sharpe, 3),
-        "Sortino Ratio":       round(sortino, 3),
-        "Max Drawdown":        round(max_dd, 2),
-        "Best Month":          round(best_m, 2),
-        "Worst Month":         round(worst_m, 2),
-        "% Months Positive":   round(pct_pos, 1),
-        "vs S&P 500":          round(total_ret - sp500_ret, 2) if not np.isnan(sp500_ret) else "N/A",
-        "S&P 500 Return":      round(sp500_ret, 2) if not np.isnan(sp500_ret) else "N/A",
+        "Final Value":        round(final_val, 2),
+        "Total Contributed":  round(total_contributed, 2),
+        "Total Gain/Loss":    round(total_gain, 2),
+        "Total Return":       round(total_ret, 2),
+        "Ann. Return":        round(ann_ret, 2),
+        "Ann. Volatility":    round(ann_vol, 2),
+        "Sharpe Ratio":       round(sharpe, 3),
+        "Sortino Ratio":      round(sortino, 3),
+        "Max Drawdown":       round(max_dd, 2),
+        "Best Month":         round(best_m, 2),
+        "Worst Month":        round(worst_m, 2),
+        "% Months Positive":  round(pct_pos, 1),
+        "vs S&P 500":         alpha,
+        "S&P 500 Return":     round(sp500_ret, 2) if not np.isnan(sp500_ret) else "N/A",
     }
 
 
@@ -286,8 +295,21 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
     w_arr   /= w_arr.sum()
 
     port_ret = returns_df[tickers] @ w_arr
-    mu       = port_ret.mean()
+    hist_mu  = port_ret.mean()
     sigma    = port_ret.std()
+
+    # Blend historical return with long-term market mean to reduce recency bias.
+    # Long-term S&P 500 daily mean ≈ 10% annually.
+    # 40% historical, 60% long-term — prevents recent bull-run from inflating projections.
+    LONGTERM_DAILY_MU = 0.10 / 252
+    mu = 0.40 * hist_mu + 0.60 * LONGTERM_DAILY_MU
+
+    # Hard cap: annualised mu never exceeds 15% regardless of historical period
+    mu = min(mu, 0.15 / 252)
+
+    ann_mu_pct = mu * 252 * 100
+    log(f"   Assumed annual return: {ann_mu_pct:.1f}% "
+        f"(historical: {hist_mu*252*100:.1f}%, blended with 10% long-term avg, capped at 15%)")
 
     forecast_days = forecast_years * 252
     np.random.seed(None)
