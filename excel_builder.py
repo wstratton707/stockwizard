@@ -264,8 +264,59 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
     return ws
 
 
+# ── Annual summary sheet ──────────────────────────────────────────────────────
+def _build_annual_summary(wb, df):
+    """Year-by-year performance table — always included, especially useful for long ranges."""
+    ws_a = wb.create_sheet("Annual_Summary")
+    ws_a.sheet_view.showGridLines = False
+
+    ws_a.merge_cells("A1:H1")
+    ws_a["A1"] = "Annual Performance Summary"
+    ws_a["A1"].font      = Font(size=14, bold=True, color=DARK_BLUE, name="Arial")
+    ws_a["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws_a.row_dimensions[1].height = 26
+
+    headers = ["Year","Open","Close","Annual Return","High","Low","Max Drawdown","Avg Daily Vol"]
+    for ci, h in enumerate(headers, 1):
+        _hdr_cell(ws_a.cell(row=2, column=ci, value=h), bg=MID_BLUE)
+
+    tmp = df[["Date","Open","Close","Daily_Return","High","Low","Volume","Drawdown_60d"]].copy()
+    tmp["Year"] = pd.to_datetime(tmp["Date"]).dt.year
+
+    for ri, (year, grp) in enumerate(tmp.groupby("Year"), 3):
+        yr_open     = grp["Open"].iloc[0]
+        yr_close    = grp["Close"].iloc[-1]
+        yr_return   = (yr_close / yr_open - 1)
+        yr_high     = grp["High"].max()
+        yr_low      = grp["Low"].min()
+        yr_drawdown = grp["Drawdown_60d"].min()
+        yr_vol      = grp["Volume"].mean()
+
+        row_vals = [year, yr_open, yr_close, yr_return, yr_high, yr_low, yr_drawdown, yr_vol]
+        bg = GREY_ROW if ri % 2 == 0 else WHITE
+        for ci, val in enumerate(row_vals, 1):
+            c = ws_a.cell(row=ri, column=ci, value=val)
+            c.font   = Font(name="Arial", size=10)
+            c.border = _border()
+            c.fill   = PatternFill("solid", fgColor=bg)
+            if ci == 1:   c.number_format = "0"
+            elif ci in (2,3,5,6): c.number_format = '_($* #,##0.00_)'
+            elif ci in (4,7):
+                c.number_format = "0.00%"
+                if isinstance(val, float):
+                    good = val > 0 if ci == 4 else val > -0.15
+                    c.fill = PatternFill("solid", fgColor=GREEN_OK if good else "FFAAAA")
+                    c.font = Font(name="Arial", size=10, bold=True)
+            elif ci == 8: c.number_format = "#,##0"
+
+    auto_col_width(ws_a)
+    ws_a.freeze_panes = "A3"
+    ws_a.auto_filter.ref = f"A2:{get_column_letter(len(headers))}2"
+    return ws_a
+
+
 # ── Price & Indicators sheet ──────────────────────────────────────────────────
-def _build_price_sheet(wb, df):
+def _build_price_sheet(wb, df, bar_size="day"):
     price_cols = ["Date","Open","High","Low","Close","Volume",
                   "Daily_Return","MA20","MA50","MA200",
                   "Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
@@ -279,23 +330,49 @@ def _build_price_sheet(wb, df):
         price_cols += ["Rolling_Beta_60d"]
     price_cols += [c for c in df.columns if c.endswith("_Cumulative")]
 
-    export_df = df[[c for c in price_cols if c in df.columns]].copy()
+    full_df   = df[[c for c in price_cols if c in df.columns]].copy()
+    # Cap raw data sheet at 1,300 rows (~5yr daily). All calculations use the full dataset.
+    ROW_CAP   = 1300
+    truncated = len(full_df) > ROW_CAP
+    export_df = full_df.tail(ROW_CAP).copy() if truncated else full_df
+
     ws_p = wb.create_sheet("Price_Indicators")
+
+    # Info banner when data is capped
+    if truncated:
+        ws_p.insert_rows(1)
+        note = (f"Note: Showing most recent {ROW_CAP} bars ({bar_size} data). "
+                f"Full {len(full_df)}-bar history used for all calculations & charts. "
+                f"See Annual_Summary sheet for full year-by-year breakdown.")
+        ws_p.merge_cells(f"A1:{get_column_letter(len(export_df.columns))}1")
+        nc = ws_p["A1"]
+        nc.value     = note
+        nc.font      = Font(name="Arial", size=9, italic=True, color="1F4E79")
+        nc.fill      = PatternFill("solid", fgColor="D6E4F0")
+        nc.alignment = Alignment(wrap_text=True, vertical="center")
+        ws_p.row_dimensions[1].height = 30
+
     for r in dataframe_to_rows(export_df, index=False, header=True):
         ws_p.append(r)
-    style_header_row(ws_p)
-    auto_col_width(ws_p)
-    ws_p.freeze_panes = "A2"
-    ws_p.auto_filter.ref = f"A1:{get_column_letter(ws_p.max_column)}1"
 
-    col_map    = {c[0].column_letter: c[0].value for c in ws_p.iter_cols(1, ws_p.max_column, 1, 1)}
+    # Header row is row 2 if banner exists, else row 1
+    hdr_row = 2 if truncated else 1
+    data_start = hdr_row + 1
+    for cell in ws_p[hdr_row]:
+        _hdr_cell(cell)
+    auto_col_width(ws_p)
+    ws_p.freeze_panes = f"A{data_start}"
+    ws_p.auto_filter.ref = f"A{hdr_row}:{get_column_letter(ws_p.max_column)}{hdr_row}"
+
+    col_map    = {c[0].column_letter: c[0].value
+                  for c in ws_p.iter_cols(1, ws_p.max_column, hdr_row, hdr_row)}
     price_hdrs = {"Open","High","Low","Close","MA20","MA50","MA200",
                   "BB_Upper","BB_Middle","BB_Lower","52W_High","52W_Low"}
     pct_hdrs   = {"Daily_Return","Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
                   "Volatility_20d","Drawdown_20d","Drawdown_60d","BB_Pct",
                   "Pct_From_52W_High","Pct_From_52W_Low"}
 
-    for row in ws_p.iter_rows(min_row=2):
+    for row in ws_p.iter_rows(min_row=data_start):
         for cell in row:
             h = col_map.get(cell.column_letter)
             if   h == "Date":         cell.number_format = "yyyy-mm-dd"
@@ -306,13 +383,13 @@ def _build_price_sheet(wb, df):
     dr_col = next((l for l, h in col_map.items() if h == "Daily_Return"), None)
     if dr_col:
         ws_p.conditional_formatting.add(
-            f"{dr_col}2:{dr_col}{ws_p.max_row}",
+            f"{dr_col}{data_start}:{dr_col}{ws_p.max_row}",
             ColorScaleRule(start_type="num", start_value=-0.05, start_color="FFAAAA",
                            mid_type="num",   mid_value=0,        mid_color="FFFFFF",
                            end_type="num",   end_value=0.05,     end_color="AAFFAA"))
     rsi_col = next((l for l, h in col_map.items() if h == "RSI14"), None)
     if rsi_col:
-        rng = f"{rsi_col}2:{rsi_col}{ws_p.max_row}"
+        rng = f"{rsi_col}{data_start}:{rsi_col}{ws_p.max_row}"
         ws_p.conditional_formatting.add(rng, CellIsRule(operator="greaterThan", formula=["70"],
             fill=PatternFill("solid", fgColor="FF9999")))
         ws_p.conditional_formatting.add(rng, CellIsRule(operator="lessThan", formula=["30"],
@@ -509,14 +586,15 @@ def build_excel(ticker, df, period,
                 news_list=None, peer_df=None,
                 corr_matrix=None,
                 resistance_levels=None, support_levels=None,
-                summary_text=""):
+                summary_text="", bar_size="day"):
 
     wb = Workbook()
     wb.remove(wb.active)
 
     ws_dash = _build_dashboard(wb, ticker, df, company_details, mc_summary,
                                 resistance_levels, support_levels, summary_text)
-    ws_p, export_df = _build_price_sheet(wb, df)
+    ws_p, export_df = _build_price_sheet(wb, df, bar_size=bar_size)
+    _build_annual_summary(wb, df)
     _build_news_sheet(wb, news_list)
     _build_peer_sheet(wb, peer_df)
     ws_s       = _build_sector_sheet(wb, ticker, df, sector_df)
@@ -528,7 +606,7 @@ def build_excel(ticker, df, period,
     sheets_so_far = [s for s in wb.sheetnames]
     _build_cover(wb, ticker, period, sheets_so_far)
 
-    desired = ["Cover","Dashboard","Price_Indicators","News_Headlines",
+    desired = ["Cover","Dashboard","Annual_Summary","Price_Indicators","News_Headlines",
                "Peer_Comparison","Sector_Comparison","Correlation_Matrix",
                "Monte_Carlo","Charts"]
     existing = wb.sheetnames

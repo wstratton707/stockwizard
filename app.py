@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 
 try:
@@ -711,6 +711,7 @@ with tab1:
                     corr_matrix=corr_matrix,
                     resistance_levels=resistance, support_levels=support,
                     summary_text=summary_text,
+                    bar_size=bar_size,
                 )
 
                 progress.progress(100, text="Complete!")
