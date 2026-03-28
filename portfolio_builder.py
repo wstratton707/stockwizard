@@ -6,7 +6,7 @@ import plotly.express as px
 from datetime import datetime
 
 from portfolio_data import (
-    fetch_portfolio_prices, build_candidate_universe,
+    fetch_portfolio_prices, build_candidate_universe, select_by_sharpe,
     get_ticker_info, SECTOR_UNIVERSE, SECTOR_ETFS,
     BOND_UNIVERSE, BOND_ETFS,
 )
@@ -56,12 +56,26 @@ def render_portfolio_builder(api_key, is_pro=False):
     """Main entry point — renders the full portfolio builder UI."""
 
     if not is_pro:
-        st.info(
-            "🎉 **Free Trial** — You're using Portfolio Builder for free. "
-            "Upgrade to Pro for unlimited access.",
-            icon="ℹ️"
-        )
-        # No return — free users continue into the full builder below
+        st.markdown("""
+        <div style="background:#0f172a;border:1px solid #334155;border-radius:16px;
+                    padding:2.5rem;text-align:center;margin:1rem 0">
+            <div style="font-size:1.75rem;margin-bottom:0.75rem">📊</div>
+            <div style="color:#fff;font-weight:600;font-size:1.2rem;margin-bottom:0.5rem">
+                Portfolio Builder is a Pro Feature
+            </div>
+            <div style="color:#94a3b8;font-size:0.9rem;margin-bottom:1.5rem;
+                        max-width:480px;margin-left:auto;margin-right:auto">
+                Build custom portfolios with backtesting, efficient frontier optimisation,
+                Monte Carlo simulation, Sharpe-ranked stock selection, and full Excel report export.
+            </div>
+            <div style="color:#38bdf8;font-size:1.1rem;font-weight:600">$9.99 / month</div>
+            <div style="color:#64748b;font-size:0.8rem;margin-top:4px">Cancel anytime</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Upgrade to Pro", type="primary", key="upgrade_portfolio"):
+            st.session_state["show_payment"] = True
+            st.rerun()
+        return
     
     # if not is_pro:
     #     st.markdown("""
@@ -265,13 +279,21 @@ def render_portfolio_builder(api_key, is_pro=False):
                 log_area.code("\n".join(log_lines[-10:]), language=None)
 
             try:
-                # Build universe
-                candidates = build_candidate_universe(prefs, api_key, log=log)
+                # Build universe (top 3 per sector for Sharpe ranking)
+                candidates, sector_map = build_candidate_universe(prefs, api_key, log=log)
                 progress.progress(15, text="Fetching price history...")
 
-                # Fetch prices (3 years)
+                # Fetch prices in parallel (3 years)
                 price_dict, close_df, returns_df, failed = fetch_portfolio_prices(
                     candidates, period_years=3, api_key=api_key, log=log)
+                progress.progress(40, text="Ranking stocks by Sharpe ratio...")
+
+                # Keep best stock per sector by Sharpe — trim to 14 for optimizer
+                best_tickers = select_by_sharpe(returns_df, sector_map, max_total=14)
+                log(f"   Selected {len(best_tickers)} stocks by Sharpe: {', '.join(best_tickers)}")
+                returns_df = returns_df[best_tickers]
+                close_df   = close_df[[t for t in best_tickers if t in close_df.columns]]
+                price_dict = {t: v for t, v in price_dict.items() if t in best_tickers}
                 progress.progress(50, text="Computing stock metrics...")
 
                 # Metrics
@@ -599,6 +621,36 @@ def render_portfolio_builder(api_key, is_pro=False):
             )
             fig_hmap.update_traces(textfont_size=9)
             st.plotly_chart(fig_hmap, use_container_width=True)
+
+        # Rebalancing recommendations
+        _section_header("Rebalancing Recommendations")
+        weights = st.session_state.get("port_selected_weights", {})
+        opt     = st.session_state.get("port_optimised", {})
+        close_df_rb = opt.get("close_df")
+        if weights and close_df_rb is not None:
+            latest_prices = {t: float(close_df_rb[t].iloc[-1])
+                             for t in weights if t in close_df_rb.columns}
+            # Simulate equal share count as a proxy for current holdings
+            total_val = sum(weights[t] * 10000 for t in weights)
+            current_holdings = {t: (weights[t] * 10000) / latest_prices[t]
+                                for t in weights if t in latest_prices and latest_prices[t] > 0}
+            recs = get_rebalancing_recommendations(current_holdings, weights, latest_prices)
+            if recs:
+                for r in recs:
+                    action_color = GREEN if r["Action"] == "BUY" else RED
+                    st.markdown(f"""
+                    <div style="display:flex;justify-content:space-between;align-items:center;
+                                padding:0.6rem 1rem;border-radius:8px;margin-bottom:0.4rem;
+                                background:#f8fafc;border:1px solid #e2e8f0">
+                        <span style="font-weight:600;color:#0f172a;font-size:0.9rem">{r['Ticker']}</span>
+                        <span style="color:{action_color};font-weight:700;font-size:0.85rem">{r['Action']}</span>
+                        <span style="color:#64748b;font-size:0.82rem">{r['Off Target']} off target</span>
+                        <span style="font-family:'DM Mono',monospace;font-size:0.82rem;color:#0f172a">
+                            ${r['Difference']:,.0f}
+                        </span>
+                    </div>""", unsafe_allow_html=True)
+            else:
+                st.success("Portfolio is balanced — no rebalancing needed.")
 
         st.markdown("---")
         col1, col2 = st.columns(2)

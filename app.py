@@ -16,6 +16,7 @@ except ImportError:
 from data import (
     validate_ticker, fetch_stock_data, fetch_company_details,
     fetch_news, fetch_peer_comparison, fetch_sector_data, fetch_bond_data,
+    fetch_next_earnings,
 )
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -233,6 +234,14 @@ with st.sidebar:
     email_input = st.text_input("Get notified about new features", placeholder="your@email.com")
     if st.button("Join waitlist", use_container_width=True):
         if email_input and "@" in email_input:
+            import csv, os
+            csv_path = os.path.join(os.path.dirname(__file__), "waitlist.csv")
+            already_exists = os.path.exists(csv_path)
+            with open(csv_path, "a", newline="") as f:
+                writer = csv.writer(f)
+                if not already_exists:
+                    writer.writerow(["email", "timestamp"])
+                writer.writerow([email_input, datetime.now().isoformat()])
             st.success("Thanks! We'll be in touch.")
         else:
             st.error("Please enter a valid email.")
@@ -646,7 +655,8 @@ with tab1:
             st.markdown("---")
 
             st.markdown('<div class="section-header">Key Metrics</div>', unsafe_allow_html=True)
-            col1,col2,col3,col4,col5,col6 = st.columns(6)
+            earnings_date = fetch_next_earnings(ticker_input, POLYGON_API_KEY)
+            col1,col2,col3,col4,col5,col6,col7 = st.columns(7)
             vol_val = df["Volatility_20d"].iloc[-1]
             for col, label, value, cls in [
                 (col1,"Current Price",   f"${latest['Close']:,.2f}",                           "neutral"),
@@ -655,6 +665,7 @@ with tab1:
                 (col4,"52W Low",         f"${latest.get('52W_Low',0):,.2f}",                   "neutral"),
                 (col5,"Sharpe Ratio",    f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A",       pos_neg(sharpe) if pd.notna(sharpe) else "neutral"),
                 (col6,"Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A","neutral"),
+                (col7,"Last Earnings",   earnings_date if earnings_date else "N/A",             "neutral"),
             ]:
                 with col:
                     st.markdown(f"""

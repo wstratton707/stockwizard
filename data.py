@@ -298,3 +298,17 @@ def fetch_sector_data(ticker, period, api_key, sector, log=print):
     except Exception as e:
         log(f"   Sector ETF failed: {e}")
         return None
+
+
+def fetch_next_earnings(ticker, api_key):
+    """Returns the next earnings date string for a ticker, or None if unavailable."""
+    try:
+        data = _get("/vX/reference/financials", api_key, params={
+            "ticker": ticker, "timeframe": "quarterly", "limit": 1,
+            "include_sources": "false"
+        })
+        if data and data.get("results"):
+            return data["results"][0].get("end_date", None)
+    except Exception:
+        pass
+    return None

@@ -90,18 +90,24 @@ def render_pricing_section():
         """, unsafe_allow_html=True)
 
     with col2:
-        st.markdown("""
+        billing = st.toggle("Annual billing (save 34%)", key="annual_billing")
+        price_display = "$79/yr" if billing else "$9.99/mo"
+        savings_tag   = "BEST VALUE" if billing else "MOST POPULAR"
+
+        st.markdown(f"""
         <div style="background:#0f172a;border:2px solid #38bdf8;border-radius:16px;padding:2rem;position:relative">
             <div style="position:absolute;top:-14px;left:50%;transform:translateX(-50%);
                         background:#38bdf8;color:#0f172a;font-size:0.7rem;font-weight:700;
                         padding:4px 16px;border-radius:20px;white-space:nowrap">
-                MOST POPULAR
+                {savings_tag}
             </div>
             <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.5px;
                         text-transform:uppercase;color:#38bdf8;margin-bottom:0.75rem">Pro</div>
             <div style="font-family:'DM Mono',monospace;font-size:2.5rem;font-weight:500;
-                        color:#fff;margin-bottom:0.25rem">$9.99</div>
-            <div style="font-size:0.85rem;color:#64748b;margin-bottom:1.5rem">per month · cancel anytime</div>
+                        color:#fff;margin-bottom:0.25rem">{price_display}</div>
+            <div style="font-size:0.85rem;color:#64748b;margin-bottom:1.5rem">
+                {"Billed annually · cancel anytime" if billing else "per month · cancel anytime"}
+            </div>
             <div style="font-size:0.88rem;color:#94a3b8;line-height:2.2">
                 ✓ &nbsp;Everything in Free<br>
                 ✓ &nbsp;<span style="color:#38bdf8">Live intraday candlestick charts</span><br>
@@ -116,7 +122,7 @@ def render_pricing_section():
         </div>
         """, unsafe_allow_html=True)
         st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
-        if st.button("Upgrade to Pro — $9.99/month", type="primary",
-                     use_container_width=True, key="upgrade_pricing"):
+        btn_label = f"Upgrade to Pro — {price_display}"
+        if st.button(btn_label, type="primary", use_container_width=True, key="upgrade_pricing"):
             st.session_state["show_payment"] = True
             st.rerun()
