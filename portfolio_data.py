@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 POLYGON_BASE = "https://api.polygon.io"
 _PORT_CACHE  = {}
@@ -74,7 +75,7 @@ BOND_DURATION_MAP = {
 }
 
 
-def _fetch_ohlcv(ticker, start, end, api_key):
+def _fetch_ohlcv(ticker, start, end, api_key, log=print):
     cache_key = f"{ticker}_{start}_{end}"
     cached    = _PORT_CACHE.get(cache_key)
     if cached and (time.time() - cached["ts"]) < CACHE_TTL:
@@ -85,8 +86,8 @@ def _fetch_ohlcv(ticker, start, end, api_key):
             params={"adjusted":"true","sort":"asc","limit":50000,"apiKey":api_key},
             timeout=20)
         if r.status_code == 429:
-            # Rate limited — wait and retry once
-            time.sleep(12)
+            log(f"   ⏳ {ticker} rate limited, waiting 15s...")
+            time.sleep(15)
             r = requests.get(
                 f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
                 params={"adjusted":"true","sort":"asc","limit":50000,"apiKey":api_key},
@@ -103,8 +104,12 @@ def _fetch_ohlcv(ticker, start, end, api_key):
                 df = df.sort_values("Date").reset_index(drop=True)
                 _PORT_CACHE[cache_key] = {"ts":time.time(),"df":df}
                 return df
-    except Exception:
-        pass
+            else:
+                log(f"   ⚠ {ticker} HTTP 200 but empty results")
+        else:
+            log(f"   ⚠ {ticker} HTTP {r.status_code}: {r.text[:120]}")
+    except Exception as e:
+        log(f"   ⚠ {ticker} exception: {e}")
     return None
 
 
@@ -115,16 +120,21 @@ def fetch_portfolio_prices(tickers, period_years=3, api_key="", log=print):
     start_s = start.strftime("%Y-%m-%d")
 
     price_dict, failed = {}, []
-    for ticker in tickers:
-        df = _fetch_ohlcv(ticker, start_s, end_s, api_key)
-        if df is not None and len(df) > 60:
-            price_dict[ticker] = df
-            log(f"   ✓ {ticker} ({len(df)} days)")
-        else:
-            status = "no data" if df is None else f"only {len(df)} days"
-            log(f"   ⚠ {ticker} skipped — {status}")
-            failed.append(ticker)
-        time.sleep(0.5)  # Stay well under Polygon rate limits
+
+    def fetch_one(ticker):
+        return ticker, _fetch_ohlcv(ticker, start_s, end_s, api_key, log=log)
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fetch_one, t): t for t in tickers}
+        for future in as_completed(futures):
+            ticker, df = future.result()
+            if df is not None and len(df) > 60:
+                price_dict[ticker] = df
+                log(f"   ✓ {ticker} ({len(df)} days)")
+            else:
+                if df is not None:
+                    log(f"   ⚠ {ticker} skipped — only {len(df)} days")
+                failed.append(ticker)
 
     if not price_dict:
         if not api_key:
@@ -167,48 +177,91 @@ def get_ticker_info(ticker, api_key):
 
 
 def build_candidate_universe(preferences, api_key, log=print):
-    candidates       = set()
+    """Returns (tickers, sector_map) where sector_map = {ticker: sector}.
+    Fetches top 3 per sector so we can rank by Sharpe after price data arrives."""
+    risk_tolerance   = preferences.get("risk_tolerance", 5)
     included_sectors = preferences.get("include_sectors", list(SECTOR_UNIVERSE.keys()))
     excluded_sectors = preferences.get("exclude_sectors", [])
     user_tickers     = [t.upper().strip() for t in preferences.get("user_tickers", [])]
-    risk_tolerance   = preferences.get("risk_tolerance", 5)
     included_bonds   = preferences.get("include_bond_categories", [])
+    excluded_tickers = set(t.upper() for t in preferences.get("exclude_tickers", []))
 
+    GROWTH_SECTORS    = {"Technology", "Consumer Discretionary", "Communication Services", "Financials"}
+    DEFENSIVE_SECTORS = {"Consumer Staples", "Utilities", "Health Care", "Real Estate"}
+    ALWAYS_KEEP       = {"SPY", "QQQ", "GLD", "TLT"}
+
+    candidates  = []   # ordered
+    sector_map  = {}   # ticker → sector label
+
+    def add(ticker, sector="Market"):
+        if ticker not in excluded_tickers and ticker not in candidates:
+            candidates.append(ticker)
+            sector_map[ticker] = sector
+
+    # 1. User picks always first
     for t in user_tickers:
-        candidates.add(t)
+        add(t, "User")
 
+    # 2. SPY always (backtest benchmark)
+    add("SPY", "Market")
+    if risk_tolerance >= 4:
+        add("QQQ", "Market")
+    if risk_tolerance <= 3:
+        add("GLD", "Commodities")
+        add("TLT", "Government")
+
+    # 3. Top 3 candidates per sector — Sharpe ranking happens after price fetch
     for sector in included_sectors:
         if sector in excluded_sectors:
             continue
-        if sector in SECTOR_ETFS:
-            candidates.add(SECTOR_ETFS[sector])
         stocks = SECTOR_UNIVERSE.get(sector, [])
-        n = 2 if risk_tolerance <= 3 else (4 if risk_tolerance <= 6 else 6)
+        if not stocks:
+            continue
+        if risk_tolerance <= 3 and sector not in DEFENSIVE_SECTORS:
+            continue  # Conservative: skip growth sectors entirely
+        n = 3  # always fetch top 3 so we can rank by Sharpe
         for s in stocks[:n]:
-            candidates.add(s)
+            add(s, sector)
 
-    # Add bond ETFs based on user-selected bond categories
-    for category in included_bonds:
-        if category in BOND_ETFS:
-            candidates.add(BOND_ETFS[category])
-        bonds = BOND_UNIVERSE.get(category, [])
-        # Conservative: more bonds; aggressive: just the category ETF
-        n_bonds = 3 if risk_tolerance <= 3 else (2 if risk_tolerance <= 6 else 1)
-        for b in bonds[:n_bonds]:
-            candidates.add(b)
+    # 4. Bond ETFs (representative only — 1 per category)
+    bond_slots = 3 if risk_tolerance <= 3 else (2 if risk_tolerance <= 6 else 0)
+    for category in included_bonds[:bond_slots]:
+        etf = BOND_ETFS.get(category)
+        if etf:
+            add(etf, f"Bond-{category}")
 
-    # SPY always included so the backtest benchmark is available
-    candidates.add("SPY")
-    if risk_tolerance <= 3:
-        candidates.update(["GLD","TLT","VNQ"])
-    elif risk_tolerance <= 6:
-        candidates.add("QQQ")
-    else:
-        candidates.add("QQQ")
+    # Cap at 24 for fetching — Sharpe filter will trim to 15 after prices arrive
+    result = candidates[:24]
+    log(f"   Fetching {len(result)} candidates for Sharpe ranking: {', '.join(result)}")
+    return result, sector_map
 
-    excluded_tickers = [t.upper() for t in preferences.get("exclude_tickers", [])]
-    candidates -= set(excluded_tickers)
 
-    result = list(candidates)[:30]
-    log(f"   Built universe of {len(result)} candidates")
-    return result
+def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=14):
+    """Rank candidates by Sharpe ratio within each sector, keep the best one.
+    Tickers in always_keep (SPY, QQQ, etc.) are always included regardless of Sharpe."""
+    if always_keep is None:
+        always_keep = {"SPY", "QQQ", "GLD", "TLT"}
+
+    def sharpe(ticker):
+        r = returns_df[ticker].dropna()
+        ann_ret = r.mean() * 252
+        ann_std = r.std() * np.sqrt(252)
+        return ann_ret / ann_std if ann_std > 0 else -999.0
+
+    # Group by sector
+    from collections import defaultdict
+    sector_groups = defaultdict(list)
+    pinned = []
+
+    for ticker in returns_df.columns:
+        if ticker in always_keep:
+            pinned.append(ticker)
+        else:
+            sector_groups[sector_map.get(ticker, "Unknown")].append(ticker)
+
+    selected = list(pinned)
+    for sector, tickers in sector_groups.items():
+        best = max(tickers, key=sharpe)
+        selected.append(best)
+
+    return selected[:max_total]
