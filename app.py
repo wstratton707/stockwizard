@@ -45,6 +45,7 @@ st.set_page_config(
 
 POLYGON_API_KEY  = os.environ.get("POLYGON_API_KEY", "")
 FMP_API_KEY      = os.environ.get("FMP_API_KEY", "")
+AV_API_KEY       = os.environ.get("AV_API_KEY", "")
 SHOW_PRICING     = False  # Set True when ready to accept payments
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -655,12 +656,12 @@ with tab1:
                 if is_crypto:
                     df = fetch_crypto_data(ticker_input, api_key=POLYGON_API_KEY, log=log,
                                            start_override=date_start, end_override=date_end,
-                                           bar_size=bar_size)
+                                           bar_size=bar_size, av_api_key=AV_API_KEY)
                 else:
                     df = fetch_stock_data(ticker_input, benchmark_tickers=benchmarks,
                                           api_key=POLYGON_API_KEY, log=log,
                                           start_override=date_start, end_override=date_end,
-                                          bar_size=bar_size)
+                                          bar_size=bar_size, av_api_key=AV_API_KEY)
 
                 progress.progress(25, text="Fetching details...")
                 if is_crypto:
@@ -687,7 +688,9 @@ with tab1:
                 sector_df = None
                 if do_sector and not is_crypto:
                     progress.progress(50, text="Fetching sector ETF...")
-                    sector_df = fetch_sector_data(ticker_input, period, POLYGON_API_KEY, sector, log=log)
+                    sector_df = fetch_sector_data(ticker_input, POLYGON_API_KEY, sector, log=log,
+                                                  start_override=date_start, end_override=date_end,
+                                                  bar_size=bar_size, av_api_key=AV_API_KEY)
 
                 corr_matrix = None
                 if do_corr:
@@ -1104,7 +1107,7 @@ with tab3:
             try:
                 bdf = fetch_bond_data(bond_ticker, period=bond_period,
                                       benchmark_tickers=benchmarks or None,
-                                      api_key=POLYGON_API_KEY)
+                                      api_key=POLYGON_API_KEY, av_api_key=AV_API_KEY)
             except Exception as e:
                 st.error(f"❌ {e}")
                 st.stop()

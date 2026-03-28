@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import time
 
 POLYGON_BASE  = "https://api.polygon.io"
+AV_BASE       = "https://www.alphavantage.co/query"
 _API_CACHE    = {}
 _API_CACHE_TTL = 300  # seconds — reuse responses for 5 minutes
 
@@ -59,8 +60,56 @@ def _period_to_dates(period):
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
+def _fetch_ohlcv_av(ticker, start, end, av_api_key, bar_size="day", log=print):
+    """Fetch OHLCV from Alpha Vantage. Returns DataFrame or None on any failure."""
+    if not av_api_key:
+        return None
+    _AV_FUNC = {
+        "day":   ("TIME_SERIES_DAILY_ADJUSTED",   "Time Series (Daily)"),
+        "week":  ("TIME_SERIES_WEEKLY_ADJUSTED",  "Weekly Adjusted Time Series"),
+        "month": ("TIME_SERIES_MONTHLY_ADJUSTED", "Monthly Adjusted Time Series"),
+    }
+    func, series_key = _AV_FUNC.get(bar_size, _AV_FUNC["day"])
+    try:
+        r = requests.get(AV_BASE, params={
+            "function": func, "symbol": ticker,
+            "outputsize": "full", "apikey": av_api_key,
+        }, timeout=30)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if "Note" in data or "Information" in data:
+            log("   Alpha Vantage rate limit reached — no fallback available.")
+            return None
+        series = data.get(series_key, {})
+        if not series:
+            return None
+        rows = []
+        for date_str, vals in series.items():
+            rows.append({
+                "Date":   date_str,
+                "Open":   float(vals.get("1. open", 0)),
+                "High":   float(vals.get("2. high", 0)),
+                "Low":    float(vals.get("3. low", 0)),
+                "Close":  float(vals.get("5. adjusted close", vals.get("4. close", 0))),
+                "Volume": float(vals.get("6. volume", vals.get("5. volume", 0))),
+            })
+        df = pd.DataFrame(rows)
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.sort_values("Date").reset_index(drop=True)
+        df = df[(df["Date"] >= pd.to_datetime(start)) & (df["Date"] <= pd.to_datetime(end))]
+        if df.empty:
+            return None
+        log(f"   Alpha Vantage fallback: {len(df)} bars for {ticker}")
+        return df[["Date", "Open", "High", "Low", "Close", "Volume"]].reset_index(drop=True)
+    except Exception as e:
+        log(f"   Alpha Vantage fallback failed: {e}")
+        return None
+
+
 def fetch_ohlcv(ticker, period, api_key, log=print,
-                start_override=None, end_override=None, bar_size="day"):
+                start_override=None, end_override=None, bar_size="day",
+                av_api_key=None):
     # Safety guards
     if bar_size not in ("day", "week", "month"):
         bar_size = "day"
@@ -79,13 +128,25 @@ def fetch_ohlcv(ticker, period, api_key, log=print,
     else:
         start, end = _period_to_dates(period)
     log(f"Downloading data for {ticker} ({start} → {end}, {bar_size})...")
-    data = _get(
-        f"/v2/aggs/ticker/{ticker}/range/1/{bar_size}/{start}/{end}",
-        api_key,
-        params={"adjusted": "true", "sort": "asc", "limit": 50000},
-        raise_on_error=True,
-    )
+    try:
+        data = _get(
+            f"/v2/aggs/ticker/{ticker}/range/1/{bar_size}/{start}/{end}",
+            api_key,
+            params={"adjusted": "true", "sort": "asc", "limit": 50000},
+            raise_on_error=True,
+        )
+    except ValueError as e:
+        if "rate limit" in str(e).lower():
+            log(f"   Polygon rate limit — trying Alpha Vantage fallback...")
+            df_av = _fetch_ohlcv_av(ticker, start, end, av_api_key, bar_size=bar_size, log=log)
+            if df_av is not None:
+                return df_av
+        raise
     if not data or not data.get("results"):
+        log(f"   Polygon returned no data — trying Alpha Vantage fallback...")
+        df_av = _fetch_ohlcv_av(ticker, start, end, av_api_key, bar_size=bar_size, log=log)
+        if df_av is not None:
+            return df_av
         raise ValueError(f"No price data for '{ticker}'. Check the symbol.")
 
     rows = data["results"]
@@ -100,9 +161,10 @@ def fetch_ohlcv(ticker, period, api_key, log=print,
 
 
 def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print,
-                     start_override=None, end_override=None, bar_size="day"):
+                     start_override=None, end_override=None, bar_size="day", av_api_key=None):
     df = fetch_ohlcv(ticker, period, api_key, log=log,
-                     start_override=start_override, end_override=end_override, bar_size=bar_size)
+                     start_override=start_override, end_override=end_override, bar_size=bar_size,
+                     av_api_key=av_api_key)
 
     df["Daily_Return"]     = df["Close"].pct_change()
     df["Cumulative_Index"] = (1 + df["Daily_Return"].fillna(0)).cumprod() * 100
@@ -144,7 +206,7 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
             try:
                 bdf = fetch_ohlcv(bench, period, api_key, log=lambda m: None,
                                   start_override=start_override, end_override=end_override,
-                                  bar_size=bar_size)
+                                  bar_size=bar_size, av_api_key=av_api_key)
                 bdf[f"{bench}_Return"]     = bdf["Close"].pct_change()
                 bdf[f"{bench}_Cumulative"] = (1 + bdf[f"{bench}_Return"].fillna(0)).cumprod() * 100
                 df = pd.merge(df, bdf[["Date", f"{bench}_Return", f"{bench}_Cumulative"]],
@@ -262,14 +324,15 @@ def fetch_peer_comparison(ticker, peer_tickers, api_key, log=print):
 
 
 def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print,
-                    start_override=None, end_override=None, bar_size="day"):
+                    start_override=None, end_override=None, bar_size="day", av_api_key=None):
     """Fetch and enrich bond ETF data.  Mirrors fetch_stock_data but uses
     bond-relevant metrics (duration label, yield proxy, spread proxy) instead
     of equity-focused indicators like MACD / RSI."""
     from portfolio_data import BOND_DURATION_MAP
 
     df = fetch_ohlcv(ticker, period, api_key, log=log,
-                     start_override=start_override, end_override=end_override, bar_size=bar_size)
+                     start_override=start_override, end_override=end_override, bar_size=bar_size,
+                     av_api_key=av_api_key)
 
     df["Daily_Return"]     = df["Close"].pct_change()
     df["Cumulative_Index"] = (1 + df["Daily_Return"].fillna(0)).cumprod() * 100
@@ -328,13 +391,16 @@ def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log
     return df.sort_values("Date").reset_index(drop=True)
 
 
-def fetch_sector_data(ticker, period, api_key, sector, log=print):
+def fetch_sector_data(ticker, api_key, sector, log=print,
+                      start_override=None, end_override=None, bar_size="day", av_api_key=None):
     etf = SECTOR_ETF_MAP.get(sector)
     if not etf:
         return None
     log(f"Fetching sector ETF: {etf}...")
     try:
-        etf_df = fetch_ohlcv(etf, period, api_key, log=lambda m: None)
+        etf_df = fetch_ohlcv(etf, "5y", api_key, log=lambda m: None,
+                             start_override=start_override, end_override=end_override,
+                             bar_size=bar_size, av_api_key=av_api_key)
         etf_df["Sector_Return"]         = etf_df["Close"].pct_change()
         etf_df["Sector_ETF_Cumulative"] = (1 + etf_df["Sector_Return"].fillna(0)).cumprod() * 100
         return etf_df[["Date", "Sector_ETF_Cumulative", "Sector_Return"]]
@@ -474,11 +540,12 @@ def detect_asset_type(ticker, api_key=""):
 
 
 def fetch_crypto_data(symbol, period="1y", api_key="", log=print,
-                      start_override=None, end_override=None, bar_size="day"):
+                      start_override=None, end_override=None, bar_size="day", av_api_key=None):
     """Fetch OHLCV + technicals for a crypto symbol (e.g. BTC → X:BTCUSD)."""
     poly_ticker, _ = CRYPTO_TICKERS.get(symbol.upper(), (f"X:{symbol.upper()}USD", None))
     df = fetch_ohlcv(poly_ticker, period, api_key, log=log,
-                     start_override=start_override, end_override=end_override, bar_size=bar_size)
+                     start_override=start_override, end_override=end_override, bar_size=bar_size,
+                     av_api_key=av_api_key)
 
     df["Daily_Return"]     = df["Close"].pct_change()
     df["Cumulative_Index"] = (1 + df["Daily_Return"].fillna(0)).cumprod() * 100
