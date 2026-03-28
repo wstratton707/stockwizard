@@ -125,7 +125,7 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 """, unsafe_allow_html=True)
 
 # ── Session state ─────────────────────────────────────────────────────────────
-if "is_pro"       not in st.session_state: st.session_state["is_pro"]       = False
+if "is_pro"       not in st.session_state: st.session_state["is_pro"]       = True
 if "user_email"   not in st.session_state: st.session_state["user_email"]   = ""
 if "show_payment" not in st.session_state: st.session_state["show_payment"] = False
 if "candle_tf"    not in st.session_state: st.session_state["candle_tf"]    = "5min"
@@ -401,10 +401,13 @@ with tab1:
             valid, info = validate_ticker(ticker_input, POLYGON_API_KEY)
 
         if not valid:
-            live_check = get_live_price(ticker_input, POLYGON_API_KEY)
-            if not live_check or not live_check.get("price"):
+            # Reference API may be rate-limited — try fetching price data directly
+            # Only hard-stop if the ticker looks obviously wrong (non-alphanumeric)
+            import re
+            if not re.match(r'^[A-Z0-9.\-]{1,10}$', ticker_input):
                 st.error(f"❌ Ticker '{ticker_input}' not found. Check the symbol and try again.")
                 st.stop()
+            # Otherwise continue — fetch_stock_data will raise if the ticker is truly invalid
 
         # Live price ticker
         live = get_live_price(ticker_input, POLYGON_API_KEY)
