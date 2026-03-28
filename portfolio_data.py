@@ -120,14 +120,18 @@ def fetch_portfolio_prices(tickers, period_years=3, api_key="", log=print):
     start_s = start.strftime("%Y-%m-%d")
 
     price_dict, failed = {}, []
+    thread_logs = []  # collect logs from threads — Streamlit can't be called from worker threads
 
     def fetch_one(ticker):
-        return ticker, _fetch_ohlcv(ticker, start_s, end_s, api_key, log=log)
+        msgs = []
+        df = _fetch_ohlcv(ticker, start_s, end_s, api_key, log=lambda m: msgs.append(m))
+        return ticker, df, msgs
 
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(fetch_one, t): t for t in tickers}
         for future in as_completed(futures):
-            ticker, df = future.result()
+            ticker, df, msgs = future.result()
+            thread_logs.extend(msgs)
             if df is not None and len(df) > 60:
                 price_dict[ticker] = df
                 log(f"   ✓ {ticker} ({len(df)} days)")
@@ -135,6 +139,9 @@ def fetch_portfolio_prices(tickers, period_years=3, api_key="", log=print):
                 if df is not None:
                     log(f"   ⚠ {ticker} skipped — only {len(df)} days")
                 failed.append(ticker)
+
+    for msg in thread_logs:
+        log(msg)
 
     if not price_dict:
         if not api_key:
