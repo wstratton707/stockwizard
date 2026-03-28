@@ -4,7 +4,9 @@ import numpy as np
 from datetime import datetime, timedelta
 import time
 
-POLYGON_BASE = "https://api.polygon.io"
+POLYGON_BASE  = "https://api.polygon.io"
+_API_CACHE    = {}
+_API_CACHE_TTL = 300  # seconds — reuse responses for 5 minutes
 
 SECTOR_ETF_MAP = {
     "Technology": "XLK", "Health Care": "XLV", "Financials": "XLF",
@@ -14,25 +16,38 @@ SECTOR_ETF_MAP = {
 }
 
 
-def _get(endpoint, api_key, params=None):
+def _get(endpoint, api_key, params=None, raise_on_error=False):
     if params is None:
         params = {}
     params["apiKey"] = api_key
+
+    # Cache key built from endpoint + non-key params so same call is never repeated
+    cache_key = endpoint + str(sorted((k, v) for k, v in params.items() if k != "apiKey"))
+    cached = _API_CACHE.get(cache_key)
+    if cached and (time.time() - cached["ts"]) < _API_CACHE_TTL:
+        return cached["data"]
+
     r = requests.get(f"{POLYGON_BASE}{endpoint}", params=params, timeout=30)
     if r.status_code == 200:
-        return r.json()
-    if r.status_code == 429:
-        raise ValueError("Polygon API rate limit hit — wait a moment and try again.")
-    if r.status_code == 403:
-        raise ValueError("Polygon API key invalid or unauthorized (HTTP 403).")
+        result = r.json()
+        _API_CACHE[cache_key] = {"ts": time.time(), "data": result}
+        return result
+    if raise_on_error:
+        if r.status_code == 429:
+            raise ValueError("Polygon API rate limit hit — wait a moment and try again.")
+        if r.status_code == 403:
+            raise ValueError("Polygon API key invalid or unauthorized (HTTP 403).")
     return None
 
 
 def validate_ticker(ticker, api_key):
-    data = _get(f"/v3/reference/tickers/{ticker.upper()}", api_key)
-    if data and data.get("status") == "OK":
-        info = data.get("results", {})
-        return True, info
+    try:
+        data = _get(f"/v3/reference/tickers/{ticker.upper()}", api_key)
+        if data and data.get("status") == "OK":
+            info = data.get("results", {})
+            return True, info
+    except Exception:
+        pass
     return False, "Ticker not found or invalid."
 
 
@@ -46,6 +61,19 @@ def _period_to_dates(period):
 
 def fetch_ohlcv(ticker, period, api_key, log=print,
                 start_override=None, end_override=None, bar_size="day"):
+    # Safety guards
+    if bar_size not in ("day", "week", "month"):
+        bar_size = "day"
+    if start_override and end_override:
+        # Ensure strings are valid dates and start is before end
+        try:
+            from datetime import datetime as _dt
+            _s = _dt.strptime(start_override, "%Y-%m-%d")
+            _e = _dt.strptime(end_override,   "%Y-%m-%d")
+            if _s >= _e:
+                start_override = end_override = None  # fall back to period
+        except Exception:
+            start_override = end_override = None
     if start_override and end_override:
         start, end = start_override, end_override
     else:
@@ -55,6 +83,7 @@ def fetch_ohlcv(ticker, period, api_key, log=print,
         f"/v2/aggs/ticker/{ticker}/range/1/{bar_size}/{start}/{end}",
         api_key,
         params={"adjusted": "true", "sort": "asc", "limit": 50000},
+        raise_on_error=True,
     )
     if not data or not data.get("results"):
         raise ValueError(f"No price data for '{ticker}'. Check the symbol.")
