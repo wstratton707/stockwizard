@@ -190,9 +190,56 @@ with st.sidebar:
     ).strip().upper()
 
     if mode == "Investor Mode":
-        period = st.radio("Date Range", ["1y","2y","5y","10y"], index=2, horizontal=True)
+        st.markdown("**Date Range**")
+        _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y","5Y","10Y","Max"]
+        _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730,
+                           "5Y":1825,"10Y":3650,"Max":365*55}
+        period_key = st.select_slider("", options=_SLIDER_OPTIONS, value="5Y",
+                                      label_visibility="collapsed")
+
+        with st.expander("Custom date range (optional)"):
+            _cc1, _cc2 = st.columns(2)
+            with _cc1:
+                custom_start = st.date_input("From", value=None,
+                                             min_value=datetime(1970,1,1).date(),
+                                             max_value=datetime.today().date(),
+                                             key="custom_start_date")
+            with _cc2:
+                custom_end = st.date_input("To", value=None,
+                                           min_value=datetime(1970,1,1).date(),
+                                           max_value=datetime.today().date(),
+                                           key="custom_end_date")
+
+        # Custom range wins if both dates are filled in and valid
+        _today = datetime.today().date()
+        if custom_start and custom_end and custom_start < custom_end:
+            date_start   = custom_start.strftime("%Y-%m-%d")
+            date_end     = custom_end.strftime("%Y-%m-%d")
+            _range_days  = (custom_end - custom_start).days
+            period_label = f"{date_start} → {date_end}"
+            st.caption(f"✓ Custom range active: {period_label}")
+        else:
+            _days        = _SLIDER_DAYS[period_key]
+            date_end     = _today.strftime("%Y-%m-%d")
+            date_start   = (_today - timedelta(days=_days)).strftime("%Y-%m-%d")
+            _range_days  = _days
+            period_label = period_key
+
+        # Auto bar size: daily < 10yr, weekly 10-25yr, monthly 25yr+
+        if _range_days > 365 * 25:
+            bar_size = "month"
+            st.caption("Using monthly bars (25+ year range)")
+        elif _range_days > 365 * 10:
+            bar_size = "week"
+            st.caption("Using weekly bars (10+ year range)")
+        else:
+            bar_size = "day"
+
     else:
-        period = "1y"
+        date_start   = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
+        date_end     = datetime.today().strftime("%Y-%m-%d")
+        bar_size     = "day"
+        period_label = "1Y"
         tf_options = {"1 Min":"1min","5 Min":"5min","15 Min":"15min","1 Hour":"1hour"}
         tf_label   = st.radio("Candle Size", list(tf_options.keys()), index=1, horizontal=True)
         st.session_state["candle_tf"] = tf_options[tf_label]
@@ -593,12 +640,14 @@ with tab1:
             try:
                 progress.progress(10, text="Downloading price data...")
                 if is_crypto:
-                    df = fetch_crypto_data(ticker_input, period=period,
-                                           api_key=POLYGON_API_KEY, log=log)
+                    df = fetch_crypto_data(ticker_input, api_key=POLYGON_API_KEY, log=log,
+                                           start_override=date_start, end_override=date_end,
+                                           bar_size=bar_size)
                 else:
-                    df = fetch_stock_data(ticker_input, period=period,
-                                          benchmark_tickers=benchmarks,
-                                          api_key=POLYGON_API_KEY, log=log)
+                    df = fetch_stock_data(ticker_input, benchmark_tickers=benchmarks,
+                                          api_key=POLYGON_API_KEY, log=log,
+                                          start_override=date_start, end_override=date_end,
+                                          bar_size=bar_size)
 
                 progress.progress(25, text="Fetching details...")
                 if is_crypto:
@@ -655,7 +704,7 @@ with tab1:
 
                 progress.progress(92, text="Building Excel report...")
                 excel_buf = build_excel(
-                    ticker_input, df, period,
+                    ticker_input, df, period_label,
                     company_details=company_details, sector_df=sector_df,
                     mc_sim_df=mc_sim_df, mc_summary=mc_summary,
                     news_list=news_list, peer_df=peer_df,
@@ -682,9 +731,9 @@ with tab1:
             pos_neg    = lambda v: "positive" if v > 0 else ("negative" if v < 0 else "neutral")
 
             st.download_button(
-                label=f"⬇  Download Excel Report — {ticker_input}_{period}_Analysis.xlsx",
+                label=f"⬇  Download Excel Report — {ticker_input}_{period_label}_Analysis.xlsx",
                 data=excel_buf,
-                file_name=f"{ticker_input}_{period}_Analysis.xlsx",
+                file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True, type="primary", key="download_top",
             )
@@ -966,9 +1015,9 @@ with tab1:
             st.markdown("---")
             excel_buf.seek(0)
             st.download_button(
-                label=f"⬇  Download Excel Report — {ticker_input}_{period}_Analysis.xlsx",
+                label=f"⬇  Download Excel Report — {ticker_input}_{period_label}_Analysis.xlsx",
                 data=excel_buf,
-                file_name=f"{ticker_input}_{period}_Analysis.xlsx",
+                file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True, type="primary", key="download_bottom",
             )

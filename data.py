@@ -40,11 +40,15 @@ def _period_to_dates(period):
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
-def fetch_ohlcv(ticker, period, api_key, log=print):
-    start, end = _period_to_dates(period)
-    log(f"Downloading {period} data for {ticker}...")
+def fetch_ohlcv(ticker, period, api_key, log=print,
+                start_override=None, end_override=None, bar_size="day"):
+    if start_override and end_override:
+        start, end = start_override, end_override
+    else:
+        start, end = _period_to_dates(period)
+    log(f"Downloading data for {ticker} ({start} → {end}, {bar_size})...")
     data = _get(
-        f"/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
+        f"/v2/aggs/ticker/{ticker}/range/1/{bar_size}/{start}/{end}",
         api_key,
         params={"adjusted": "true", "sort": "asc", "limit": 50000},
     )
@@ -58,12 +62,14 @@ def fetch_ohlcv(ticker, period, api_key, log=print):
     df["Date"] = pd.to_datetime(df["Date"], unit="ms")
     df = df[["Date", "Open", "High", "Low", "Close", "Volume"]].copy()
     df = df.sort_values("Date").reset_index(drop=True)
-    log(f"   {len(df)} trading days fetched.")
+    log(f"   {len(df)} bars fetched.")
     return df
 
 
-def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print):
-    df = fetch_ohlcv(ticker, period, api_key, log=log)
+def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print,
+                     start_override=None, end_override=None, bar_size="day"):
+    df = fetch_ohlcv(ticker, period, api_key, log=log,
+                     start_override=start_override, end_override=end_override, bar_size=bar_size)
 
     df["Daily_Return"]     = df["Close"].pct_change()
     df["Cumulative_Index"] = (1 + df["Daily_Return"].fillna(0)).cumprod() * 100
@@ -103,7 +109,9 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
         for bench in benchmark_tickers:
             log(f"   Benchmark: {bench}")
             try:
-                bdf = fetch_ohlcv(bench, period, api_key, log=lambda m: None)
+                bdf = fetch_ohlcv(bench, period, api_key, log=lambda m: None,
+                                  start_override=start_override, end_override=end_override,
+                                  bar_size=bar_size)
                 bdf[f"{bench}_Return"]     = bdf["Close"].pct_change()
                 bdf[f"{bench}_Cumulative"] = (1 + bdf[f"{bench}_Return"].fillna(0)).cumprod() * 100
                 df = pd.merge(df, bdf[["Date", f"{bench}_Return", f"{bench}_Cumulative"]],
@@ -220,13 +228,15 @@ def fetch_peer_comparison(ticker, peer_tickers, api_key, log=print):
     return pd.DataFrame(rows) if rows else None
 
 
-def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print):
+def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print,
+                    start_override=None, end_override=None, bar_size="day"):
     """Fetch and enrich bond ETF data.  Mirrors fetch_stock_data but uses
     bond-relevant metrics (duration label, yield proxy, spread proxy) instead
     of equity-focused indicators like MACD / RSI."""
     from portfolio_data import BOND_DURATION_MAP
 
-    df = fetch_ohlcv(ticker, period, api_key, log=log)
+    df = fetch_ohlcv(ticker, period, api_key, log=log,
+                     start_override=start_override, end_override=end_override, bar_size=bar_size)
 
     df["Daily_Return"]     = df["Close"].pct_change()
     df["Cumulative_Index"] = (1 + df["Daily_Return"].fillna(0)).cumprod() * 100
@@ -430,10 +440,12 @@ def detect_asset_type(ticker, api_key=""):
     return "stock"
 
 
-def fetch_crypto_data(symbol, period="1y", api_key="", log=print):
+def fetch_crypto_data(symbol, period="1y", api_key="", log=print,
+                      start_override=None, end_override=None, bar_size="day"):
     """Fetch OHLCV + technicals for a crypto symbol (e.g. BTC → X:BTCUSD)."""
     poly_ticker, _ = CRYPTO_TICKERS.get(symbol.upper(), (f"X:{symbol.upper()}USD", None))
-    df = fetch_ohlcv(poly_ticker, period, api_key, log=log)
+    df = fetch_ohlcv(poly_ticker, period, api_key, log=log,
+                     start_override=start_override, end_override=end_override, bar_size=bar_size)
 
     df["Daily_Return"]     = df["Close"].pct_change()
     df["Cumulative_Index"] = (1 + df["Daily_Return"].fillna(0)).cumprod() * 100
