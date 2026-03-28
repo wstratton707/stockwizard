@@ -524,59 +524,152 @@ def _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary):
     return ws_mc, start_row_mc, pct_col_start
 
 
+# ── Chart helpers (matplotlib) ────────────────────────────────────────────────
+def _mpl_chart(fig):
+    """Save a matplotlib figure to a BytesIO PNG buffer."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _chart_style(ax, title, xlabel="Date", ylabel="Price ($)"):
+    ax.set_title(title, fontsize=13, fontweight="bold", color="#1F4E79", pad=10)
+    ax.set_xlabel(xlabel, fontsize=10, color="#444444")
+    ax.set_ylabel(ylabel, fontsize=10, color="#444444")
+    ax.tick_params(axis="x", rotation=35, labelsize=8)
+    ax.tick_params(axis="y", labelsize=9)
+    ax.grid(axis="y", linestyle="--", alpha=0.4, color="#cccccc")
+    ax.grid(axis="x", linestyle=":", alpha=0.25, color="#cccccc")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.legend(fontsize=9, framealpha=0.7)
+
+
+def _add_mpl_image(ws, buf, anchor, width_px=900, height_px=400):
+    img = XLImage(buf)
+    img.width  = width_px
+    img.height = height_px
+    ws.add_image(img, anchor)
+
+
 # ── Charts sheet ──────────────────────────────────────────────────────────────
 def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data):
     ws_ch = wb.create_sheet("Charts")
-    max_r = ws_p.max_row
+    ws_ch.sheet_view.showGridLines = False
 
-    chart1 = LineChart()
-    chart1.title = f"{ticker} — Price & Moving Averages"
-    chart1.y_axis.title = "Price ($)"
-    chart1.height, chart1.width, chart1.style = 16, 32, 2
-    for col_name in ["Close","MA20","MA50","MA200"]:
-        idx = next((i for i, c in enumerate(export_df.columns, 1) if c == col_name), None)
-        if idx:
-            chart1.add_data(Reference(ws_p, min_col=idx, min_row=1, max_row=max_r), titles_from_data=True)
-    chart1.set_categories(Reference(ws_p, min_col=1, min_row=2, max_row=max_r))
-    ws_ch.add_chart(chart1, "A1")
+    if not MPL_AVAILABLE:
+        ws_ch["A1"] = "Charts unavailable — matplotlib not installed."
+        return
 
+    dates = pd.to_datetime(export_df["Date"]) if "Date" in export_df.columns else None
+
+    # ── Chart 1: Price + Moving Averages ──────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(13, 5))
+    ax.plot(dates, export_df["Close"],  color="#1F4E79", linewidth=1.8, label="Close",  zorder=3)
+    for ma, col, lw in [("MA20","#E8A838",1.2), ("MA50","#2ECC71",1.2), ("MA200","#E74C3C",1.2)]:
+        if ma in export_df.columns:
+            ax.plot(dates, export_df[ma], color=col, linewidth=lw, linestyle="--", label=ma, zorder=2)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.2f}"))
+    _chart_style(ax, f"{ticker} — Price & Moving Averages")
+    _add_mpl_image(ws_ch, _mpl_chart(fig), "A1")
+
+    # ── Chart 2: Volume ───────────────────────────────────────────────────────
+    if "Volume" in export_df.columns:
+        fig, ax = plt.subplots(figsize=(13, 3.5))
+        colors = ["#2ECC71" if r >= 0 else "#E74C3C"
+                  for r in export_df.get("Daily_Return", [0]*len(export_df)).fillna(0)]
+        ax.bar(dates, export_df["Volume"], color=colors, width=1.5, alpha=0.75)
+        if "Vol_MA20" in export_df.columns:
+            ax.plot(dates, export_df["Vol_MA20"], color="#1F4E79", linewidth=1.2,
+                    linestyle="--", label="20-Day Avg")
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M"))
+        _chart_style(ax, f"{ticker} — Volume", ylabel="Volume")
+        _add_mpl_image(ws_ch, _mpl_chart(fig), "A22", height_px=280)
+
+    # ── Chart 3: Bollinger Bands ──────────────────────────────────────────────
     if "BB_Upper" in export_df.columns:
-        chart_bb = LineChart()
-        chart_bb.title = f"{ticker} — Bollinger Bands"
-        chart_bb.y_axis.title = "Price ($)"
-        chart_bb.height, chart_bb.width, chart_bb.style = 16, 32, 2
-        for col_name in ["Close","BB_Upper","BB_Middle","BB_Lower"]:
-            idx = next((i for i, c in enumerate(export_df.columns, 1) if c == col_name), None)
-            if idx:
-                chart_bb.add_data(Reference(ws_p, min_col=idx, min_row=1, max_row=max_r), titles_from_data=True)
-        chart_bb.set_categories(Reference(ws_p, min_col=1, min_row=2, max_row=max_r))
-        ws_ch.add_chart(chart_bb, "A35")
+        fig, ax = plt.subplots(figsize=(13, 5))
+        ax.plot(dates, export_df["Close"],     color="#1F4E79", linewidth=1.8, label="Close",    zorder=3)
+        ax.plot(dates, export_df["BB_Upper"],  color="#E74C3C", linewidth=1.0, linestyle="--", label="BB Upper")
+        ax.plot(dates, export_df["BB_Middle"], color="#888888", linewidth=1.0, linestyle="--", label="BB Mid")
+        ax.plot(dates, export_df["BB_Lower"],  color="#2ECC71", linewidth=1.0, linestyle="--", label="BB Lower")
+        ax.fill_between(dates, export_df["BB_Upper"], export_df["BB_Lower"], alpha=0.07, color="#2E75B6")
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.2f}"))
+        _chart_style(ax, f"{ticker} — Bollinger Bands (20-day, 2σ)")
+        _add_mpl_image(ws_ch, _mpl_chart(fig), "A35")
 
+    # ── Chart 4: RSI ──────────────────────────────────────────────────────────
+    if "RSI14" in export_df.columns:
+        fig, ax = plt.subplots(figsize=(13, 3))
+        ax.plot(dates, export_df["RSI14"], color="#6C3483", linewidth=1.4, label="RSI (14)")
+        ax.axhline(70, color="#E74C3C", linewidth=0.8, linestyle="--", alpha=0.7, label="Overbought (70)")
+        ax.axhline(30, color="#2ECC71", linewidth=0.8, linestyle="--", alpha=0.7, label="Oversold (30)")
+        ax.fill_between(dates, export_df["RSI14"], 70,
+                        where=export_df["RSI14"] >= 70, alpha=0.15, color="#E74C3C")
+        ax.fill_between(dates, export_df["RSI14"], 30,
+                        where=export_df["RSI14"] <= 30, alpha=0.15, color="#2ECC71")
+        ax.set_ylim(0, 100)
+        _chart_style(ax, f"{ticker} — RSI (14)", ylabel="RSI")
+        _add_mpl_image(ws_ch, _mpl_chart(fig), "A56", height_px=240)
+
+    # ── Chart 5: Cumulative Return vs Benchmarks ──────────────────────────────
+    cum_cols = [c for c in export_df.columns if c.endswith("_Cumulative")]
+    if cum_cols:
+        fig, ax = plt.subplots(figsize=(13, 5))
+        ax.plot(dates, export_df["Cumulative_Index"], color="#1F4E79", linewidth=2.0,
+                label=ticker, zorder=3)
+        bench_colors = ["#E74C3C", "#2ECC71", "#F39C12", "#8E44AD"]
+        for i, col in enumerate(cum_cols):
+            label = col.replace("_Cumulative", "")
+            ax.plot(dates, export_df[col], color=bench_colors[i % len(bench_colors)],
+                    linewidth=1.2, linestyle="--", label=label)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}"))
+        ax.axhline(100, color="#aaaaaa", linewidth=0.7, linestyle=":")
+        _chart_style(ax, f"{ticker} — Cumulative Return vs Benchmarks", ylabel="Index (100 = start)")
+        _add_mpl_image(ws_ch, _mpl_chart(fig), "A68")
+
+    # ── Chart 6: Sector comparison ────────────────────────────────────────────
+    if ws_s is not None:
+        sect_data = []
+        for row in ws_s.iter_rows(min_row=2, values_only=True):
+            sect_data.append(row)
+        if sect_data:
+            sect_df   = pd.DataFrame(sect_data, columns=[c[0].value for c in ws_s.iter_cols(1, ws_s.max_column, 1, 1)])
+            sect_dates = pd.to_datetime(sect_df.iloc[:, 0])
+            fig, ax = plt.subplots(figsize=(13, 5))
+            ax.plot(sect_dates, sect_df.iloc[:, 1], color="#1F4E79", linewidth=2.0, label=ticker)
+            ax.plot(sect_dates, sect_df.iloc[:, 2], color="#E74C3C", linewidth=1.4,
+                    linestyle="--", label="Sector ETF")
+            ax.axhline(100, color="#aaaaaa", linewidth=0.7, linestyle=":")
+            _chart_style(ax, f"{ticker} vs Sector ETF — Cumulative Return", ylabel="Index (100 = start)")
+            _add_mpl_image(ws_ch, _mpl_chart(fig), "A88")
+
+    # ── Chart 7: Monte Carlo ──────────────────────────────────────────────────
     if ws_mc_data and ws_mc_data[0]:
         ws_mc, start_row_mc, pct_col_start = ws_mc_data
-        chart_mc = LineChart()
-        chart_mc.title = f"{ticker} — Monte Carlo Percentile Forecast"
-        chart_mc.y_axis.title = "Price ($)"
-        chart_mc.height, chart_mc.width, chart_mc.style = 16, 32, 10
         n_rows = min(253, ws_mc.max_row - start_row_mc)
-        for j in range(5):
-            chart_mc.add_data(
-                Reference(ws_mc, min_col=pct_col_start+j+1,
-                          min_row=start_row_mc, max_row=start_row_mc+n_rows),
-                titles_from_data=True)
-        chart_mc.set_categories(Reference(ws_mc, min_col=pct_col_start,
-                                           min_row=start_row_mc+1, max_row=start_row_mc+n_rows))
-        ws_ch.add_chart(chart_mc, "A69")
-
-    if ws_s is not None:
-        chart_s = LineChart()
-        chart_s.title = f"{ticker} vs Sector ETF — Cumulative Return"
-        chart_s.y_axis.title = "Index (100 = start)"
-        chart_s.height, chart_s.width, chart_s.style = 16, 32, 3
-        chart_s.add_data(Reference(ws_s, min_col=2, min_row=1, max_row=ws_s.max_row), titles_from_data=True)
-        chart_s.add_data(Reference(ws_s, min_col=3, min_row=1, max_row=ws_s.max_row), titles_from_data=True)
-        chart_s.set_categories(Reference(ws_s, min_col=1, min_row=2, max_row=ws_s.max_row))
-        ws_ch.add_chart(chart_s, "A103")
+        pct_labels = ["P5 (Bear)","P25 (Low)","P50 (Median)","P75 (Bull)","P95 (Best)"]
+        pct_colors = ["#E74C3C","#E8A838","#1F4E79","#2ECC71","#27AE60"]
+        mc_rows = []
+        for r in range(start_row_mc + 1, start_row_mc + 1 + n_rows):
+            mc_rows.append([ws_mc.cell(row=r, column=pct_col_start + j + 1).value for j in range(5)])
+        if mc_rows:
+            mc_arr = np.array(mc_rows, dtype=float)
+            days   = list(range(len(mc_arr)))
+            fig, ax = plt.subplots(figsize=(13, 5))
+            ax.fill_between(days, mc_arr[:, 0], mc_arr[:, 4], alpha=0.12, color="#2E75B6", label="P5–P95 range")
+            ax.fill_between(days, mc_arr[:, 1], mc_arr[:, 3], alpha=0.2,  color="#2E75B6", label="P25–P75 range")
+            for j, (lbl, col) in enumerate(zip(pct_labels, pct_colors)):
+                lw = 2.2 if "Median" in lbl else 1.0
+                ls = "-" if "Median" in lbl else "--"
+                ax.plot(days, mc_arr[:, j], color=col, linewidth=lw, linestyle=ls, label=lbl)
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.2f}"))
+            ax.set_xlabel("Trading Days Forward", fontsize=10)
+            _chart_style(ax, f"{ticker} — Monte Carlo Forecast ({n_rows} days)")
+            ax.set_xlabel("Trading Days Forward", fontsize=10)
+            _add_mpl_image(ws_ch, _mpl_chart(fig), "A108")
 
 
 # ── Master orchestrator ───────────────────────────────────────────────────────
