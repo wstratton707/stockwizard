@@ -84,6 +84,13 @@ def _fetch_ohlcv(ticker, start, end, api_key):
             f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
             params={"adjusted":"true","sort":"asc","limit":50000,"apiKey":api_key},
             timeout=20)
+        if r.status_code == 429:
+            # Rate limited — wait and retry once
+            time.sleep(12)
+            r = requests.get(
+                f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
+                params={"adjusted":"true","sort":"asc","limit":50000,"apiKey":api_key},
+                timeout=20)
         if r.status_code == 200:
             results = r.json().get("results", [])
             if results:
@@ -109,17 +116,20 @@ def fetch_portfolio_prices(tickers, period_years=3, api_key="", log=print):
 
     price_dict, failed = {}, []
     for ticker in tickers:
-        log(f"   Fetching {ticker}...")
         df = _fetch_ohlcv(ticker, start_s, end_s, api_key)
         if df is not None and len(df) > 60:
             price_dict[ticker] = df
+            log(f"   ✓ {ticker} ({len(df)} days)")
         else:
-            log(f"   ⚠ {ticker} insufficient data, skipping")
+            status = "no data" if df is None else f"only {len(df)} days"
+            log(f"   ⚠ {ticker} skipped — {status}")
             failed.append(ticker)
-        time.sleep(0.12)
+        time.sleep(0.5)  # Stay well under Polygon rate limits
 
     if not price_dict:
-        raise ValueError("No valid price data retrieved.")
+        if not api_key:
+            raise ValueError("Polygon API key is missing. Check your environment variables.")
+        raise ValueError(f"No valid price data retrieved. All {len(tickers)} tickers failed — check API key and rate limits.")
 
     closes = {t: df.set_index("Date")["Close"].rename(t)
               for t, df in price_dict.items()}
