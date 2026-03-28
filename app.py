@@ -77,13 +77,13 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 
 .metric-card {
     background: #f8fafc; border: 1px solid #e2e8f0;
-    border-radius: 12px; padding: 1.25rem; text-align: center;
+    border-radius: 12px; padding: 0.85rem 0.5rem; text-align: center;
 }
 .metric-label {
     font-size: 0.72rem; font-weight: 600; letter-spacing: 0.6px;
     text-transform: uppercase; color: #94a3b8; margin-bottom: 0.4rem;
 }
-.metric-value { font-family: 'DM Mono', monospace; font-size: 1.4rem; font-weight: 500; color: #0f172a; }
+.metric-value { font-family: 'DM Mono', monospace; font-size: clamp(0.8rem, 1.1vw, 1.2rem); font-weight: 500; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .metric-value.positive { color: #16a34a; }
 .metric-value.negative { color: #dc2626; }
 
