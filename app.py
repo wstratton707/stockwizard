@@ -45,7 +45,6 @@ st.set_page_config(
 
 POLYGON_API_KEY  = os.environ.get("POLYGON_API_KEY", "")
 FMP_API_KEY      = os.environ.get("FMP_API_KEY", "")
-AV_API_KEY       = os.environ.get("AV_API_KEY", "")
 SHOW_PRICING     = False  # Set True when ready to accept payments
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -194,58 +193,17 @@ with st.sidebar:
 
     if mode == "Investor Mode":
         st.markdown("**Date Range**")
-        _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y","5Y","10Y","Max"]
-        _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730,
-                           "5Y":1825,"10Y":3650,"Max":365*55}
-        period_key = st.select_slider("", options=_SLIDER_OPTIONS, value="5Y",
+        _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y","5Y"]
+        _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730,"5Y":1825}
+        period_key = st.select_slider("", options=_SLIDER_OPTIONS, value="1Y",
                                       label_visibility="collapsed")
 
-        _today = datetime.today().date()
-        _use_custom = False
-
-        with st.expander("Custom date range (optional)"):
-            _use_custom = st.checkbox("Use custom dates", value=False, key="use_custom_range")
-            if _use_custom:
-                _cc1, _cc2 = st.columns(2)
-                _default_start = _today - timedelta(days=1825)
-                with _cc1:
-                    custom_start = st.date_input("From",
-                                                 value=_default_start,
-                                                 min_value=datetime(1970,1,1).date(),
-                                                 max_value=_today,
-                                                 key="custom_start_date")
-                with _cc2:
-                    custom_end = st.date_input("To",
-                                               value=_today,
-                                               min_value=datetime(1970,1,1).date(),
-                                               max_value=_today,
-                                               key="custom_end_date")
-            else:
-                custom_start = custom_end = None
-
-        # Custom range wins only when checkbox is on and dates are valid
-        if _use_custom and custom_start and custom_end and custom_start < custom_end:
-            date_start   = custom_start.strftime("%Y-%m-%d")
-            date_end     = custom_end.strftime("%Y-%m-%d")
-            _range_days  = (custom_end - custom_start).days
-            period_label = f"{date_start} to {date_end}"
-            st.caption(f"✓ Custom range active: {period_label}")
-        else:
-            _days        = _SLIDER_DAYS[period_key]
-            date_end     = _today.strftime("%Y-%m-%d")
-            date_start   = (_today - timedelta(days=_days)).strftime("%Y-%m-%d")
-            _range_days  = _days
-            period_label = period_key
-
-        # Auto bar size: daily < 10yr, weekly 10-25yr, monthly 25yr+
-        if _range_days > 365 * 25:
-            bar_size = "month"
-            st.caption("Using monthly bars (25+ year range)")
-        elif _range_days > 365 * 10:
-            bar_size = "week"
-            st.caption("Using weekly bars (10+ year range)")
-        else:
-            bar_size = "day"
+        _today      = datetime.today().date()
+        _days       = _SLIDER_DAYS[period_key]
+        date_end    = _today.strftime("%Y-%m-%d")
+        date_start  = (_today - timedelta(days=_days)).strftime("%Y-%m-%d")
+        bar_size    = "day"
+        period_label = period_key
 
     else:
         date_start   = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
@@ -656,12 +614,12 @@ with tab1:
                 if is_crypto:
                     df = fetch_crypto_data(ticker_input, api_key=POLYGON_API_KEY, log=log,
                                            start_override=date_start, end_override=date_end,
-                                           bar_size=bar_size, av_api_key=AV_API_KEY)
+                                           bar_size=bar_size)
                 else:
                     df = fetch_stock_data(ticker_input, benchmark_tickers=benchmarks,
                                           api_key=POLYGON_API_KEY, log=log,
                                           start_override=date_start, end_override=date_end,
-                                          bar_size=bar_size, av_api_key=AV_API_KEY)
+                                          bar_size=bar_size)
 
                 progress.progress(25, text="Fetching details...")
                 if is_crypto:
@@ -690,7 +648,7 @@ with tab1:
                     progress.progress(50, text="Fetching sector ETF...")
                     sector_df = fetch_sector_data(ticker_input, POLYGON_API_KEY, sector, log=log,
                                                   start_override=date_start, end_override=date_end,
-                                                  bar_size=bar_size, av_api_key=AV_API_KEY)
+                                                  bar_size=bar_size)
 
                 corr_matrix = None
                 if do_corr:
@@ -1107,7 +1065,7 @@ with tab3:
             try:
                 bdf = fetch_bond_data(bond_ticker, period=bond_period,
                                       benchmark_tickers=benchmarks or None,
-                                      api_key=POLYGON_API_KEY, av_api_key=AV_API_KEY)
+                                      api_key=POLYGON_API_KEY)
             except Exception as e:
                 st.error(f"❌ {e}")
                 st.stop()
