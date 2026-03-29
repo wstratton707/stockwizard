@@ -51,311 +51,298 @@ SHOW_PRICING     = False  # Set True when ready to accept payments
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap');
 
-/* ── Reset & base ── */
+:root {
+  --bg:       #0a0c0f;
+  --surface:  #0f1217;
+  --surface2: #151a22;
+  --border:   #1e2530;
+  --border2:  #2a3444;
+  --accent:   #f5a623;
+  --accent2:  #00d4aa;
+  --accent3:  #4a9eff;
+  --text:     #e8edf4;
+  --muted:    #6b7a8d;
+  --dim:      #3a4558;
+  --red:      #ff4d4d;
+  --green:    #00d4aa;
+}
+
 html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
-    color: #1e293b;
+  font-family: 'IBM Plex Sans', sans-serif;
+  color: #e8edf4;
 }
 #MainMenu {visibility:hidden;} footer {visibility:hidden;} .stDeployButton {display:none;}
 .block-container { padding-top: 1.5rem !important; max-width: 1200px !important; }
 
+[data-testid="stAppViewContainer"] { background: #0a0c0f !important; }
+[data-testid="stHeader"] { background: #0a0c0f !important; border-bottom: 1px solid #1e2530 !important; }
+.main { background: #0a0c0f !important; }
+
 /* ── Sidebar ── */
 [data-testid="stSidebar"] {
-    background: #0f172a !important;
-    border-right: 1px solid #1e293b;
+  background: #0a0c0f !important;
+  border-right: 1px solid #1e2530;
 }
-[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
-[data-testid="stSidebar"] .stMarkdown h3 { color: #f1f5f9 !important; font-size: 0.8rem !important; font-weight: 600 !important; letter-spacing: 0.8px !important; text-transform: uppercase !important; }
-[data-testid="stSidebar"] label { color: #94a3b8 !important; font-size: 0.82rem !important; }
-[data-testid="stSidebar"] .stCheckbox label { color: #cbd5e1 !important; }
-[data-testid="stSidebar"] hr { border-color: #1e293b !important; }
+[data-testid="stSidebar"] * { color: #e8edf4 !important; }
+[data-testid="stSidebar"] .stMarkdown h3 { color: #f5a623 !important; font-size: 0.8rem !important; font-weight: 600 !important; letter-spacing: 0.8px !important; text-transform: uppercase !important; }
+[data-testid="stSidebar"] label { color: #6b7a8d !important; font-size: 0.8rem !important; font-family: 'IBM Plex Mono', monospace !important; }
+[data-testid="stSidebar"] .stCheckbox label { color: #e8edf4 !important; }
+[data-testid="stSidebar"] hr { border-color: #1e2530 !important; }
 [data-testid="stSidebar"] .stButton button {
-    background: linear-gradient(135deg, #0ea5e9, #2563eb) !important;
-    color: white !important; border: none !important; border-radius: 8px !important;
-    font-weight: 600 !important; font-size: 0.82rem !important;
+  background: #f5a623 !important;
+  color: #0a0c0f !important; border: none !important; border-radius: 2px !important;
+  font-weight: 700 !important; font-size: 0.8rem !important;
+  font-family: 'IBM Plex Mono', monospace !important;
+  letter-spacing: 1px !important; text-transform: uppercase !important;
 }
-[data-testid="stSidebar"] .stButton button:hover {
-    background: linear-gradient(135deg, #38bdf8, #3b82f6) !important;
-    transform: translateY(-1px); box-shadow: 0 4px 12px rgba(14,165,233,0.3) !important;
-}
+[data-testid="stSidebar"] .stButton button:hover { opacity: 0.85 !important; transform: none !important; box-shadow: none !important; }
 [data-testid="stSidebar"] [data-testid="stTextInput"] input {
-    background: #1e293b !important; border: 1px solid #334155 !important;
-    color: #f1f5f9 !important; border-radius: 8px !important; font-size: 1rem !important;
+  background: #151a22 !important; border: 1px solid #2a3444 !important;
+  color: #e8edf4 !important; border-radius: 2px !important; font-size: 0.95rem !important;
+  font-family: 'IBM Plex Mono', monospace !important;
 }
-[data-testid="stSidebar"] [data-testid="stTextInput"] input::placeholder { color: #475569 !important; }
+[data-testid="stSidebar"] [data-testid="stTextInput"] input::placeholder { color: #3a4558 !important; }
+[data-testid="stSidebar"] .stSelectbox > div > div {
+  background: #151a22 !important; border: 1px solid #2a3444 !important;
+  border-radius: 2px !important; font-family: 'IBM Plex Mono', monospace !important;
+}
 
 /* ── Tabs ── */
 .stTabs [data-baseweb="tab-list"] {
-    background: #f1f5f9; border-radius: 10px; padding: 4px; gap: 2px;
-    border: 1px solid #e2e8f0;
+  background: #0f1217; border-radius: 3px; padding: 4px; gap: 2px;
+  border: 1px solid #1e2530;
 }
 .stTabs [data-baseweb="tab"] {
-    border-radius: 7px; font-size: 0.85rem; font-weight: 500;
-    color: #64748b; padding: 0.4rem 1.2rem; border: none !important;
-    background: transparent !important;
+  border-radius: 2px; font-size: 0.8rem; font-weight: 500;
+  font-family: 'IBM Plex Mono', monospace;
+  color: #6b7a8d; padding: 0.4rem 1.2rem; border: none !important;
+  background: transparent !important; letter-spacing: 0.5px;
 }
 .stTabs [aria-selected="true"] {
-    background: #ffffff !important; color: #0f172a !important;
-    font-weight: 600 !important; box-shadow: 0 1px 4px rgba(0,0,0,0.1) !important;
+  background: #151a22 !important; color: #f5a623 !important;
+  font-weight: 600 !important; box-shadow: none !important;
 }
 .stTabs [data-baseweb="tab-panel"] { padding-top: 1.5rem !important; }
 
 /* ── Main header ── */
 .main-header {
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0f2744 100%);
-    padding: 2.5rem 3rem; border-radius: 20px; margin-bottom: 2rem;
-    border: 1px solid #1e3a5f;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05);
-    position: relative; overflow: hidden;
+  background: linear-gradient(135deg, #0a0c0f 0%, #0f1217 60%, #0c1020 100%);
+  padding: 2.5rem 3rem; border-radius: 4px; margin-bottom: 2rem;
+  border: 1px solid #1e2530; border-left: 3px solid #f5a623;
+  position: relative; overflow: hidden;
 }
 .main-header::before {
-    content: ''; position: absolute; top: -50%; right: -10%;
-    width: 400px; height: 400px; border-radius: 50%;
-    background: radial-gradient(circle, rgba(14,165,233,0.08) 0%, transparent 70%);
-    pointer-events: none;
+  content: ''; position: absolute; top: -50%; right: -10%;
+  width: 400px; height: 400px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(245,166,35,0.04) 0%, transparent 70%);
+  pointer-events: none;
 }
-.main-header-logo {
-    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem;
-}
+.main-header-logo { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem; }
 .main-header-logo-icon {
-    width: 42px; height: 42px; background: linear-gradient(135deg, #0ea5e9, #2563eb);
-    border-radius: 10px; display: flex; align-items: center; justify-content: center;
-    font-size: 1.3rem; font-weight: 700; color: white; flex-shrink: 0;
-    box-shadow: 0 2px 8px rgba(14,165,233,0.4);
+  width: 42px; height: 42px; background: #f5a623;
+  border-radius: 3px; display: flex; align-items: center; justify-content: center;
+  font-family: 'IBM Plex Mono', monospace; font-size: 1.1rem; font-weight: 700;
+  color: #0a0c0f; flex-shrink: 0;
 }
 .main-header h1 {
-    font-family: 'Inter', sans-serif; color: #f1f5f9;
-    font-size: 1.9rem; margin: 0; font-weight: 700; letter-spacing: -0.5px;
+  font-family: 'IBM Plex Mono', monospace; color: #e8edf4;
+  font-size: 1.9rem; margin: 0; font-weight: 600;
+  letter-spacing: 3px; text-transform: uppercase;
 }
-.main-header h1 span { color: #38bdf8; }
+.main-header h1 span { color: #f5a623; }
 .main-header-sub {
-    color: #64748b; font-size: 0.88rem; margin: 0.4rem 0 0;
-    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  color: #6b7a8d; font-size: 0.78rem; font-family: 'IBM Plex Mono', monospace;
+  margin: 0.4rem 0 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
 }
 .main-header-sub .badge {
-    background: rgba(14,165,233,0.12); color: #38bdf8; border: 1px solid rgba(14,165,233,0.2);
-    border-radius: 20px; padding: 2px 10px; font-size: 0.75rem; font-weight: 500;
+  background: rgba(245,166,35,0.1); color: #f5a623;
+  border: 1px solid rgba(245,166,35,0.2);
+  border-radius: 2px; padding: 2px 8px;
+  font-size: 0.7rem; font-weight: 500; font-family: 'IBM Plex Mono', monospace;
 }
 .main-header-stats {
-    display: flex; gap: 2rem; margin-top: 1.5rem; padding-top: 1.5rem;
-    border-top: 1px solid #1e293b;
+  display: flex; gap: 2rem; margin-top: 1.5rem; padding-top: 1.5rem;
+  border-top: 1px solid #1e2530;
 }
 .main-header-stat { text-align: left; }
-.main-header-stat-val { font-size: 1.4rem; font-weight: 700; color: #f1f5f9; line-height: 1; }
-.main-header-stat-lbl { font-size: 0.72rem; color: #475569; text-transform: uppercase; letter-spacing: 0.6px; margin-top: 3px; }
+.main-header-stat-val { font-family: 'IBM Plex Mono', monospace; font-size: 1.4rem; font-weight: 600; color: #f5a623; line-height: 1; }
+.main-header-stat-lbl { font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem; color: #3a4558; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
 
 /* ── Live ticker ── */
 .live-ticker {
-    background: linear-gradient(135deg, #0f172a, #1e293b);
-    border: 1px solid #334155; border-radius: 16px;
-    padding: 1.25rem 1.75rem; margin-bottom: 1.25rem;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
-    display: flex; justify-content: space-between; align-items: center;
+  background: #0f1217; border: 1px solid #1e2530; border-left: 3px solid #f5a623;
+  border-radius: 4px; padding: 1.25rem 1.75rem; margin-bottom: 1.25rem;
+  display: flex; justify-content: space-between; align-items: center;
 }
-.live-price {
-    font-family: 'JetBrains Mono', monospace; font-size: 2.2rem;
-    font-weight: 500; color: #f1f5f9; line-height: 1;
-}
-.live-change-pos { font-family: 'JetBrains Mono', monospace; font-size: 1rem; color: #22c55e; font-weight: 500; }
-.live-change-neg { font-family: 'JetBrains Mono', monospace; font-size: 1rem; color: #ef4444; font-weight: 500; }
-.live-dot {
-    width: 8px; height: 8px; background: #22c55e; border-radius: 50%;
-    display: inline-block; margin-right: 6px; animation: pulse 2s infinite;
-}
+.live-price { font-family: 'IBM Plex Mono', monospace; font-size: 2.2rem; font-weight: 500; color: #e8edf4; line-height: 1; }
+.live-change-pos { font-family: 'IBM Plex Mono', monospace; font-size: 1rem; color: #00d4aa; font-weight: 500; }
+.live-change-neg { font-family: 'IBM Plex Mono', monospace; font-size: 1rem; color: #ff4d4d; font-weight: 500; }
+.live-dot { width: 7px; height: 7px; background: #00d4aa; border-radius: 50%; display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
 /* ── Metric cards ── */
 .metric-card {
-    background: #ffffff; border: 1px solid #e2e8f0;
-    border-radius: 14px; padding: 1rem 0.75rem; text-align: center;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-    transition: box-shadow 0.2s, transform 0.2s;
-    position: relative; overflow: hidden;
+  background: #0f1217; border: 1px solid #1e2530;
+  border-radius: 3px; padding: 1rem 0.75rem; text-align: center;
+  position: relative; overflow: hidden; transition: border-color 0.2s;
 }
 .metric-card::before {
-    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-    background: linear-gradient(90deg, #0ea5e9, #2563eb);
-    border-radius: 14px 14px 0 0;
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: #f5a623;
 }
-.metric-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-1px); }
+.metric-card:hover { border-color: #2a3444; }
 .metric-label {
-    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.7px;
-    text-transform: uppercase; color: #94a3b8; margin-bottom: 0.5rem;
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 500;
+  letter-spacing: 1px; text-transform: uppercase; color: #6b7a8d; margin-bottom: 0.5rem;
 }
 .metric-value {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: clamp(0.85rem, 1.1vw, 1.25rem);
-    font-weight: 500; color: #0f172a;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: clamp(0.85rem, 1.1vw, 1.2rem);
+  font-weight: 500; color: #e8edf4;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.metric-value.positive { color: #16a34a; }
-.metric-value.negative { color: #dc2626; }
+.metric-value.positive { color: #00d4aa; }
+.metric-value.negative { color: #ff4d4d; }
+.metric-value.neutral  { color: #f5a623; }
 
 /* ── Section headers ── */
 .section-header {
-    font-size: 0.72rem; font-weight: 700; letter-spacing: 1px;
-    text-transform: uppercase; color: #0ea5e9;
-    padding: 0.4rem 0 0.5rem;
-    border-bottom: 2px solid #e2e8f0;
-    margin-bottom: 1rem; margin-top: 1.75rem;
-    display: flex; align-items: center; gap: 0.5rem;
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem; font-weight: 600;
+  letter-spacing: 2px; text-transform: uppercase; color: #f5a623;
+  padding: 0.4rem 0 0.5rem; border-bottom: 1px solid #1e2530;
+  margin-bottom: 1rem; margin-top: 1.75rem;
+  display: flex; align-items: center; gap: 0.5rem;
 }
-.section-header::before {
-    content: ''; display: inline-block; width: 3px; height: 14px;
-    background: linear-gradient(180deg, #0ea5e9, #2563eb);
-    border-radius: 2px; flex-shrink: 0;
-}
+.section-header::before { content: '──'; color: #3a4558; font-size: 0.58rem; flex-shrink: 0; }
 
-/* ── Feature cards (landing) ── */
+/* ── Feature cards ── */
 .feature-card {
-    background: #ffffff; border: 1px solid #e2e8f0;
-    border-radius: 16px; padding: 1.5rem; height: 100%;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-    transition: box-shadow 0.2s, transform 0.2s;
+  background: #0f1217; border: 1px solid #1e2530;
+  border-radius: 3px; padding: 1.5rem; height: 100%;
+  transition: border-color 0.2s;
 }
-.feature-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.1); transform: translateY(-2px); }
-.feature-card-icon {
-    font-size: 1.8rem; margin-bottom: 0.75rem; display: block;
-}
-.feature-card-title {
-    font-size: 1rem; font-weight: 700; color: #0f172a; margin-bottom: 0.35rem;
-}
-.feature-card-subtitle {
-    font-size: 0.78rem; color: #64748b; margin-bottom: 1rem;
-}
-.feature-card-list {
-    font-size: 0.84rem; color: #475569; line-height: 2; list-style: none; padding: 0; margin: 0;
-}
-.feature-card-list li::before { content: "✓ "; color: #0ea5e9; font-weight: 700; }
+.feature-card:hover { border-color: #f5a623; }
+.feature-card-icon { font-size: 1.5rem; margin-bottom: 0.75rem; display: block; }
+.feature-card-title { font-family: 'IBM Plex Mono', monospace; font-size: 0.9rem; font-weight: 600; color: #e8edf4; margin-bottom: 0.35rem; letter-spacing: 0.5px; }
+.feature-card-subtitle { font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: #6b7a8d; margin-bottom: 1rem; }
+.feature-card-list { font-size: 0.82rem; color: #6b7a8d; line-height: 2; list-style: none; padding: 0; margin: 0; }
+.feature-card-list li::before { content: "› "; color: #f5a623; font-weight: 700; }
 
 /* ── Quick-start chips ── */
-.quickstart-bar {
-    display: flex; gap: 0.6rem; flex-wrap: wrap;
-    margin-bottom: 1rem;
-}
+.quickstart-bar { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .quickstart-chip {
-    background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 20px;
-    padding: 4px 14px; font-size: 0.8rem; font-weight: 600; color: #334155;
-    cursor: pointer; font-family: 'JetBrains Mono', monospace;
-    transition: all 0.15s;
+  background: #0f1217; border: 1px solid #1e2530; border-radius: 2px;
+  padding: 4px 14px; font-size: 0.78rem; font-weight: 600;
+  font-family: 'IBM Plex Mono', monospace; color: #6b7a8d; cursor: pointer;
+  letter-spacing: 1px; transition: all 0.15s;
 }
-.quickstart-chip:hover {
-    background: #0ea5e9; border-color: #0ea5e9; color: white;
-}
+.quickstart-chip:hover { background: rgba(245,166,35,0.1); border-color: #f5a623; color: #f5a623; }
 
 /* ── Mover cards ── */
 .mover-card {
-    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px;
-    padding: 0.7rem 1rem; margin-bottom: 0.4rem;
-    display: flex; justify-content: space-between; align-items: center;
-    transition: box-shadow 0.15s;
+  background: #0f1217; border: 1px solid #1e2530; border-radius: 3px;
+  padding: 0.7rem 1rem; margin-bottom: 0.4rem;
+  display: flex; justify-content: space-between; align-items: center;
+  transition: border-color 0.15s;
 }
-.mover-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.mover-card:hover { border-color: #2a3444; }
 
 /* ── Stats bar ── */
 .stats-bar {
-    display: flex; gap: 1px; background: #e2e8f0;
-    border-radius: 12px; overflow: hidden; margin-bottom: 1.5rem;
-    border: 1px solid #e2e8f0;
+  display: flex; gap: 1px; background: #1e2530;
+  border-radius: 3px; overflow: hidden; margin-bottom: 1.5rem;
+  border: 1px solid #1e2530;
 }
-.stats-bar-item {
-    flex: 1; background: #ffffff; padding: 0.9rem 1rem; text-align: center;
-}
-.stats-bar-val { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #0f172a; }
-.stats-bar-lbl { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+.stats-bar-item { flex: 1; background: #0f1217; padding: 0.9rem 1rem; text-align: center; }
+.stats-bar-val { font-family: 'IBM Plex Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #f5a623; }
+.stats-bar-lbl { font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem; color: #3a4558; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
 
 /* ── Pro badge ── */
 .pro-badge {
-    background: linear-gradient(135deg, #0ea5e9, #2563eb);
-    color: white; font-size: 0.6rem; font-weight: 700;
-    padding: 2px 8px; border-radius: 20px;
-    letter-spacing: 0.5px; margin-left: 8px; vertical-align: middle;
+  background: #f5a623; color: #0a0c0f;
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 700;
+  padding: 2px 8px; border-radius: 2px; letter-spacing: 1px;
+  margin-left: 8px; vertical-align: middle;
 }
 
 /* ── Founder cards ── */
-.founder-card {
-    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;
-    padding: 1.75rem; box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-}
-.founder-quote { font-size: 0.92rem; color: #475569; line-height: 1.8; font-style: italic; margin-bottom: 1.25rem; border-left: 3px solid #0ea5e9; padding-left: 1rem; }
-.founder-name  { font-weight: 700; color: #0f172a; font-size: 0.95rem; }
-.founder-school{ font-size: 0.8rem; color: #94a3b8; margin-top: 2px; }
-.founder-role  { font-size: 0.78rem; color: #0ea5e9; margin-top: 3px; font-weight: 600; }
+.founder-card { background: #0f1217; border: 1px solid #1e2530; border-radius: 3px; padding: 1.75rem; }
+.founder-quote { font-size: 0.88rem; color: #6b7a8d; line-height: 1.8; font-style: italic; margin-bottom: 1.25rem; border-left: 2px solid #f5a623; padding-left: 1rem; }
+.founder-name  { font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: #e8edf4; font-size: 0.9rem; letter-spacing: 0.5px; }
+.founder-school{ font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: #3a4558; margin-top: 3px; }
+.founder-role  { font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; color: #f5a623; margin-top: 3px; font-weight: 500; }
 
-/* ── Disclaimer / warning ── */
+/* ── Disclaimer ── */
 .disclaimer {
-    background: #fffbeb; border: 1px solid #fcd34d; border-radius: 10px;
-    padding: 0.75rem 1rem; font-size: 0.78rem; color: #92400e; margin-top: 1.5rem;
+  background: rgba(245,166,35,0.04); border: 1px solid rgba(245,166,35,0.12);
+  border-radius: 3px; padding: 0.75rem 1rem;
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: #6b7a8d; margin-top: 1.5rem;
 }
 
 /* ── Pro locked ── */
-.pro-locked {
-    background: linear-gradient(135deg, #0f172a, #1e293b);
-    border: 1px solid #334155; border-radius: 16px;
-    padding: 2.5rem; text-align: center; margin: 1rem 0;
-}
+.pro-locked { background: #0f1217; border: 1px solid #1e2530; border-radius: 3px; padding: 2.5rem; text-align: center; margin: 1rem 0; }
 
 /* ── Tooltip ── */
 .tooltip-wrap { position: relative; display: inline-block; cursor: help; }
 .tooltip-wrap .tooltip-text {
-    visibility: hidden; opacity: 0; background: #1e293b; color: #e2e8f0;
-    font-size: 0.78rem; border-radius: 8px; padding: 0.5rem 0.75rem;
-    position: absolute; z-index: 999; bottom: 125%; left: 50%; transform: translateX(-50%);
-    width: 200px; text-align: left; line-height: 1.5;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-    transition: opacity 0.2s; pointer-events: none;
+  visibility: hidden; opacity: 0; background: #151a22; color: #e8edf4;
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem;
+  border-radius: 3px; padding: 0.5rem 0.75rem;
+  position: absolute; z-index: 999; bottom: 125%; left: 50%; transform: translateX(-50%);
+  width: 200px; text-align: left; line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6); border: 1px solid #2a3444;
+  transition: opacity 0.2s; pointer-events: none;
 }
 .tooltip-wrap:hover .tooltip-text { visibility: visible; opacity: 1; }
 
 /* ── Analysis summary ── */
 .summary-box {
-    background: linear-gradient(135deg, #f8fafc, #f1f5f9);
-    border: 1px solid #e2e8f0; border-radius: 14px;
-    padding: 1.5rem; font-size: 0.9rem; color: #334155;
-    line-height: 1.85; border-left: 4px solid #0ea5e9;
+  background: #0f1217; border: 1px solid #1e2530;
+  border-left: 3px solid #f5a623; border-radius: 3px;
+  padding: 1.5rem; font-size: 0.88rem; color: #6b7a8d;
+  line-height: 1.85; font-family: 'IBM Plex Sans', sans-serif;
 }
 
 /* ── Download buttons ── */
 .stDownloadButton button {
-    border-radius: 10px !important; font-weight: 600 !important;
-    font-size: 0.85rem !important; padding: 0.6rem 1.2rem !important;
-    transition: transform 0.15s, box-shadow 0.15s !important;
+  border-radius: 2px !important; font-family: 'IBM Plex Mono', monospace !important;
+  font-weight: 700 !important; font-size: 0.8rem !important;
+  letter-spacing: 1px !important; text-transform: uppercase !important;
+  padding: 0.6rem 1.2rem !important; transition: opacity 0.2s !important;
 }
-.stDownloadButton button:hover {
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 12px rgba(14,165,233,0.3) !important;
-}
+.stDownloadButton button:hover { opacity: 0.85 !important; transform: none !important; }
 
 /* ── Run button ── */
 [data-testid="stSidebar"] .stButton [kind="primary"] {
-    background: linear-gradient(135deg, #0ea5e9, #2563eb) !important;
-    border: none !important; font-weight: 700 !important;
-    letter-spacing: 0.3px !important; font-size: 0.9rem !important;
-    box-shadow: 0 2px 8px rgba(14,165,233,0.3) !important;
+  background: #f5a623 !important; color: #0a0c0f !important;
+  border: none !important; font-weight: 700 !important;
+  font-family: 'IBM Plex Mono', monospace !important;
+  letter-spacing: 1.5px !important; font-size: 0.85rem !important; text-transform: uppercase !important;
 }
 
 /* ── Sidebar group label ── */
 .sidebar-group {
-    font-size: 0.68rem; font-weight: 700; letter-spacing: 1px;
-    text-transform: uppercase; color: #475569;
-    padding: 0.5rem 0 0.3rem; border-bottom: 1px solid #1e293b;
-    margin-bottom: 0.5rem;
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600;
+  letter-spacing: 2px; text-transform: uppercase; color: #f5a623;
+  padding: 0.5rem 0 0.3rem; border-bottom: 1px solid #1e2530; margin-bottom: 0.5rem;
 }
 
 /* ── Page footer ── */
 .page-footer {
-    text-align: center; padding: 2rem 0 1rem;
-    border-top: 1px solid #e2e8f0; margin-top: 3rem;
-    color: #94a3b8; font-size: 0.78rem;
+  text-align: center; padding: 2rem 0 1rem; border-top: 1px solid #1e2530;
+  margin-top: 3rem; font-family: 'IBM Plex Mono', monospace; color: #3a4558; font-size: 0.7rem;
 }
-.page-footer a { color: #0ea5e9; text-decoration: none; }
+.page-footer a { color: #f5a623; text-decoration: none; }
+
+/* ── Dataframes ── */
+[data-testid="stDataFrame"] { background: #0f1217 !important; }
 
 /* ── Scrollbar ── */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #f1f5f9; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0a0c0f; }
+::-webkit-scrollbar-thumb { background: #1e2530; border-radius: 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -401,7 +388,7 @@ st.markdown("""
         <span class="badge">Monte Carlo</span>
         <span class="badge">Portfolio Builder</span>
         <span class="badge">Excel &amp; PowerPoint Export</span>
-        <span style="color:#334155;margin-left:0.5rem">· Powered by Polygon.io</span>
+        <span style="color:#6b7a8d;margin-left:0.5rem">· Powered by Polygon.io</span>
     </div>
     <div class="main-header-stats">
         <div class="main-header-stat">
@@ -430,10 +417,10 @@ with st.sidebar:
     if SHOW_PRICING:
         if st.session_state["is_pro"]:
             st.markdown("""
-            <div style="background:linear-gradient(135deg,#0c4a6e,#1e3a5f);
-                        border:1px solid #0ea5e9;border-radius:12px;
+            <div style="background:linear-gradient(135deg,#0f1217,#151a22);
+                        border:1px solid rgba(245,166,35,0.3);border-radius:2px;
                         padding:0.75rem 1rem;margin-bottom:1.25rem;text-align:center">
-                <span style="color:#38bdf8;font-weight:700;font-size:0.82rem;
+                <span style="color:#f5a623;font-weight:700;font-size:0.82rem;
                              letter-spacing:0.5px">⚡ PRO MEMBER</span>
             </div>
             """, unsafe_allow_html=True)
@@ -443,10 +430,10 @@ with st.sidebar:
                 st.rerun()
     else:
         st.markdown("""
-        <div style="background:linear-gradient(135deg,#0c4a6e,#1e3a5f);
-                    border:1px solid #0ea5e9;border-radius:12px;
+        <div style="background:linear-gradient(135deg,#0f1217,#151a22);
+                    border:1px solid rgba(245,166,35,0.3);border-radius:2px;
                     padding:0.7rem 1rem;margin-bottom:1.25rem;text-align:center">
-            <span style="color:#38bdf8;font-weight:700;font-size:0.8rem;letter-spacing:0.5px">
+            <span style="color:#f5a623;font-weight:700;font-size:0.8rem;letter-spacing:0.5px">
                 ⚡ STOCKWIZARD
             </span>
         </div>
@@ -529,17 +516,17 @@ with st.sidebar:
                 st.markdown(
                     '<div style="font-size:0.73rem;line-height:1.6;'
                     'padding:0.65rem 0.75rem;'
-                    'background:rgba(14,165,233,0.07);'
-                    'border-radius:8px;'
-                    'border:1px solid #1e3a5f;'
-                    'border-left:3px solid #0ea5e9;'
+                    'background:rgba(245,166,35,0.05);'
+                    'border-radius:2px;'
+                    'border:1px solid #1e2530;'
+                    'border-left:3px solid #f5a623;'
                     'margin-bottom:0.5rem;'
-                    'font-family:Inter,sans-serif">'
-                    'Our <span style="color:#38bdf8 !important;font-weight:600">Custom Forecast</span> '
+                    'font-family:IBM Plex Sans,sans-serif">'
+                    'Our <span style="color:#f5a623 !important;font-weight:600">Custom Forecast</span> '
                     'combines three models — '
-                    '<span style="color:#38bdf8 !important;font-weight:500">GARCH</span> volatility modeling, '
-                    '<span style="color:#38bdf8 !important;font-weight:500">Monte Carlo</span> simulation, '
-                    'and a <span style="color:#38bdf8 !important;font-weight:500">ML ensemble</span> '
+                    '<span style="color:#f5a623 !important;font-weight:500">GARCH</span> volatility modeling, '
+                    '<span style="color:#f5a623 !important;font-weight:500">Monte Carlo</span> simulation, '
+                    'and a <span style="color:#f5a623 !important;font-weight:500">ML ensemble</span> '
                     '(Random Forest / XGBoost) — for smarter, more adaptive price projections. '
                     'GARCH captures volatility clustering, Monte Carlo simulates thousands of '
                     'price paths, and the ML model adds a data-driven drift signal — '
@@ -617,7 +604,7 @@ with tab1:
 
         # ── Quick-start chips ─────────────────────────────────────────────────
         st.markdown("""
-        <div style="margin-bottom:0.5rem;color:#64748b;font-size:0.82rem;font-weight:500">
+        <div style="margin-bottom:0.5rem;color:#6b7a8d;font-size:0.82rem;font-weight:500">
             Try a quick example:
         </div>
         <div class="quickstart-bar">
@@ -629,7 +616,7 @@ with tab1:
             <span class="quickstart-chip">AMZN</span>
             <span class="quickstart-chip">MSFT</span>
         </div>
-        <div style="font-size:0.78rem;color:#94a3b8;margin-bottom:1.5rem">
+        <div style="font-size:0.78rem;color:#6b7a8d;margin-bottom:1.5rem">
             ↑ Type any ticker in the sidebar and click Run Analysis
         </div>
         """, unsafe_allow_html=True)
@@ -668,7 +655,7 @@ with tab1:
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("""
-            <div style="font-size:0.78rem;font-weight:700;color:#16a34a;letter-spacing:0.5px;
+            <div style="font-size:0.78rem;font-weight:700;color:#00d4aa;letter-spacing:0.5px;
                         text-transform:uppercase;margin-bottom:0.6rem">
                 ▲ Top Gainers
             </div>""", unsafe_allow_html=True)
@@ -676,18 +663,18 @@ with tab1:
                 for g in gainers:
                     st.markdown(f"""
                     <div class="mover-card">
-                        <span style="font-weight:700;color:#0f172a;font-size:0.9rem">{g['Ticker']}</span>
-                        <span style="font-family:'JetBrains Mono',monospace;font-size:0.85rem;color:#475569">{g['Price']}</span>
-                        <span style="color:#16a34a;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:0.9rem">{g['Change']}</span>
+                        <span style="font-weight:700;color:#e8edf4;font-size:0.9rem">{g['Ticker']}</span>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.85rem;color:#6b7a8d">{g['Price']}</span>
+                        <span style="color:#00d4aa;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:0.9rem">{g['Change']}</span>
                     </div>
                     """, unsafe_allow_html=True)
             else:
-                st.markdown("""<div style="color:#94a3b8;font-size:0.82rem;padding:0.5rem">
+                st.markdown("""<div style="color:#6b7a8d;font-size:0.82rem;padding:0.5rem">
                     Market data unavailable</div>""", unsafe_allow_html=True)
 
         with col2:
             st.markdown("""
-            <div style="font-size:0.78rem;font-weight:700;color:#dc2626;letter-spacing:0.5px;
+            <div style="font-size:0.78rem;font-weight:700;color:#ff4d4d;letter-spacing:0.5px;
                         text-transform:uppercase;margin-bottom:0.6rem">
                 ▼ Top Losers
             </div>""", unsafe_allow_html=True)
@@ -695,13 +682,13 @@ with tab1:
                 for l in losers:
                     st.markdown(f"""
                     <div class="mover-card">
-                        <span style="font-weight:700;color:#0f172a;font-size:0.9rem">{l['Ticker']}</span>
-                        <span style="font-family:'JetBrains Mono',monospace;font-size:0.85rem;color:#475569">{l['Price']}</span>
-                        <span style="color:#dc2626;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:0.9rem">{l['Change']}</span>
+                        <span style="font-weight:700;color:#e8edf4;font-size:0.9rem">{l['Ticker']}</span>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.85rem;color:#6b7a8d">{l['Price']}</span>
+                        <span style="color:#ff4d4d;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:0.9rem">{l['Change']}</span>
                     </div>
                     """, unsafe_allow_html=True)
             else:
-                st.markdown("""<div style="color:#94a3b8;font-size:0.82rem;padding:0.5rem">
+                st.markdown("""<div style="color:#6b7a8d;font-size:0.82rem;padding:0.5rem">
                     Market data unavailable</div>""", unsafe_allow_html=True)
 
         # ── Feature cards ─────────────────────────────────────────────────────
@@ -725,10 +712,10 @@ with tab1:
             </div>""", unsafe_allow_html=True)
         with c2:
             st.markdown("""
-            <div class="feature-card" style="border-color:#0ea5e9;border-top-color:#0ea5e9">
+            <div class="feature-card" style="border-color:#f5a623;border-top-color:#f5a623">
                 <span class="feature-card-icon">⚡</span>
                 <div class="feature-card-title">Day Trader Mode</div>
-                <div class="feature-card-subtitle" style="color:#0ea5e9">Pro · Real-time intraday</div>
+                <div class="feature-card-subtitle" style="color:#f5a623">Pro · Real-time intraday</div>
                 <ul class="feature-card-list">
                     <li>Live candlestick charts</li>
                     <li>Real-time price (30s refresh)</li>
@@ -740,10 +727,10 @@ with tab1:
             </div>""", unsafe_allow_html=True)
         with c3:
             st.markdown("""
-            <div class="feature-card" style="border-color:#8b5cf6;border-top-color:#8b5cf6">
+            <div class="feature-card" style="border-color:#f5a623;border-top-color:#f5a623">
                 <span class="feature-card-icon">💼</span>
                 <div class="feature-card-title">Portfolio Builder</div>
-                <div class="feature-card-subtitle" style="color:#8b5cf6">Pro · Quant-grade optimisation</div>
+                <div class="feature-card-subtitle" style="color:#f5a623">Pro · Quant-grade optimisation</div>
                 <ul class="feature-card-list">
                     <li>Mean-variance optimisation</li>
                     <li>Efficient frontier chart</li>
@@ -769,12 +756,12 @@ with tab1:
             with col:
                 st.markdown(f"""
                 <div style="text-align:center;padding:1.25rem 0.5rem">
-                    <div style="width:44px;height:44px;background:linear-gradient(135deg,#0ea5e9,#2563eb);
-                                border-radius:50%;display:flex;align-items:center;justify-content:center;
-                                margin:0 auto 0.75rem;font-size:1.1rem;font-weight:700;color:white;
-                                box-shadow:0 2px 8px rgba(14,165,233,0.35)">{num}</div>
-                    <div style="font-weight:700;color:#0f172a;font-size:0.9rem;margin-bottom:0.35rem">{title}</div>
-                    <div style="color:#64748b;font-size:0.8rem;line-height:1.5">{desc}</div>
+                    <div style="width:44px;height:44px;background:#f5a623;
+                                border-radius:3px;display:flex;align-items:center;justify-content:center;
+                                margin:0 auto 0.75rem;font-size:1.1rem;font-weight:700;color:#0a0c0f;
+                                box-shadow:none">{num}</div>
+                    <div style="font-weight:700;color:#e8edf4;font-size:0.9rem;margin-bottom:0.35rem">{title}</div>
+                    <div style="color:#6b7a8d;font-size:0.8rem;line-height:1.5">{desc}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -786,7 +773,7 @@ with tab1:
             <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
                 <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0434.jpeg"
                      style="width:72px;height:72px;border-radius:50%;object-fit:cover;
-                            flex-shrink:0;border:3px solid #0ea5e9;margin-top:4px">
+                            flex-shrink:0;border:3px solid #f5a623;margin-top:4px">
                 <div>
                     <div class="founder-quote">
                         "I built StockWizard because I was tired of spending hours pulling financial
@@ -804,7 +791,7 @@ with tab1:
             <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
                 <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0433.jpeg"
                      style="width:72px;height:72px;border-radius:50%;object-fit:cover;
-                            flex-shrink:0;border:3px solid #0ea5e9;margin-top:4px">
+                            flex-shrink:0;border:3px solid #f5a623;margin-top:4px">
                 <div>
                     <div class="founder-quote">
                         "My role was making sure the analysis was rigorous and the experience was seamless.
@@ -863,12 +850,12 @@ with tab1:
 
         # Asset type badge in UI
         if is_crypto:
-            st.markdown(f'<span style="background:#f59e0b;color:#0f172a;font-size:0.7rem;font-weight:700;'
-                        f'padding:3px 10px;border-radius:20px;letter-spacing:0.5px">CRYPTO</span>',
+            st.markdown(f'<span style="background:#f5a623;color:#0a0c0f;font-size:0.7rem;font-weight:700;'
+                        f'padding:3px 10px;border-radius:2px;letter-spacing:0.5px">CRYPTO</span>',
                         unsafe_allow_html=True)
         elif is_etf:
-            st.markdown(f'<span style="background:#8b5cf6;color:#fff;font-size:0.7rem;font-weight:700;'
-                        f'padding:3px 10px;border-radius:20px;letter-spacing:0.5px">ETF</span>',
+            st.markdown(f'<span style="background:#4a9eff;color:#0a0c0f;font-size:0.7rem;font-weight:700;'
+                        f'padding:3px 10px;border-radius:2px;letter-spacing:0.5px">ETF</span>',
                         unsafe_allow_html=True)
 
         # Live price ticker
@@ -879,16 +866,16 @@ with tab1:
             st.markdown(f"""
             <div class="live-ticker">
                 <div>
-                    <span style="color:#94a3b8;font-size:0.8rem;font-weight:600;
+                    <span style="color:#6b7a8d;font-size:0.8rem;font-weight:600;
                                  letter-spacing:0.5px;text-transform:uppercase">{ticker_input}</span>
                     <div class="live-price">${live['price']:,.2f}</div>
                     <span class="{change_cls}">{sign}{live['change']:,.2f} ({sign}{live['pct']:.2f}%)</span>
                 </div>
                 <div style="text-align:right">
                     <div><span class="live-dot"></span>
-                         <span style="color:#22c55e;font-size:0.78rem">Live</span></div>
-                    <div style="color:#475569;font-size:0.75rem;margin-top:4px">Updated {live['time']}</div>
-                    <div style="color:#475569;font-size:0.72rem">Refreshes every 30s</div>
+                         <span style="color:#00d4aa;font-size:0.78rem">Live</span></div>
+                    <div style="color:#6b7a8d;font-size:0.75rem;margin-top:4px">Updated {live['time']}</div>
+                    <div style="color:#6b7a8d;font-size:0.72rem">Refreshes every 30s</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -912,24 +899,25 @@ with tab1:
                     x=intraday_df["Time"],
                     open=intraday_df["Open"], high=intraday_df["High"],
                     low=intraday_df["Low"],   close=intraday_df["Close"],
-                    increasing_line_color="#22c55e", decreasing_line_color="#ef4444",
+                    increasing_line_color="#00d4aa", decreasing_line_color="#ff4d4d",
                     name=ticker_input,
                 )])
                 fig_candle.add_trace(go.Bar(
                     x=intraday_df["Time"], y=intraday_df["Volume"], name="Volume",
-                    marker_color=["#22c55e" if c >= o else "#ef4444"
+                    marker_color=["#00d4aa" if c >= o else "#ff4d4d"
                                   for c, o in zip(intraday_df["Close"], intraday_df["Open"])],
                     opacity=0.4, yaxis="y2",
                 ))
                 fig_candle.update_layout(
-                    height=500, template="plotly_white",
+                    height=500, template=None,
+                    plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                     margin=dict(l=0,r=0,t=10,b=0),
                     xaxis_rangeslider_visible=False,
-                    yaxis=dict(title="Price ($)", showgrid=True, gridcolor="#f1f5f9", side="right"),
+                    yaxis=dict(title="Price ($)", showgrid=True, gridcolor="#1e2530", side="right", color="#6b7a8d"),
                     yaxis2=dict(title="Volume", overlaying="y", side="left",
                                 showgrid=False, range=[0, intraday_df["Volume"].max() * 5]),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                    font=dict(family="DM Sans"),
+                    font=dict(family="IBM Plex Mono", color="#e8edf4"),
                 )
                 st.plotly_chart(fig_candle, use_container_width=True)
 
@@ -948,28 +936,30 @@ with tab1:
                             st.markdown('<div class="section-header">RSI (14)</div>', unsafe_allow_html=True)
                             fig_rsi = go.Figure()
                             fig_rsi.add_trace(go.Scatter(x=intraday_df["Time"], y=intraday_df["RSI"],
-                                                         line=dict(color="#8b5cf6", width=1.5), name="RSI"))
-                            fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ef4444", opacity=0.6)
-                            fig_rsi.add_hline(y=30, line_dash="dash", line_color="#22c55e", opacity=0.6)
-                            fig_rsi.update_layout(height=200, template="plotly_white",
+                                                         line=dict(color="#4a9eff", width=1.5), name="RSI"))
+                            fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ff4d4d", opacity=0.6)
+                            fig_rsi.add_hline(y=30, line_dash="dash", line_color="#00d4aa", opacity=0.6)
+                            fig_rsi.update_layout(height=200, template=None,
+                                                  plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                                                   margin=dict(l=0,r=0,t=5,b=0),
-                                                  yaxis=dict(range=[0,100]),
-                                                  font=dict(family="DM Sans"))
+                                                  yaxis=dict(range=[0,100], color="#6b7a8d"),
+                                                  font=dict(family="IBM Plex Mono", color="#e8edf4"))
                             st.plotly_chart(fig_rsi, use_container_width=True)
 
                         with r2:
                             st.markdown('<div class="section-header">MACD</div>', unsafe_allow_html=True)
                             fig_macd = go.Figure()
                             fig_macd.add_trace(go.Scatter(x=intraday_df["Time"], y=intraday_df["MACD"],
-                                                          line=dict(color="#0ea5e9", width=1.5), name="MACD"))
+                                                          line=dict(color="#4a9eff", width=1.5), name="MACD"))
                             fig_macd.add_trace(go.Scatter(x=intraday_df["Time"], y=intraday_df["MACD_Signal"],
-                                                          line=dict(color="#f59e0b", width=1.5), name="Signal"))
-                            hist_colors = ["#22c55e" if v >= 0 else "#ef4444" for v in intraday_df["MACD_Hist"]]
+                                                          line=dict(color="#f5a623", width=1.5), name="Signal"))
+                            hist_colors = ["#00d4aa" if v >= 0 else "#ff4d4d" for v in intraday_df["MACD_Hist"]]
                             fig_macd.add_trace(go.Bar(x=intraday_df["Time"], y=intraday_df["MACD_Hist"],
                                                       marker_color=hist_colors, name="Histogram", opacity=0.6))
-                            fig_macd.update_layout(height=200, template="plotly_white",
+                            fig_macd.update_layout(height=200, template=None,
+                                                   plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                                                    margin=dict(l=0,r=0,t=5,b=0),
-                                                   font=dict(family="DM Sans"))
+                                                   font=dict(family="IBM Plex Mono", color="#e8edf4"))
                             st.plotly_chart(fig_macd, use_container_width=True)
                 except Exception:
                     pass
@@ -1006,7 +996,7 @@ with tab1:
                 <div style="color:#fff;font-weight:600;font-size:1.1rem;margin-bottom:0.5rem">
                     Day Trader Mode is Pro Only
                 </div>
-                <div style="color:#94a3b8;font-size:0.88rem;margin-bottom:1.25rem">
+                <div style="color:#6b7a8d;font-size:0.88rem;margin-bottom:1.25rem">
                     Get live intraday charts, real-time updates, and full day trading tools for $9.99/month
                 </div>
             </div>
@@ -1249,15 +1239,15 @@ with tab1:
                                 st.markdown(f"""
                                 <div class="metric-card">
                                     <div class="metric-label">{lbl}</div>
-                                    <div style="font-size:0.88rem;font-weight:500;color:#0f172a;
+                                    <div style="font-size:0.88rem;font-weight:500;color:#e8edf4;
                                                 margin-top:0.25rem;line-height:1.4">{val}</div>
                                 </div>""", unsafe_allow_html=True)
                         st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
                         aum = meta.get("aum_b", 0)
                         exp = meta.get("expense", 0)
                         st.markdown(f"""
-                        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
-                                    padding:0.6rem 1rem;font-size:0.85rem;color:#1e40af">
+                        <div style="background:#0f1217;border:1px solid #2a3444;border-radius:2px;
+                                    padding:0.6rem 1rem;font-size:0.85rem;color:#4a9eff">
                             <strong>AUM:</strong> ${aum:,.0f}B &nbsp;·&nbsp;
                             <strong>Expense Ratio:</strong> {exp:.2f}% annually &nbsp;·&nbsp;
                             <strong>Cost on $10,000:</strong> ${exp*100:.0f}/yr
@@ -1275,16 +1265,17 @@ with tab1:
                                 x=[w for _, w in holdings],
                                 y=[t for t, _ in holdings],
                                 orientation="h",
-                                marker_color="#0ea5e9",
+                                marker_color="#4a9eff",
                                 text=[f"{w:.1f}%" for _, w in holdings],
                                 textposition="outside",
                             ))
                             fig_h.update_layout(
-                                height=300, template="plotly_white",
+                                height=300, template=None,
+                                plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                                 margin=dict(l=0, r=40, t=10, b=0),
                                 xaxis_title="Weight (%)",
-                                yaxis=dict(autorange="reversed"),
-                                font=dict(family="DM Sans"),
+                                yaxis=dict(autorange="reversed", color="#6b7a8d"),
+                                font=dict(family="IBM Plex Mono", color="#e8edf4"),
                             )
                             st.plotly_chart(fig_h, use_container_width=True)
 
@@ -1309,12 +1300,12 @@ with tab1:
                     return f"${n:,.0f}"
 
                 for col, lbl, val, color in [
-                    (cc1, "Market Cap",     fmt_large(mc_usd),                            "#0f172a"),
-                    (cc2, "24h Volume",     fmt_large(vol_24h),                           "#0f172a"),
-                    (cc3, "All-Time High",  f"${ath_val:,.2f}" if ath_val else "N/A",    "#0f172a"),
-                    (cc4, "vs ATH",         f"{ath_pct:+.1f}%" if ath_pct else "N/A",   "#dc2626" if ath_pct and ath_pct < 0 else "#16a34a"),
-                    (cc5, "7d Change",      f"{p7d:+.1f}%"  if p7d  else "N/A",         "#16a34a" if p7d  and p7d  > 0 else "#dc2626"),
-                    (cc6, "30d Change",     f"{p30d:+.1f}%" if p30d else "N/A",         "#16a34a" if p30d and p30d > 0 else "#dc2626"),
+                    (cc1, "Market Cap",     fmt_large(mc_usd),                            "#e8edf4"),
+                    (cc2, "24h Volume",     fmt_large(vol_24h),                           "#e8edf4"),
+                    (cc3, "All-Time High",  f"${ath_val:,.2f}" if ath_val else "N/A",    "#e8edf4"),
+                    (cc4, "vs ATH",         f"{ath_pct:+.1f}%" if ath_pct else "N/A",   "#ff4d4d" if ath_pct and ath_pct < 0 else "#00d4aa"),
+                    (cc5, "7d Change",      f"{p7d:+.1f}%"  if p7d  else "N/A",         "#00d4aa" if p7d  and p7d  > 0 else "#ff4d4d"),
+                    (cc6, "30d Change",     f"{p30d:+.1f}%" if p30d else "N/A",         "#00d4aa" if p30d and p30d > 0 else "#ff4d4d"),
                 ]:
                     with col:
                         st.markdown(f"""
@@ -1327,8 +1318,8 @@ with tab1:
                     sup_pct = f" ({circ/max_sup*100:.1f}% of max supply)" if max_sup else ""
                     ath_date = crypto_details.get("ath_date", "")
                     st.markdown(f"""
-                    <div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;
-                                padding:0.6rem 1rem;margin-top:0.75rem;font-size:0.85rem;color:#78350f">
+                    <div style="background:#0f1217;border:1px solid #2a3444;border-radius:2px;
+                                padding:0.6rem 1rem;margin-top:0.75rem;font-size:0.85rem;color:#6b7a8d">
                         <strong>Circulating Supply:</strong> {circ:,.0f} {ticker_input}{sup_pct}
                         {"&nbsp;·&nbsp;<strong>ATH Date:</strong> " + ath_date if ath_date else ""}
                     </div>""", unsafe_allow_html=True)
@@ -1336,56 +1327,64 @@ with tab1:
             st.markdown('<div class="section-header">Price & Moving Averages</div>', unsafe_allow_html=True)
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], name="Close",
-                                     line=dict(color="#0ea5e9", width=2)))
-            for ma, color in [(20,"#f59e0b"),(50,"#8b5cf6"),(200,"#ef4444")]:
+                                     line=dict(color="#4a9eff", width=2)))
+            for ma, color in [(20,"#f5a623"),(50,"#4a9eff"),(200,"#ff4d4d")]:
                 if f"MA{ma}" in df.columns:
                     fig.add_trace(go.Scatter(x=df["Date"], y=df[f"MA{ma}"],
                                              name=f"{ma}-Day MA",
                                              line=dict(color=color, width=1.2, dash="dot")))
             if do_sr and resistance:
                 for r in resistance[:3]:
-                    fig.add_hline(y=r, line_dash="dash", line_color="#ef4444", opacity=0.5,
+                    fig.add_hline(y=r, line_dash="dash", line_color="#ff4d4d", opacity=0.5,
                                   annotation_text=f"R ${r:,.0f}", annotation_position="right")
             if do_sr and support:
                 for s in support[:3]:
-                    fig.add_hline(y=s, line_dash="dash", line_color="#16a34a", opacity=0.5,
+                    fig.add_hline(y=s, line_dash="dash", line_color="#00d4aa", opacity=0.5,
                                   annotation_text=f"S ${s:,.0f}", annotation_position="right")
-            fig.update_layout(height=420, template="plotly_white",
+            fig.update_layout(height=420, template=None,
+                              plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                               margin=dict(l=0,r=0,t=10,b=0),
                               legend=dict(orientation="h",yanchor="bottom",y=1.02),
-                              font=dict(family="DM Sans"))
+                              font=dict(family="IBM Plex Mono", color="#e8edf4"),
+                              xaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                              yaxis=dict(gridcolor="#1e2530", color="#6b7a8d"))
             st.plotly_chart(fig, use_container_width=True)
 
             if "RSI14" in df.columns:
                 st.markdown('<div class="section-header">RSI (14)</div>', unsafe_allow_html=True)
                 fig_rsi = go.Figure()
                 fig_rsi.add_trace(go.Scatter(x=df["Date"], y=df["RSI14"],
-                                             line=dict(color="#8b5cf6",width=1.5), name="RSI"))
-                fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ef4444", opacity=0.6)
-                fig_rsi.add_hline(y=30, line_dash="dash", line_color="#16a34a", opacity=0.6)
-                fig_rsi.add_hrect(y0=70,y1=100,fillcolor="#ef4444",opacity=0.05)
-                fig_rsi.add_hrect(y0=0, y1=30, fillcolor="#16a34a",opacity=0.05)
-                fig_rsi.update_layout(height=200, template="plotly_white",
+                                             line=dict(color="#4a9eff",width=1.5), name="RSI"))
+                fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ff4d4d", opacity=0.6)
+                fig_rsi.add_hline(y=30, line_dash="dash", line_color="#00d4aa", opacity=0.6)
+                fig_rsi.add_hrect(y0=70,y1=100,fillcolor="#ff4d4d",opacity=0.05)
+                fig_rsi.add_hrect(y0=0, y1=30, fillcolor="#00d4aa",opacity=0.05)
+                fig_rsi.update_layout(height=200, template=None,
+                                      plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                                       margin=dict(l=0,r=0,t=5,b=0),
-                                      yaxis=dict(range=[0,100]),
-                                      font=dict(family="DM Sans"))
+                                      yaxis=dict(range=[0,100], color="#6b7a8d"),
+                                      xaxis=dict(color="#6b7a8d"),
+                                      font=dict(family="IBM Plex Mono", color="#e8edf4"))
                 st.plotly_chart(fig_rsi, use_container_width=True)
 
             if "BB_Upper" in df.columns:
                 st.markdown('<div class="section-header">Bollinger Bands</div>', unsafe_allow_html=True)
                 fig_bb = go.Figure()
                 fig_bb.add_trace(go.Scatter(x=df["Date"],y=df["BB_Upper"],
-                                            line=dict(color="#94a3b8",width=1),name="Upper"))
+                                            line=dict(color="#6b7a8d",width=1),name="Upper"))
                 fig_bb.add_trace(go.Scatter(x=df["Date"],y=df["BB_Lower"],
-                                            line=dict(color="#94a3b8",width=1),name="Lower",
-                                            fill="tonexty",fillcolor="rgba(148,163,184,0.1)"))
+                                            line=dict(color="#6b7a8d",width=1),name="Lower",
+                                            fill="tonexty",fillcolor="rgba(107,122,141,0.1)"))
                 fig_bb.add_trace(go.Scatter(x=df["Date"],y=df["Close"],
-                                            line=dict(color="#0ea5e9",width=1.5),name="Close"))
+                                            line=dict(color="#4a9eff",width=1.5),name="Close"))
                 fig_bb.add_trace(go.Scatter(x=df["Date"],y=df["BB_Middle"],
-                                            line=dict(color="#f59e0b",width=1,dash="dot"),name="Middle"))
-                fig_bb.update_layout(height=300,template="plotly_white",
+                                            line=dict(color="#f5a623",width=1,dash="dot"),name="Middle"))
+                fig_bb.update_layout(height=300,template=None,
+                                     plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                                      margin=dict(l=0,r=0,t=5,b=0),
-                                     font=dict(family="DM Sans"))
+                                     xaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                     yaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                     font=dict(family="IBM Plex Mono", color="#e8edf4"))
                 st.plotly_chart(fig_bb, use_container_width=True)
 
             if mc_summary:
@@ -1397,24 +1396,24 @@ with tab1:
                 if _is_custom:
                     mc_cols = st.columns(8)
                     _cards = [
-                        (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
-                        (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#f59e0b"),
-                        (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
-                        (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#0ea5e9"),
-                        (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#16a34a"),
-                        (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#8b5cf6"),
-                        (mc_cols[6],"GARCH Vol",  mc_summary.get("Ann. Volatility (GARCH)", "—"), "#0ea5e9"),
-                        (mc_cols[7],"ML Drift",   mc_summary.get("ML Drift (daily)", "—"),        "#16a34a"),
+                        (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#ff4d4d"),
+                        (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#f5a623"),
+                        (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#e8edf4"),
+                        (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#4a9eff"),
+                        (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#00d4aa"),
+                        (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#f5a623"),
+                        (mc_cols[6],"GARCH Vol",  mc_summary.get("Ann. Volatility (GARCH)", "—"), "#4a9eff"),
+                        (mc_cols[7],"ML Drift",   mc_summary.get("ML Drift (daily)", "—"),        "#00d4aa"),
                     ]
                 else:
                     mc_cols = st.columns(6)
                     _cards = [
-                        (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
-                        (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#f59e0b"),
-                        (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
-                        (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#0ea5e9"),
-                        (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#16a34a"),
-                        (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#8b5cf6"),
+                        (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#ff4d4d"),
+                        (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#f5a623"),
+                        (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#e8edf4"),
+                        (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#4a9eff"),
+                        (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#00d4aa"),
+                        (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#f5a623"),
                     ]
                 for col, label, value, color in _cards:
                     with col:
@@ -1428,17 +1427,20 @@ with tab1:
                 pcts = np.percentile(mc_sim_df.iloc[:,:200].values,[5,25,50,75,95],axis=1)
                 x    = list(range(len(pcts[0])))
                 fig_mc = go.Figure()
-                fig_mc.add_trace(go.Scatter(x=x,y=pcts[4],name="P95",line=dict(color="#16a34a",width=1.5)))
-                fig_mc.add_trace(go.Scatter(x=x,y=pcts[3],name="P75",line=dict(color="#0ea5e9",width=1),
-                                            fill="tonexty",fillcolor="rgba(14,165,233,0.08)"))
-                fig_mc.add_trace(go.Scatter(x=x,y=pcts[2],name="Median",line=dict(color="#0f172a",width=2)))
-                fig_mc.add_trace(go.Scatter(x=x,y=pcts[1],name="P25",line=dict(color="#f59e0b",width=1),
-                                            fill="tonexty",fillcolor="rgba(245,158,11,0.08)"))
-                fig_mc.add_trace(go.Scatter(x=x,y=pcts[0],name="P5",line=dict(color="#dc2626",width=1.5)))
-                fig_mc.update_layout(height=350,template="plotly_white",
+                fig_mc.add_trace(go.Scatter(x=x,y=pcts[4],name="P95",line=dict(color="#00d4aa",width=1.5)))
+                fig_mc.add_trace(go.Scatter(x=x,y=pcts[3],name="P75",line=dict(color="#4a9eff",width=1),
+                                            fill="tonexty",fillcolor="rgba(74,158,255,0.06)"))
+                fig_mc.add_trace(go.Scatter(x=x,y=pcts[2],name="Median",line=dict(color="#e8edf4",width=2)))
+                fig_mc.add_trace(go.Scatter(x=x,y=pcts[1],name="P25",line=dict(color="#f5a623",width=1),
+                                            fill="tonexty",fillcolor="rgba(245,166,35,0.06)"))
+                fig_mc.add_trace(go.Scatter(x=x,y=pcts[0],name="P5",line=dict(color="#ff4d4d",width=1.5)))
+                fig_mc.update_layout(height=350,template=None,
+                                     plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                                      margin=dict(l=0,r=0,t=5,b=0),
                                      xaxis_title="Trading Days",yaxis_title="Price ($)",
-                                     font=dict(family="DM Sans"))
+                                     xaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                     yaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                     font=dict(family="IBM Plex Mono", color="#e8edf4"))
                 st.plotly_chart(fig_mc, use_container_width=True)
 
                 # ── Custom Forecast extra charts ──────────────────────────────
@@ -1455,15 +1457,18 @@ with tab1:
                         fig_gv.add_trace(go.Scatter(
                             x=_garch_x, y=_ann_vols,
                             name="Ann. Vol (%)",
-                            line=dict(color="#0ea5e9", width=1.5),
-                            fill="tozeroy", fillcolor="rgba(14,165,233,0.08)",
+                            line=dict(color="#4a9eff", width=1.5),
+                            fill="tozeroy", fillcolor="rgba(74,158,255,0.06)",
                         ))
                         fig_gv.update_layout(
-                            height=220, template="plotly_white",
+                            height=220, template=None,
+                            plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                             margin=dict(l=0, r=0, t=5, b=0),
                             xaxis_title="Trading Days",
                             yaxis_title="Ann. Volatility (%)",
-                            font=dict(family="DM Sans"),
+                            xaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                            yaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                            font=dict(family="IBM Plex Mono", color="#e8edf4"),
                             showlegend=False,
                         )
                         st.plotly_chart(fig_gv, use_container_width=True)
@@ -1472,53 +1477,57 @@ with tab1:
                         st.markdown('<div class="section-header" style="font-size:0.85rem">ML Predicted Drift Signal</div>',
                                     unsafe_allow_html=True)
                         _drift_pct = (custom_ml_drift or 0) * 100
-                        _drift_color = "#16a34a" if _drift_pct >= 0 else "#dc2626"
+                        _drift_color = "#00d4aa" if _drift_pct >= 0 else "#ff4d4d"
                         _drift_label = "Bullish" if _drift_pct >= 0 else "Bearish"
                         st.markdown(f"""
                         <div style="display:flex;flex-direction:column;align-items:center;
                                     justify-content:center;height:180px;
-                                    background:#f8fafc;border-radius:10px;
-                                    border:1px solid #e2e8f0">
+                                    background:#0f1217;border-radius:2px;
+                                    border:1px solid #1e2530">
                             <div style="font-size:2.4rem;font-weight:700;color:{_drift_color}">
                                 {_drift_pct:+.4f}%
                             </div>
-                            <div style="font-size:0.85rem;color:#64748b;margin-top:0.4rem">
+                            <div style="font-size:0.85rem;color:#6b7a8d;margin-top:0.4rem">
                                 Daily drift per step &nbsp;·&nbsp;
                                 <span style="color:{_drift_color};font-weight:600">{_drift_label}</span>
                             </div>
-                            <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.3rem">
+                            <div style="font-size:0.72rem;color:#6b7a8d;margin-top:0.3rem">
                                 Random Forest + XGBoost ensemble
                             </div>
                         </div>""", unsafe_allow_html=True)
 
             st.markdown('<div class="section-header">Volume</div>', unsafe_allow_html=True)
-            vol_colors = ["#16a34a" if r>=0 else "#dc2626" for r in df["Daily_Return"].fillna(0)]
+            vol_colors = ["#00d4aa" if r>=0 else "#ff4d4d" for r in df["Daily_Return"].fillna(0)]
             fig_vol = go.Figure()
             fig_vol.add_trace(go.Bar(x=df["Date"],y=df["Volume"],marker_color=vol_colors,opacity=0.7))
-            fig_vol.update_layout(height=200,template="plotly_white",
+            fig_vol.update_layout(height=200,template=None,
+                                  plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                                   margin=dict(l=0,r=0,t=5,b=0),showlegend=False,
-                                  font=dict(family="DM Sans"))
+                                  xaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                  yaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                  font=dict(family="IBM Plex Mono", color="#e8edf4"))
             st.plotly_chart(fig_vol, use_container_width=True)
 
             if corr_matrix is not None:
                 st.markdown('<div class="section-header">Correlation Matrix</div>', unsafe_allow_html=True)
                 fig_corr = px.imshow(corr_matrix, text_auto=".2f",
-                                     color_continuous_scale=["#dc2626","#ffffff","#0ea5e9"],
+                                     color_continuous_scale=["#ff4d4d","#0a0c0f","#4a9eff"],
                                      zmin=-1, zmax=1, aspect="auto")
                 fig_corr.update_layout(height=280,margin=dict(l=0,r=0,t=5,b=0),
-                                       font=dict(family="DM Sans"))
+                                       plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
+                                       font=dict(family="IBM Plex Mono", color="#e8edf4"))
                 st.plotly_chart(fig_corr, use_container_width=True)
 
             if news_list:
                 st.markdown('<div class="section-header">Recent News</div>', unsafe_allow_html=True)
                 for item in news_list[:8]:
                     st.markdown(f"""
-                    <div style="padding:0.6rem 0;border-bottom:1px solid #f1f5f9">
+                    <div style="padding:0.6rem 0;border-bottom:1px solid #1e2530">
                         <div style="font-size:0.82rem;font-weight:500">
                             <a href="{item['URL']}" target="_blank"
-                               style="text-decoration:none;color:#0f172a">{item['Headline']}</a>
+                               style="text-decoration:none;color:#e8edf4">{item['Headline']}</a>
                         </div>
-                        <div style="font-size:0.72rem;color:#94a3b8;margin-top:2px">
+                        <div style="font-size:0.72rem;color:#6b7a8d;margin-top:2px">
                             {item['Publisher']} &nbsp;·&nbsp; {item['Date']}
                         </div>
                     </div>""", unsafe_allow_html=True)
@@ -1528,13 +1537,13 @@ with tab1:
 
                 _peer_colors = ["#2E75B6", "#00B0F0", "#FFC000", "#FF4136", "#2ECC71"]
                 _chart_layout = dict(
-                    plot_bgcolor="#0f1117",
-                    paper_bgcolor="#161b27",
-                    font=dict(color="#e2e8f0", family="Inter, sans-serif"),
-                    xaxis=dict(gridcolor="#1e2a3a", showgrid=True),
-                    yaxis=dict(gridcolor="#1e2a3a", showgrid=True),
+                    plot_bgcolor="#0a0c0f",
+                    paper_bgcolor="#0f1217",
+                    font=dict(color="#e8edf4", family="IBM Plex Mono"),
+                    xaxis=dict(gridcolor="#1e2530", showgrid=True, color="#6b7a8d"),
+                    yaxis=dict(gridcolor="#1e2530", showgrid=True, color="#6b7a8d"),
                     legend=dict(orientation="h", y=1.04, x=0,
-                                bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                                bgcolor="rgba(0,0,0,0)", font=dict(size=11, color="#e8edf4")),
                     margin=dict(l=60, r=20, t=50, b=50),
                     hovermode="x unified",
                 )
@@ -1562,7 +1571,7 @@ with tab1:
                     fig_cum.update_layout(
                         **_chart_layout,
                         title=dict(text="Cumulative Return Comparison (Base = 100)",
-                                   font=dict(size=14, color="#e2e8f0")),
+                                   font=dict(size=14, color="#e8edf4")),
                         yaxis_title="Index (Start = 100)",
                         xaxis_title="Date",
                         height=380,
@@ -1623,7 +1632,7 @@ with tab1:
                                 **_chart_layout,
                                 barmode="group",
                                 title=dict(text="Ann. Return vs Volatility",
-                                           font=dict(size=13, color="#e2e8f0")),
+                                           font=dict(size=13, color="#e8edf4")),
                                 yaxis_title="Percent (%)",
                                 height=300,
                             )
@@ -1643,7 +1652,7 @@ with tab1:
                             fig_sh.update_layout(
                                 **_chart_layout,
                                 title=dict(text="Sharpe Ratio Comparison",
-                                           font=dict(size=13, color="#e2e8f0")),
+                                           font=dict(size=13, color="#e8edf4")),
                                 yaxis_title="Sharpe Ratio",
                                 showlegend=False,
                                 height=300,
@@ -1660,7 +1669,7 @@ with tab1:
                         fig_dd.update_layout(
                             **_chart_layout,
                             title=dict(text="Maximum Drawdown Comparison",
-                                       font=dict(size=13, color="#e2e8f0")),
+                                       font=dict(size=13, color="#e8edf4")),
                             yaxis_title="Max Drawdown (%)",
                             showlegend=False,
                             height=280,
@@ -1720,11 +1729,11 @@ with tab2:
 with tab3:
 
     st.markdown("""
-    <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border:1px solid #334155;
-                border-radius:14px;padding:1.5rem 2rem;margin-bottom:1.5rem">
-        <div style="font-family:'DM Mono',monospace;color:#38bdf8;font-size:1.1rem;
+    <div style="background:linear-gradient(135deg,#0a0c0f,#0f1217);border:1px solid #1e2530;
+                border-radius:3px;padding:1.5rem 2rem;margin-bottom:1.5rem">
+        <div style="font-family:'IBM Plex Mono',monospace;color:#f5a623;font-size:1.1rem;
                     font-weight:500;margin-bottom:4px">🏦 Bond Analysis</div>
-        <div style="color:#94a3b8;font-size:0.85rem">
+        <div style="color:#6b7a8d;font-size:0.85rem">
             Analyse bond ETFs · Price history · Volatility · Drawdown · Yield proxy
         </div>
     </div>
@@ -1732,7 +1741,7 @@ with tab3:
 
     # ── Bond universe browser ─────────────────────────────────────────────────
     st.markdown('<div class="section-header">Bond Universe</div>', unsafe_allow_html=True)
-    st.markdown("<div style='font-size:0.85rem;color:#64748b;margin-bottom:0.75rem'>"
+    st.markdown("<div style='font-size:0.85rem;color:#6b7a8d;margin-bottom:0.75rem'>"
                 "Browse available bond ETFs by category:</div>", unsafe_allow_html=True)
 
     bond_cat_cols = st.columns(3)
@@ -1740,11 +1749,11 @@ with tab3:
         with bond_cat_cols[i % 3]:
             ticker_list = "  ·  ".join(tickers[:5])
             st.markdown(f"""
-            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+            <div style="background:#0f1217;border:1px solid #1e2530;border-radius:2px;
                         padding:0.85rem 1rem;margin-bottom:0.75rem">
                 <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.5px;
-                            text-transform:uppercase;color:#64748b;margin-bottom:0.35rem">{category}</div>
-                <div style="font-family:'DM Mono',monospace;font-size:0.78rem;color:#0f172a">{ticker_list}</div>
+                            text-transform:uppercase;color:#6b7a8d;margin-bottom:0.35rem">{category}</div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:#e8edf4">{ticker_list}</div>
             </div>""", unsafe_allow_html=True)
 
     # ── Analysis form ─────────────────────────────────────────────────────────
@@ -1785,13 +1794,13 @@ with tab3:
 
         m_cols = st.columns(6)
         for col, label, value, color in [
-            (m_cols[0], "Price",          f"${latest['Close']:,.2f}",        "#0f172a"),
-            (m_cols[1], "1Y Return",      f"{ret_1y:+.1f}%",                 "#16a34a" if ret_1y > 0 else "#dc2626"),
-            (m_cols[2], "Ann. Volatility",f"{vol_20d:.1f}%",                 "#0f172a"),
-            (m_cols[3], "60d Drawdown",   f"{drawdown_60d:.1f}%",            "#dc2626" if drawdown_60d < -5 else "#f59e0b"),
+            (m_cols[0], "Price",          f"${latest['Close']:,.2f}",        "#e8edf4"),
+            (m_cols[1], "1Y Return",      f"{ret_1y:+.1f}%",                 "#00d4aa" if ret_1y > 0 else "#ff4d4d"),
+            (m_cols[2], "Ann. Volatility",f"{vol_20d:.1f}%",                 "#e8edf4"),
+            (m_cols[3], "60d Drawdown",   f"{drawdown_60d:.1f}%",            "#ff4d4d" if drawdown_60d < -5 else "#f5a623"),
             (m_cols[4], "Sharpe Ratio",   f"{sharpe:.2f}" if not pd.isna(sharpe) else "N/A",
-                                                                              "#16a34a" if not pd.isna(sharpe) and sharpe > 1 else "#f59e0b"),
-            (m_cols[5], "vs 52W High",    f"{pct_52w_high:+.1f}%",           "#16a34a" if pct_52w_high > -5 else "#dc2626"),
+                                                                              "#00d4aa" if not pd.isna(sharpe) and sharpe > 1 else "#f5a623"),
+            (m_cols[5], "vs 52W High",    f"{pct_52w_high:+.1f}%",           "#00d4aa" if pct_52w_high > -5 else "#ff4d4d"),
         ]:
             with col:
                 st.markdown(f"""
@@ -1801,8 +1810,8 @@ with tab3:
                 </div>""", unsafe_allow_html=True)
 
         st.markdown(f"""
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
-                    padding:0.6rem 1rem;margin-top:0.75rem;font-size:0.85rem;color:#1e40af">
+        <div style="background:#0f1217;border:1px solid #2a3444;border-radius:2px;
+                    padding:0.6rem 1rem;margin-top:0.75rem;font-size:0.85rem;color:#4a9eff">
             <strong>Duration:</strong> {duration_lbl} &nbsp;·&nbsp;
             <strong>Ticker:</strong> {bond_ticker} &nbsp;·&nbsp;
             <strong>Period:</strong> {bond_period}
@@ -1812,8 +1821,8 @@ with tab3:
         st.markdown('<div class="section-header">Price History</div>', unsafe_allow_html=True)
         fig_price = go.Figure()
         fig_price.add_trace(go.Scatter(x=bdf["Date"], y=bdf["Close"],
-                                       line=dict(color="#0f172a", width=1.5), name="Price"))
-        for ma, color in [(20, "#38bdf8"), (50, "#f59e0b"), (200, "#8b5cf6")]:
+                                       line=dict(color="#e8edf4", width=1.5), name="Price"))
+        for ma, color in [(20, "#f5a623"), (50, "#f5a623"), (200, "#4a9eff")]:
             col_name = f"MA{ma}"
             if col_name in bdf.columns:
                 fig_price.add_trace(go.Scatter(x=bdf["Date"], y=bdf[col_name],
@@ -1826,12 +1835,16 @@ with tab3:
                 scale = bdf["Close"].iloc[0] / (bdf[bench_col].iloc[0] / 100)
                 fig_price.add_trace(go.Scatter(
                     x=bdf["Date"], y=bdf[bench_col] / 100 * scale,
-                    line=dict(color="#94a3b8", width=1, dash="dash"),
+                    line=dict(color="#6b7a8d", width=1, dash="dash"),
                     name=benchmarks[0],
                 ))
-        fig_price.update_layout(height=380, template="plotly_white",
+        fig_price.update_layout(height=380, template=None,
+                                plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                                 margin=dict(l=0, r=0, t=10, b=0),
-                                yaxis_title="Price ($)", font=dict(family="DM Sans"),
+                                yaxis_title="Price ($)",
+                                xaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                yaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                font=dict(family="IBM Plex Mono", color="#e8edf4"),
                                 legend=dict(orientation="h", yanchor="bottom", y=1.02))
         st.plotly_chart(fig_price, use_container_width=True)
 
@@ -1839,14 +1852,18 @@ with tab3:
         st.markdown('<div class="section-header">Drawdown</div>', unsafe_allow_html=True)
         fig_dd = go.Figure()
         fig_dd.add_trace(go.Scatter(x=bdf["Date"], y=bdf["Drawdown_60d"] * 100,
-                                    fill="tozeroy", fillcolor="rgba(220,38,38,0.15)",
-                                    line=dict(color="#dc2626", width=1.5), name="60d Drawdown"))
+                                    fill="tozeroy", fillcolor="rgba(255,77,77,0.12)",
+                                    line=dict(color="#ff4d4d", width=1.5), name="60d Drawdown"))
         fig_dd.add_trace(go.Scatter(x=bdf["Date"], y=bdf["Drawdown_20d"] * 100,
-                                    line=dict(color="#f59e0b", width=1, dash="dot"),
+                                    line=dict(color="#f5a623", width=1, dash="dot"),
                                     name="20d Drawdown"))
-        fig_dd.update_layout(height=220, template="plotly_white",
+        fig_dd.update_layout(height=220, template=None,
+                             plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                              margin=dict(l=0, r=0, t=10, b=0),
-                             yaxis_title="Drawdown (%)", font=dict(family="DM Sans"))
+                             yaxis_title="Drawdown (%)",
+                             xaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                             yaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                             font=dict(family="IBM Plex Mono", color="#e8edf4"))
         st.plotly_chart(fig_dd, use_container_width=True)
 
         # ── Volatility & momentum ─────────────────────────────────────────────
@@ -1856,10 +1873,14 @@ with tab3:
                         unsafe_allow_html=True)
             fig_vol = go.Figure()
             fig_vol.add_trace(go.Scatter(x=bdf["Date"], y=bdf["Volatility_20d"] * 100,
-                                         line=dict(color="#8b5cf6", width=1.5), name="Volatility"))
-            fig_vol.update_layout(height=220, template="plotly_white",
+                                         line=dict(color="#4a9eff", width=1.5), name="Volatility"))
+            fig_vol.update_layout(height=220, template=None,
+                                  plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                                   margin=dict(l=0, r=0, t=5, b=0),
-                                  yaxis_title="Ann. Vol (%)", font=dict(family="DM Sans"))
+                                  yaxis_title="Ann. Vol (%)",
+                                  xaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                  yaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                  font=dict(family="IBM Plex Mono", color="#e8edf4"))
             st.plotly_chart(fig_vol, use_container_width=True)
 
         with v_col2:
@@ -1868,12 +1889,16 @@ with tab3:
             mom = bdf["Price_Momentum_20d"] * 100
             fig_mom = go.Figure()
             fig_mom.add_trace(go.Bar(x=bdf["Date"], y=mom,
-                                     marker_color=["#16a34a" if v >= 0 else "#dc2626" for v in mom],
+                                     marker_color=["#00d4aa" if v >= 0 else "#ff4d4d" for v in mom],
                                      name="Momentum"))
-            fig_mom.add_hline(y=0, line_color="#94a3b8", line_width=1)
-            fig_mom.update_layout(height=220, template="plotly_white",
+            fig_mom.add_hline(y=0, line_color="#6b7a8d", line_width=1)
+            fig_mom.update_layout(height=220, template=None,
+                                  plot_bgcolor="#0a0c0f", paper_bgcolor="#0f1217",
                                   margin=dict(l=0, r=0, t=5, b=0),
-                                  yaxis_title="Return (%)", font=dict(family="DM Sans"))
+                                  yaxis_title="Return (%)",
+                                  xaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                  yaxis=dict(gridcolor="#1e2530", color="#6b7a8d"),
+                                  font=dict(family="IBM Plex Mono", color="#e8edf4"))
             st.plotly_chart(fig_mom, use_container_width=True)
 
         st.markdown("""
