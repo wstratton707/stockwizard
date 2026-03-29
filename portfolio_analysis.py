@@ -298,14 +298,14 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
     hist_mu  = port_ret.mean()
     sigma    = port_ret.std()
 
-    # Blend historical return with long-term market mean to reduce recency bias.
-    # Long-term S&P 500 daily mean ≈ 10% annually.
-    # 40% historical, 60% long-term — prevents recent bull-run from inflating projections.
-    LONGTERM_DAILY_MU = 0.10 / 252
-    mu = 0.40 * hist_mu + 0.60 * LONGTERM_DAILY_MU
+    # Blend historical return with long-term market mean.
+    # 70% historical, 30% long-term — anchors to actual portfolio performance
+    # while slightly moderating extreme recent bull/bear runs.
+    LONGTERM_DAILY_MU = 0.07 / 252   # conservative 7% long-run real equity return
+    mu = 0.70 * hist_mu + 0.30 * LONGTERM_DAILY_MU
 
-    # Hard cap: annualised mu never exceeds 15% regardless of historical period
-    mu = min(mu, 0.15 / 252)
+    # Hard cap: annualised mu never exceeds 12% regardless of historical period
+    mu = min(mu, 0.12 / 252)
 
     ann_mu_pct = mu * 252 * 100
     log(f"   Assumed annual return: {ann_mu_pct:.1f}% "
@@ -349,7 +349,7 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
             "P95":             round(pcts[4], 2),
             "total_invested":  round(tot_invested, 2),
             "prob_gain":       f"{(vals > tot_invested).mean()*100:.1f}%",
-            "prob_double":     f"{(vals > starting_capital * 2).mean()*100:.1f}%",
+            "prob_double":     f"{(vals > tot_invested * 2).mean()*100:.1f}%",
             "prob_loss_20":    f"{(vals < tot_invested * 0.8).mean()*100:.1f}%",
         }
         if target_value:
@@ -361,7 +361,7 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
 
     # Probabilities compare against total invested (starting capital + all contributions)
     prob_gain    = (fp > tot_invested).mean() * 100
-    prob_double  = (fp > starting_capital * 2).mean() * 100
+    prob_double  = (fp > tot_invested * 2).mean() * 100
     prob_loss_20 = (fp < tot_invested * 0.8).mean() * 100
     prob_goal    = (fp > target_value).mean() * 100 if target_value else None
 

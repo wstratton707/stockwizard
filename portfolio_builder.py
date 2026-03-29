@@ -1125,7 +1125,7 @@ def render_portfolio_builder(api_key, is_pro=False):
             f"Probabilities at **{sel_horizon}** · "
             f"Total invested by then: **${tot_invested_val:,.0f}** · "
             f"'Any Gain' = portfolio exceeds total invested · "
-            f"'Doubling' = exceeds 2× initial capital"
+            f"'Doubling' = exceeds 2× total invested"
         )
 
         # Probability gauges
