@@ -66,6 +66,194 @@ def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print):
     return pd.DataFrame(paths), summary
 
 
+# ── Custom Forecast (GARCH + ML + Monte Carlo) ────────────────────────────────
+
+def _fetch_yf_history(ticker, start_date, end_date):
+    """Fetch OHLCV history from Yahoo Finance."""
+    import yfinance as yf
+    start_str = start_date.strftime("%Y-%m-%d") if hasattr(start_date, "strftime") else str(start_date)
+    end_str   = end_date.strftime("%Y-%m-%d")   if hasattr(end_date,   "strftime") else str(end_date)
+    raw = yf.download(ticker, start=start_str, end=end_str, auto_adjust=True, progress=False)
+    if isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = raw.columns.get_level_values(0)
+    df = raw[["Open", "High", "Low", "Close", "Volume"]].copy()
+    df.index = pd.to_datetime(df.index)
+    df["Daily_Return"] = df["Close"].pct_change()
+    return df.dropna(subset=["Daily_Return"])
+
+
+def _fit_garch_volatility(returns, forecast_days):
+    """
+    Fit GARCH(1,1) on daily returns and produce multi-step ahead volatility forecasts.
+    Returns an array of daily sigma values (length = forecast_days).
+    """
+    from arch import arch_model
+    r_pct = returns * 100  # scale for numerical stability
+    model = arch_model(r_pct, vol="Garch", p=1, q=1, dist="normal", rescale=False)
+    res   = model.fit(disp="off", show_warning=False)
+
+    omega = float(res.params["omega"])
+    alpha = float(res.params["alpha[1]"])
+    beta  = float(res.params["beta[1]"])
+
+    # Last conditional variance (pct²)
+    h = float(res.conditional_volatility.iloc[-1]) ** 2
+
+    vols = []
+    for _ in range(forecast_days):
+        h = omega + (alpha + beta) * h   # multi-step GARCH(1,1) recursion
+        vols.append(np.sqrt(max(h, 1e-12)) / 100)  # convert back to decimal
+
+    return np.array(vols)
+
+
+def _engineer_features(df):
+    """Build ML feature matrix from OHLCV dataframe."""
+    ret   = df["Daily_Return"]
+    close = df["Close"]
+    f     = pd.DataFrame(index=df.index)
+
+    for lag in [1, 2, 3, 5, 10]:
+        f[f"ret_lag{lag}"] = ret.shift(lag)
+
+    for w in [10, 20, 60]:
+        f[f"vol_{w}d"] = ret.rolling(w).std()
+
+    # RSI-14
+    delta = close.diff()
+    gain  = delta.clip(lower=0).rolling(14).mean()
+    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+    f["rsi14"] = 100 - 100 / (1 + gain / (loss + 1e-8))
+
+    # Price / moving-average ratios
+    f["ma20_ratio"] = close / close.rolling(20).mean()
+    f["ma50_ratio"] = close / close.rolling(50).mean()
+
+    # Volume ratio vs 20-day average
+    f["vol_ratio"] = df["Volume"] / (df["Volume"].rolling(20).mean() + 1e-8)
+
+    # Target: next-day return
+    f["target"] = ret.shift(-1)
+
+    return f.dropna()
+
+
+def _train_ml_drift(df, log=print):
+    """
+    Train a Random Forest + XGBoost ensemble on engineered features.
+    Returns a predicted daily drift (float) for use in the Monte Carlo simulation.
+    """
+    try:
+        from sklearn.ensemble import RandomForestRegressor
+        from sklearn.preprocessing import StandardScaler
+
+        feat_df = _engineer_features(df)
+        if len(feat_df) < 60:
+            log("  ML: Not enough data — using historical mean drift.")
+            return float(df["Daily_Return"].mean())
+
+        X = feat_df.drop(columns=["target"]).values
+        y = feat_df["target"].values
+
+        split     = int(len(X) * 0.8)
+        X_train   = X[:split]
+        y_train   = y[:split]
+
+        scaler       = StandardScaler()
+        X_train_s    = scaler.fit_transform(X_train)
+        X_last_s     = scaler.transform(X[-1:])
+
+        rf = RandomForestRegressor(n_estimators=150, random_state=42, n_jobs=-1)
+        rf.fit(X_train_s, y_train)
+        pred_rf = float(rf.predict(X_last_s)[0])
+
+        try:
+            import xgboost as xgb
+            gb = xgb.XGBRegressor(n_estimators=150, learning_rate=0.05,
+                                   random_state=42, verbosity=0)
+        except ImportError:
+            from sklearn.ensemble import GradientBoostingRegressor
+            gb = GradientBoostingRegressor(n_estimators=150, random_state=42)
+
+        gb.fit(X_train_s, y_train)
+        pred_gb = float(gb.predict(X_last_s)[0])
+
+        drift = (pred_rf + pred_gb) / 2
+        log(f"  ML drift — RF: {pred_rf*100:.3f}%  GB: {pred_gb*100:.3f}%  Ensemble: {drift*100:.3f}%")
+        return drift
+
+    except Exception as exc:
+        log(f"  ML training failed ({exc}) — using historical mean drift.")
+        return float(df["Daily_Return"].mean())
+
+
+def run_custom_forecast(ticker, start_date, end_date,
+                        n_simulations=1000, forecast_days=252, log=print):
+    """
+    Custom Forecast: GARCH(1,1) volatility + ML-ensemble drift + Monte Carlo paths.
+
+    Returns
+    -------
+    paths_df    : pd.DataFrame  shape (forecast_days+1, n_simulations)
+    garch_vols  : np.ndarray    daily volatility curve (length = forecast_days)
+    ml_drift    : float         ML-predicted daily drift
+    summary     : dict          same key structure as run_monte_carlo summary
+    """
+    log(f"Custom Forecast: fetching {ticker} from Yahoo Finance...")
+    df = _fetch_yf_history(ticker, start_date, end_date)
+
+    returns    = df["Daily_Return"].dropna()
+    last_price = float(df["Close"].iloc[-1])
+    hist_sigma = float(returns.std())
+
+    # ── 1. GARCH volatility forecast ─────────────────────────────────────────
+    log("  GARCH(1,1): fitting model...")
+    try:
+        garch_vols = _fit_garch_volatility(returns, forecast_days)
+    except Exception as exc:
+        log(f"  GARCH failed ({exc}) — using constant historical volatility.")
+        garch_vols = np.full(forecast_days, hist_sigma)
+
+    # ── 2. ML drift ───────────────────────────────────────────────────────────
+    log("  ML ensemble: training Random Forest / XGBoost...")
+    ml_drift = _train_ml_drift(df, log=log)
+
+    # ── 3. Monte Carlo with GARCH vol + ML drift ──────────────────────────────
+    log(f"  Monte Carlo: {n_simulations:,} paths × {forecast_days} days (dynamic σ)...")
+    rand  = np.random.standard_normal((forecast_days, n_simulations))
+    paths = np.zeros((forecast_days + 1, n_simulations))
+    paths[0] = last_price
+
+    for t in range(1, forecast_days + 1):
+        sigma_t = garch_vols[t - 1]
+        mu_t    = ml_drift - 0.5 * sigma_t ** 2
+        paths[t] = paths[t - 1] * np.exp(mu_t + sigma_t * rand[t - 1])
+
+    fp   = paths[-1]
+    pcts = np.percentile(fp, [5, 25, 50, 75, 95])
+
+    summary = {
+        "Last Price":              round(last_price, 2),
+        "Forecast Horizon (days)": forecast_days,
+        "Simulations":             n_simulations,
+        "Mean Forecast":           round(float(fp.mean()), 2),
+        "Median (P50)":            round(float(pcts[2]), 2),
+        "Bear Case (P5)":          round(float(pcts[0]), 2),
+        "Low Case (P25)":          round(float(pcts[1]), 2),
+        "Bull Case (P75)":         round(float(pcts[3]), 2),
+        "Best Case (P95)":         round(float(pcts[4]), 2),
+        "Prob. of Gain":           f"{(fp > last_price).mean()*100:.1f}%",
+        "Ann. Volatility (GARCH)": f"{garch_vols.mean() * np.sqrt(252) * 100:.2f}%",
+        "ML Drift (daily)":        f"{ml_drift*100:.4f}%",
+    }
+
+    log(f"   P5 ${summary['Bear Case (P5)']:,.2f}  "
+        f"P50 ${summary['Median (P50)']:,.2f}  "
+        f"P95 ${summary['Best Case (P95)']:,.2f}")
+
+    return pd.DataFrame(paths), garch_vols, ml_drift, summary
+
+
 def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, sortino):
     latest       = df.iloc[-1]
     first        = df.iloc[0]

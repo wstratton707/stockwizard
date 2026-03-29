@@ -28,7 +28,7 @@ except ImportError:
 from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP
 from analysis import (
     detect_support_resistance, build_correlation_matrix,
-    run_monte_carlo, generate_summary_paragraph
+    run_monte_carlo, run_custom_forecast, generate_summary_paragraph
 )
 from excel_builder import build_excel
 from pptx_builder import build_stock_pptx, build_portfolio_pptx, PPTX_AVAILABLE
@@ -518,15 +518,36 @@ with st.sidebar:
         do_peers  = st.checkbox("Peer Comparison",      value=True)
 
         if do_mc:
-            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Monte Carlo</div>',
+            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Forecast Settings</div>',
                         unsafe_allow_html=True)
+            forecast_method = st.selectbox(
+                "Method",
+                ["Monte Carlo", "Custom Forecast"],
+                label_visibility="collapsed",
+            )
+            if forecast_method == "Custom Forecast":
+                st.markdown(
+                    '<div style="font-size:0.75rem;color:#64748b;line-height:1.45;'
+                    'padding:0.55rem 0.6rem;background:#f8fafc;border-radius:6px;'
+                    'border-left:3px solid #0ea5e9;margin-bottom:0.5rem">'
+                    'Our <strong>Custom Forecast</strong> combines three models — '
+                    'GARCH volatility modeling, Monte Carlo simulation, and a machine '
+                    'learning ensemble (Random Forest / XGBoost) — to generate smarter, '
+                    'more adaptive price projections. GARCH captures volatility clustering, '
+                    'Monte Carlo simulates thousands of future price paths, and our ML model '
+                    'adds a data-driven directional signal — all powered by real-time '
+                    'Yahoo Finance data.</div>',
+                    unsafe_allow_html=True,
+                )
             n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
             n_horizon = st.slider("Horizon (days)",  21,  504,  252, step=21)
         else:
+            forecast_method = "Monte Carlo"
             n_sims = 1000; n_horizon = 252
     else:
         peers_input = ""
         do_mc = do_sector = do_corr = do_sr = do_news = do_peers = False
+        forecast_method = "Monte Carlo"
         n_sims = 1000; n_horizon = 252
 
     st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
@@ -1069,10 +1090,17 @@ with tab1:
                     resistance, support = detect_support_resistance(df)
 
                 mc_sim_df = mc_summary = None
+                custom_garch_vols = custom_ml_drift = None
                 if do_mc:
-                    progress.progress(75, text="Running Monte Carlo simulation...")
-                    mc_sim_df, mc_summary = run_monte_carlo(
-                        df, n_simulations=n_sims, forecast_days=n_horizon, log=log)
+                    if forecast_method == "Custom Forecast":
+                        progress.progress(75, text="Running Custom Forecast (GARCH + ML + Monte Carlo)...")
+                        mc_sim_df, custom_garch_vols, custom_ml_drift, mc_summary = run_custom_forecast(
+                            ticker_input, date_start, date_end,
+                            n_simulations=n_sims, forecast_days=n_horizon, log=log)
+                    else:
+                        progress.progress(75, text="Running Monte Carlo simulation...")
+                        mc_sim_df, mc_summary = run_monte_carlo(
+                            df, n_simulations=n_sims, forecast_days=n_horizon, log=log)
 
                 progress.progress(85, text="Generating summary...")
                 ret      = df["Daily_Return"].dropna()
@@ -1353,16 +1381,34 @@ with tab1:
                 st.plotly_chart(fig_bb, use_container_width=True)
 
             if mc_summary:
-                st.markdown('<div class="section-header">Monte Carlo Forecast</div>', unsafe_allow_html=True)
-                mc_cols = st.columns(6)
-                for col, label, value, color in [
-                    (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
-                    (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#f59e0b"),
-                    (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
-                    (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#0ea5e9"),
-                    (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#16a34a"),
-                    (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#8b5cf6"),
-                ]:
+                _is_custom = forecast_method == "Custom Forecast"
+                _header    = "Custom Forecast" if _is_custom else "Monte Carlo Forecast"
+                st.markdown(f'<div class="section-header">{_header}</div>', unsafe_allow_html=True)
+
+                # ── Metric cards ──────────────────────────────────────────────
+                if _is_custom:
+                    mc_cols = st.columns(8)
+                    _cards = [
+                        (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
+                        (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#f59e0b"),
+                        (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
+                        (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#0ea5e9"),
+                        (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#16a34a"),
+                        (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#8b5cf6"),
+                        (mc_cols[6],"GARCH Vol",  mc_summary.get("Ann. Volatility (GARCH)", "—"), "#0ea5e9"),
+                        (mc_cols[7],"ML Drift",   mc_summary.get("ML Drift (daily)", "—"),        "#16a34a"),
+                    ]
+                else:
+                    mc_cols = st.columns(6)
+                    _cards = [
+                        (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
+                        (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#f59e0b"),
+                        (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
+                        (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#0ea5e9"),
+                        (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#16a34a"),
+                        (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#8b5cf6"),
+                    ]
+                for col, label, value, color in _cards:
                     with col:
                         st.markdown(f"""
                         <div class="metric-card">
@@ -1370,6 +1416,7 @@ with tab1:
                             <div class="metric-value" style="color:{color}">{value}</div>
                         </div>""", unsafe_allow_html=True)
 
+                # ── Simulated price-path fan chart ────────────────────────────
                 pcts = np.percentile(mc_sim_df.iloc[:,:200].values,[5,25,50,75,95],axis=1)
                 x    = list(range(len(pcts[0])))
                 fig_mc = go.Figure()
@@ -1385,6 +1432,56 @@ with tab1:
                                      xaxis_title="Trading Days",yaxis_title="Price ($)",
                                      font=dict(family="DM Sans"))
                 st.plotly_chart(fig_mc, use_container_width=True)
+
+                # ── Custom Forecast extra charts ──────────────────────────────
+                if _is_custom and custom_garch_vols is not None:
+                    _garch_x = list(range(len(custom_garch_vols)))
+                    _ann_vols = custom_garch_vols * np.sqrt(252) * 100
+
+                    col_garch, col_drift = st.columns(2)
+
+                    with col_garch:
+                        st.markdown('<div class="section-header" style="font-size:0.85rem">GARCH Volatility Forecast</div>',
+                                    unsafe_allow_html=True)
+                        fig_gv = go.Figure()
+                        fig_gv.add_trace(go.Scatter(
+                            x=_garch_x, y=_ann_vols,
+                            name="Ann. Vol (%)",
+                            line=dict(color="#0ea5e9", width=1.5),
+                            fill="tozeroy", fillcolor="rgba(14,165,233,0.08)",
+                        ))
+                        fig_gv.update_layout(
+                            height=220, template="plotly_white",
+                            margin=dict(l=0, r=0, t=5, b=0),
+                            xaxis_title="Trading Days",
+                            yaxis_title="Ann. Volatility (%)",
+                            font=dict(family="DM Sans"),
+                            showlegend=False,
+                        )
+                        st.plotly_chart(fig_gv, use_container_width=True)
+
+                    with col_drift:
+                        st.markdown('<div class="section-header" style="font-size:0.85rem">ML Predicted Drift Signal</div>',
+                                    unsafe_allow_html=True)
+                        _drift_pct = (custom_ml_drift or 0) * 100
+                        _drift_color = "#16a34a" if _drift_pct >= 0 else "#dc2626"
+                        _drift_label = "Bullish" if _drift_pct >= 0 else "Bearish"
+                        st.markdown(f"""
+                        <div style="display:flex;flex-direction:column;align-items:center;
+                                    justify-content:center;height:180px;
+                                    background:#f8fafc;border-radius:10px;
+                                    border:1px solid #e2e8f0">
+                            <div style="font-size:2.4rem;font-weight:700;color:{_drift_color}">
+                                {_drift_pct:+.4f}%
+                            </div>
+                            <div style="font-size:0.85rem;color:#64748b;margin-top:0.4rem">
+                                Daily drift per step &nbsp;·&nbsp;
+                                <span style="color:{_drift_color};font-weight:600">{_drift_label}</span>
+                            </div>
+                            <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.3rem">
+                                Random Forest + XGBoost ensemble
+                            </div>
+                        </div>""", unsafe_allow_html=True)
 
             st.markdown('<div class="section-header">Volume</div>', unsafe_allow_html=True)
             vol_colors = ["#16a34a" if r>=0 else "#dc2626" for r in df["Daily_Return"].fillna(0)]
