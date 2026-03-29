@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from constants import RISK_FREE_RATE
+
 POLYGON_BASE = "https://api.polygon.io"
 _PORT_CACHE  = {}
 CACHE_TTL    = 300
@@ -300,7 +302,6 @@ def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=18,
     Tickers in always_keep (SPY, QQQ, etc.) are pinned regardless of Sharpe.
     """
     from collections import defaultdict
-    RISK_FREE_RATE = 0.045  # keep in sync with portfolio_analysis.py
 
     if always_keep is None:
         always_keep = {"SPY", "QQQ", "GLD", "TLT"}

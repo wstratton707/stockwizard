@@ -35,6 +35,7 @@ from pptx_builder import build_stock_pptx, build_portfolio_pptx, PPTX_AVAILABLE
 from live_data import get_live_price, get_intraday_data, get_top_movers
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
+from constants import DEV_MODE_FREE
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -444,14 +445,17 @@ html, body, [class*="css"] {
 """, unsafe_allow_html=True)
 
 # ── Session state ─────────────────────────────────────────────────────────────
-if "is_pro"       not in st.session_state: st.session_state["is_pro"]       = False
+# DEV_MODE_FREE: is_pro starts True so every feature gate in the app unlocks.
+# When DEV_MODE_FREE = False this reverts to False and Stripe handles elevation.
+if "is_pro"       not in st.session_state: st.session_state["is_pro"]       = DEV_MODE_FREE
 if "user_email"   not in st.session_state: st.session_state["user_email"]   = ""
 if "show_payment" not in st.session_state: st.session_state["show_payment"] = False
 if "candle_tf"    not in st.session_state: st.session_state["candle_tf"]    = "5min"
 
 # ── Check returning from Stripe ───────────────────────────────────────────────
+# DEV_MODE_FREE: skip all Stripe session verification — preserved, not deleted.
 params = st.query_params
-if "session_id" in params:
+if not DEV_MODE_FREE and "session_id" in params:
     ok, email = verify_session(params["session_id"])
     if ok:
         st.session_state["is_pro"]     = True
@@ -463,7 +467,8 @@ if "session_id" in params:
         st.success("Welcome to StockWizard Pro!")
 
 # ── Re-verify Pro status on page refresh via saved email ──────────────────────
-elif not st.session_state.get("is_pro"):
+# DEV_MODE_FREE: skip subscription lookup — preserved, not deleted.
+elif not DEV_MODE_FREE and not st.session_state.get("is_pro"):
     saved_email = params.get("email", "")
     if saved_email and not st.session_state.get("_sub_checked"):
         st.session_state["_sub_checked"] = True
@@ -511,7 +516,22 @@ st.markdown("""
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     # ── Pro status / upgrade ──────────────────────────────────────────────────
-    if SHOW_PRICING:
+    if DEV_MODE_FREE:
+        # Development phase banner — replace with payment UI when DEV_MODE_FREE = False
+        st.markdown("""
+        <div style="background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.35);
+                    border-radius:4px;padding:0.6rem 0.9rem;margin-bottom:1.25rem">
+            <div style="font-size:0.62rem;font-weight:700;letter-spacing:1.5px;
+                        text-transform:uppercase;color:#f5a623;margin-bottom:3px">
+                Dev Mode
+            </div>
+            <div style="font-size:0.75rem;color:#94a3b8;line-height:1.4">
+                All features unlocked.<br>Payments disabled.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    elif SHOW_PRICING:
+        # ── Original payment UI preserved below — do not delete ──────────────
         if st.session_state["is_pro"]:
             st.markdown("""
             <div style="background:linear-gradient(135deg,#0c1e35,#1e3a5f);
@@ -664,7 +684,8 @@ with st.sidebar:
             st.error("Please enter a valid email.")
 
 # ── Payment modal ─────────────────────────────────────────────────────────────
-if SHOW_PRICING and st.session_state["show_payment"] and not st.session_state["is_pro"]:
+# DEV_MODE_FREE: modal never shown — Stripe checkout logic preserved, not deleted.
+if not DEV_MODE_FREE and SHOW_PRICING and st.session_state["show_payment"] and not st.session_state["is_pro"]:
     st.markdown("---")
     st.markdown("### Upgrade to StockWizard Pro")
     col1, col2 = st.columns([2, 1])
@@ -1087,6 +1108,8 @@ with tab1:
                 st_autorefresh(interval=30_000, key="day_trader_refresh")
 
         elif mode == "Day Trader Mode" and not st.session_state["is_pro"]:
+            # DEV_MODE_FREE: is_pro is True so this branch is never reached in dev mode.
+            # Original locked-screen UI preserved below — do not delete.
             st.markdown("""
             <div class="pro-locked">
                 <div style="font-size:1.5rem;margin-bottom:0.5rem">🔒</div>
@@ -1098,7 +1121,7 @@ with tab1:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            if SHOW_PRICING:
+            if not DEV_MODE_FREE and SHOW_PRICING:
                 if st.button("Upgrade to Pro — $9.99/month", type="primary", key="upgrade_locked"):
                     st.session_state["show_payment"] = True
                     st.rerun()

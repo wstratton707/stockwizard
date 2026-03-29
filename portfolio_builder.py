@@ -5,6 +5,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 
+from constants import DEV_MODE_FREE
+
 from portfolio_data import (
     fetch_portfolio_prices, build_candidate_universe, select_by_sharpe,
     get_ticker_info, SECTOR_UNIVERSE, SECTOR_ETFS,
@@ -56,7 +58,9 @@ def _section_header(text):
 def render_portfolio_builder(api_key, is_pro=False):
     """Main entry point — renders the full portfolio builder UI."""
 
-    if not is_pro:
+    # DEV_MODE_FREE bypasses the Pro gate entirely.
+    # Original paywall UI preserved below — do not delete.
+    if not DEV_MODE_FREE and not is_pro:
         st.markdown("""
         <div style="background:#0f172a;border:1px solid #334155;border-radius:16px;
                     padding:2.5rem;text-align:center;margin:1rem 0">

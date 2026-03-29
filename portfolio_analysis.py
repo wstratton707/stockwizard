@@ -3,9 +3,7 @@ import pandas as pd
 from scipy.optimize import minimize
 from datetime import datetime, timedelta
 
-# Annualised risk-free rate used in all Sharpe / Sortino calculations.
-# Approximate 3-month US Treasury yield. Update periodically.
-RISK_FREE_RATE = 0.045  # 4.5%
+from constants import RISK_FREE_RATE
 
 
 # ── Individual stock metrics ──────────────────────────────────────────────────
@@ -262,13 +260,16 @@ def compute_backtest_metrics(backtest_df, starting_capital):
     worst_m = monthly.min()
     pct_pos = (monthly > 0).mean() * 100
 
-    # Fix 4: vs S&P 500 on same basis — return on invested capital vs SPY price return
-    sp500_ret = np.nan
+    # Use SPY column from backtest which already mirrors the contribution schedule
+    sp500_ret_matched = np.nan
     if "SP500" in backtest_df.columns and not backtest_df["SP500"].isna().all():
-        sp = backtest_df["SP500"]
-        sp500_ret = (sp.iloc[-1] / sp.iloc[0] - 1) * 100
+        sp           = backtest_df["SP500"]
+        sp500_start  = sp.iloc[0]
+        sp500_final  = sp.iloc[-1]
+        if sp500_start > 0:
+            sp500_ret_matched = (sp500_final - sp500_start) / sp500_start * 100
 
-    alpha = round(total_ret - sp500_ret, 2) if not np.isnan(sp500_ret) else "N/A"
+    alpha = round(total_ret - sp500_ret_matched, 2) if not np.isnan(sp500_ret_matched) else "N/A"
 
     return {
         "Final Value":        round(final_val, 2),
@@ -284,7 +285,7 @@ def compute_backtest_metrics(backtest_df, starting_capital):
         "Worst Month":        round(worst_m, 2),
         "% Months Positive":  round(pct_pos, 1),
         "vs S&P 500":         alpha,
-        "S&P 500 Return":     round(sp500_ret, 2) if not np.isnan(sp500_ret) else "N/A",
+        "S&P 500 Return":     round(sp500_ret_matched, 2) if not np.isnan(sp500_ret_matched) else "N/A",
     }
 
 
@@ -304,46 +305,86 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
                                monthly_contribution, forecast_years=10,
                                n_simulations=1000, target_value=None, log=print):
     """
-    Run Monte Carlo on the full portfolio preserving correlations.
-    Uses Cholesky decomposition for correlated returns.
+    Run Monte Carlo on the full portfolio preserving cross-asset correlations.
+
+    Uses Cholesky decomposition of the historical daily return correlation matrix
+    to generate correlated per-asset paths. Each simulation draws correlated
+    log-returns for all assets, computes the weighted portfolio log-return, and
+    compounds it forward with monthly contributions.
+
+    Per-asset drift is blended (70% historical, 30% long-run 7% nominal) and
+    capped at 12% annualised. Ito correction (−½σ²) is applied per asset.
     """
     log(f"Portfolio Monte Carlo: {n_simulations:,} paths × {forecast_years} years...")
 
-    tickers  = [t for t in weights.keys() if t in returns_df.columns]
-    w_arr    = np.array([weights[t] for t in tickers])
-    w_arr   /= w_arr.sum()
+    tickers = [t for t in weights.keys() if t in returns_df.columns]
+    w_arr   = np.array([weights[t] for t in tickers])
+    w_arr  /= w_arr.sum()
 
-    port_ret = returns_df[tickers] @ w_arr
-    hist_mu  = port_ret.mean()
-    sigma    = port_ret.std()
+    # --- Correlated multi-asset Monte Carlo via Cholesky decomposition ---
+    returns_matrix = returns_df[tickers]
 
-    # Blend historical return with long-term market mean.
-    # 70% historical, 30% long-term — anchors to actual portfolio performance
-    # while slightly moderating extreme recent bull/bear runs.
-    LONGTERM_DAILY_MU = 0.07 / 252   # conservative 7% long-run real equity return
-    mu = 0.70 * hist_mu + 0.30 * LONGTERM_DAILY_MU
+    # Per-asset drift and volatility
+    mu_vec    = returns_matrix.mean().values   # shape (N,)
+    sigma_vec = returns_matrix.std().values    # shape (N,)
 
-    # Hard cap: annualised mu never exceeds 12% regardless of historical period
-    mu = min(mu, 0.12 / 252)
+    # Portfolio return series for historical reference and summary volatility
+    port_ret_series = returns_matrix @ w_arr
+    hist_mu         = float(port_ret_series.mean())
+    sigma           = float(port_ret_series.std())
 
-    ann_mu_pct = mu * 252 * 100
+    # Blend per-asset historical returns with long-term market mean.
+    # 70% historical, 30% long-term — moderates extreme recent bull/bear runs.
+    LONGTERM_DAILY_MU = 0.07 / 252
+    mu_vec = 0.70 * mu_vec + 0.30 * LONGTERM_DAILY_MU
+
+    # Hard cap element-wise: no asset's annualised drift exceeds 12%
+    mu_vec = np.minimum(mu_vec, 0.12 / 252)
+
+    ann_mu_pct = float(mu_vec @ w_arr) * 252 * 100
     log(f"   Assumed annual return: {ann_mu_pct:.1f}% "
         f"(historical: {hist_mu*252*100:.1f}%, blended with 7% long-term avg, capped at 12%)")
 
-    forecast_days = forecast_years * 252
-    np.random.seed(None)
+    # Correlation matrix and Cholesky factor
+    corr_matrix = returns_matrix.corr().values
+    try:
+        L = np.linalg.cholesky(corr_matrix)
+    except np.linalg.LinAlgError:
+        # Add small diagonal perturbation if matrix is not positive definite
+        L = np.linalg.cholesky(corr_matrix + np.eye(len(tickers)) * 1e-6)
 
-    rand          = np.random.standard_normal((forecast_days, n_simulations))
-    daily_factors = np.exp((mu - 0.5 * sigma**2) + sigma * rand)
+    n_assets      = len(tickers)
+    forecast_days = forecast_years * 252
+    monthly_days  = 21
+    np.random.seed(None)
 
     paths    = np.zeros((forecast_days + 1, n_simulations))
     paths[0] = starting_capital
 
-    monthly_days = 21
-    for t in range(1, forecast_days + 1):
-        paths[t] = paths[t-1] * daily_factors[t-1]
-        if t % monthly_days == 0:
-            paths[t] += monthly_contribution
+    for sim in range(n_simulations):
+        # Draw independent standard normals, shape (forecast_days, n_assets)
+        Z = np.random.standard_normal((forecast_days, n_assets))
+        # Correlate using Cholesky factor, shape (forecast_days, n_assets)
+        Z_corr = Z @ L.T
+        # Ito-corrected log returns per asset, shape (forecast_days, n_assets)
+        log_ret = (mu_vec - 0.5 * sigma_vec ** 2) + sigma_vec * Z_corr
+        # Portfolio daily log return as weighted sum, shape (forecast_days,)
+        port_log_ret      = log_ret @ w_arr
+        daily_factors_sim = np.exp(port_log_ret)
+
+        # Efficient path construction using cumulative product.
+        # Each monthly contribution at day t_c grows forward by CP[t]/CP[t_c],
+        # so: path[t] = CP[t] * (capital + monthly * sum_{t_c<=t} 1/CP[t_c])
+        CP    = np.empty(forecast_days + 1)
+        CP[0] = 1.0
+        CP[1:] = np.cumprod(daily_factors_sim)
+
+        inv_contrib = np.zeros(forecast_days + 1)
+        for t_c in range(monthly_days, forecast_days + 1, monthly_days):
+            inv_contrib[t_c] = 1.0 / CP[t_c]
+        running_inv = np.cumsum(inv_contrib)
+
+        paths[:, sim] = CP * (starting_capital + monthly_contribution * running_inv)
 
     def _total_invested(yr):
         """Total capital put in by the end of `yr` years (contributions are monthly)."""

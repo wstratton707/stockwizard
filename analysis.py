@@ -84,12 +84,17 @@ def _fit_garch_volatility(returns, forecast_days):
     beta  = float(res.params["beta[1]"])
 
     # Last conditional variance (pct²)
-    h = float(res.conditional_volatility.iloc[-1]) ** 2
+    h0 = float(res.conditional_volatility.iloc[-1]) ** 2
 
+    # If alpha+beta >= 1 (IGARCH), long-run variance is undefined.
+    # Fall back to holding current variance constant.
+    long_run_var = omega / (1 - alpha - beta) if (alpha + beta) < 1 else h0
+
+    # Correct GARCH(1,1) multi-step ahead variance forecast
     vols = []
-    for _ in range(forecast_days):
-        h = omega + (alpha + beta) * h   # multi-step GARCH(1,1) recursion
-        vols.append(np.sqrt(max(h, 1e-12)) / 100)  # convert back to decimal
+    for i in range(1, forecast_days + 1):
+        h_i = long_run_var + (alpha + beta) ** i * (h0 - long_run_var)
+        vols.append(np.sqrt(max(h_i, 1e-12)) / 100)  # convert back to decimal
 
     return np.array(vols)
 
@@ -167,7 +172,13 @@ def _train_ml_drift(df, log=print):
 
         drift = (pred_rf + pred_gb) / 2
         log(f"  ML drift — RF: {pred_rf*100:.3f}%  GB: {pred_gb*100:.3f}%  Ensemble: {drift*100:.3f}%")
-        return drift
+
+        # Drift is capped within ±1 std of historical mean to prevent
+        # regime extrapolation over the full forecast horizon.
+        hist_mean = y_train.mean()
+        hist_std  = y_train.std()
+        ml_drift  = np.clip(drift, hist_mean - hist_std, hist_mean + hist_std)
+        return ml_drift
 
     except Exception as exc:
         log(f"  ML training failed ({exc}) — using historical mean drift.")

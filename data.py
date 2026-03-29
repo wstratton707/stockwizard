@@ -4,6 +4,8 @@ import numpy as np
 from datetime import datetime, timedelta
 import time
 
+from constants import RISK_FREE_RATE
+
 POLYGON_BASE  = "https://api.polygon.io"
 _API_CACHE    = {}
 _API_CACHE_TTL = 300  # seconds — reuse responses for 5 minutes
@@ -152,8 +154,8 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
     ann_ret  = ret.mean() * 252
     ann_std  = ret.std() * np.sqrt(252)
     downside = ret[ret < 0].std() * np.sqrt(252)
-    df["Sharpe_Ratio"]  = ann_ret / ann_std  if ann_std  else np.nan
-    df["Sortino_Ratio"] = ann_ret / downside if downside else np.nan
+    df["Sharpe_Ratio"]  = (ann_ret - RISK_FREE_RATE) / ann_std  if ann_std  else np.nan
+    df["Sortino_Ratio"] = (ann_ret - RISK_FREE_RATE) / downside if downside else np.nan
 
     return df.sort_values("Date").reset_index(drop=True)
 
@@ -310,8 +312,8 @@ def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log
     ann_ret  = ret.mean() * 252
     ann_std  = ret.std() * np.sqrt(252)
     downside = ret[ret < 0].std() * np.sqrt(252)
-    df["Sharpe_Ratio"]  = ann_ret / ann_std  if ann_std  else np.nan
-    df["Sortino_Ratio"] = ann_ret / downside if downside else np.nan
+    df["Sharpe_Ratio"]  = (ann_ret - RISK_FREE_RATE) / ann_std  if ann_std  else np.nan
+    df["Sortino_Ratio"] = (ann_ret - RISK_FREE_RATE) / downside if downside else np.nan
 
     return df.sort_values("Date").reset_index(drop=True)
 
@@ -335,17 +337,23 @@ def fetch_sector_data(ticker, api_key, sector, log=print,
 
 
 def fetch_next_earnings(ticker, api_key):
-    """Returns the next earnings date string for a ticker, or None if unavailable."""
+    # NOTE: Polygon's free tier does not provide guaranteed forward earnings dates.
+    # If next_earnings_date is unavailable, filing_date is returned as a proxy.
+    # For precise forward dates, integrate a dedicated calendar API such as
+    # Nasdaq earnings calendar or Finnhub at https://finnhub.io/docs/api/earnings-calendar
     try:
         data = _get("/vX/reference/financials", api_key, params={
-            "ticker": ticker, "timeframe": "quarterly", "limit": 1,
-            "include_sources": "false"
+            "ticker": ticker, "timeframe": "quarterly",
+            "sort": "filing_date", "order": "desc", "limit": 1,
         })
         if data and data.get("results"):
-            return data["results"][0].get("end_date", None)
+            result    = data["results"][0]
+            next_date = result.get("next_earnings_date") or result.get("filing_date")
+            if next_date:
+                return next_date
     except Exception:
         pass
-    return None
+    return "N/A"
 
 
 # ── Crypto & ETF support ─────────────────────────────────────────────────────

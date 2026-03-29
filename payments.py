@@ -8,13 +8,22 @@ try:
 except ImportError:
     pass
 
+from constants import DEV_MODE_FREE
+
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PRICE_ID   = os.environ.get("STRIPE_PRICE_ID", "")
 
-stripe.api_key = STRIPE_SECRET_KEY
+# Only initialise Stripe with the live key when payments are active.
+if not DEV_MODE_FREE:
+    stripe.api_key = STRIPE_SECRET_KEY
 
 
 def create_checkout_session(success_url, cancel_url, email=None):
+    # DEV_MODE_FREE: Stripe is disabled — callers should not reach this function,
+    # but return None safely if they do.
+    if DEV_MODE_FREE:
+        return None
+    # ── Original Stripe logic preserved below — do not delete ──
     try:
         kwargs = {
             "payment_method_types": ["card"],
@@ -33,6 +42,10 @@ def create_checkout_session(success_url, cancel_url, email=None):
 
 
 def verify_session(session_id):
+    # DEV_MODE_FREE: no Stripe session to verify.
+    if DEV_MODE_FREE:
+        return False, None
+    # ── Original Stripe logic preserved below — do not delete ──
     try:
         session = stripe.checkout.Session.retrieve(session_id)
         if session.payment_status == "paid" or session.status == "complete":
@@ -43,6 +56,10 @@ def verify_session(session_id):
 
 
 def check_subscription(email):
+    # DEV_MODE_FREE: treat every user as subscribed.
+    if DEV_MODE_FREE:
+        return True
+    # ── Original Stripe logic preserved below — do not delete ──
     try:
         customers = stripe.Customer.list(email=email, limit=1)
         if not customers.data:
