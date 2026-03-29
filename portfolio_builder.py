@@ -407,6 +407,60 @@ def render_portfolio_builder(api_key, is_pro=False):
             with col:
                 st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
 
+        # ── Side-by-Side Portfolio Strategy Comparison ───────────────────────
+        _section_header("Compare Portfolio Strategies")
+        _cmp_rows = []
+        for _ck, _clabel in [("recommended","Recommended"),("max_sharpe","Max Sharpe"),("min_vol","Min Volatility")]:
+            _cw = portfolios.get(_ck, {})
+            if not _cw:
+                continue
+            _cw = {k: v for k, v in _cw.items() if v >= 0.01}
+            _ct = sum(_cw.values())
+            _cw = {k: v/_ct for k, v in _cw.items()}
+            _ct2 = [t for t in _cw if t in returns_df.columns]
+            if not _ct2:
+                continue
+            _cwa = np.array([_cw[t] for t in _ct2]); _cwa /= _cwa.sum()
+            _car  = returns_df[_ct2].mean().values @ _cwa * 252 * 100
+            _ccov = returns_df[_ct2].cov().values * 252
+            _cvol = np.sqrt(_cwa @ _ccov @ _cwa) * 100
+            _csh  = _car / _cvol if _cvol > 0 else 0
+            _ccum = (1 + (returns_df[_ct2] @ _cwa)).cumprod()
+            _cdd  = ((_ccum - _ccum.cummax()) / _ccum.cummax()).min() * 100
+            _top_t = max(_cw, key=_cw.get)
+            _cmp_rows.append({"key": _ck, "label": _clabel,
+                "ann_ret": _car, "vol": _cvol, "sharpe": _csh,
+                "max_dd": _cdd, "holdings": len(_cw),
+                "top": f"{_top_t} ({_cw[_top_t]*100:.0f}%)"})
+
+        if _cmp_rows:
+            _cmp_cols = st.columns(len(_cmp_rows))
+            for _ccol, _crow in zip(_cmp_cols, _cmp_rows):
+                _is_sel  = (_crow["key"] == selected_key)
+                _cborder = f"2px solid {BLUE}" if _is_sel else "1px solid #e2e8f0"
+                _cbg     = "#eff6ff" if _is_sel else "#ffffff"
+                _clbl    = ("✓ " if _is_sel else "") + _crow["label"]
+                with _ccol:
+                    st.markdown(f"""
+                    <div style="background:{_cbg};border:{_cborder};border-radius:8px;
+                                padding:1rem;text-align:center">
+                        <div style="font-size:0.68rem;font-weight:700;letter-spacing:1px;
+                                    color:{BLUE if _is_sel else MUTED};text-transform:uppercase;
+                                    margin-bottom:0.75rem">{_clbl}</div>
+                        <div style="font-size:1.5rem;font-weight:700;
+                                    color:{GREEN if _crow['ann_ret']>0 else RED}">
+                            {_crow['ann_ret']:+.1f}%</div>
+                        <div style="font-size:0.68rem;color:{MUTED};margin-bottom:0.6rem">Ann. Return</div>
+                        <div style="font-size:0.82rem;color:#0f172a;margin-bottom:2px">
+                            {_crow['sharpe']:.2f} Sharpe</div>
+                        <div style="font-size:0.82rem;color:#0f172a;margin-bottom:2px">
+                            {_crow['vol']:.1f}% Volatility</div>
+                        <div style="font-size:0.82rem;color:{RED};margin-bottom:0.5rem">
+                            {_crow['max_dd']:.1f}% Max DD</div>
+                        <div style="font-size:0.7rem;color:{MUTED}">{_crow['holdings']} holdings</div>
+                        <div style="font-size:0.68rem;color:{MUTED}">{_crow['top']}</div>
+                    </div>""", unsafe_allow_html=True)
+
         # Holdings table
         _section_header("Suggested Holdings")
         holdings_data = []
@@ -423,6 +477,46 @@ def render_portfolio_builder(api_key, is_pro=False):
                 "Max Drawdown":  f"{m.get('max_drawdown',0):.1f}%",
             })
         st.dataframe(pd.DataFrame(holdings_data), use_container_width=True, hide_index=True)
+
+        # ── Explainability Panel ──────────────────────────────────────────────
+        _section_header("Why These Holdings Were Selected")
+        _sec_lookup = {}
+        for _s, _tl in SECTOR_UNIVERSE.items():
+            for _t in _tl:
+                _sec_lookup[_t] = _s
+        for _s, _etf in SECTOR_ETFS.items():
+            _sec_lookup[_etf] = f"{_s} ETF"
+        for _cat, _tl in BOND_UNIVERSE.items():
+            for _t in _tl:
+                _sec_lookup[_t] = "Bonds"
+
+        for _et, _ew in sorted(selected_weights.items(), key=lambda x: x[1], reverse=True):
+            _em  = stock_metrics.get(_et, {})
+            _ese = _sec_lookup.get(_et, "Portfolio")
+            _esh = _em.get("sharpe", 0)
+            _ear = _em.get("ann_return", 0)
+            _eav = _em.get("ann_vol", 0)
+            _esc = GREEN if _esh >= 1 else AMBER if _esh >= 0.5 else RED
+            st.markdown(f"""
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;
+                        border-left:3px solid {BLUE};border-radius:6px;
+                        padding:0.6rem 1rem;margin-bottom:0.4rem;
+                        display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">
+                <div>
+                    <span style="font-weight:700;color:#0f172a;font-size:0.9rem">{_et}</span>
+                    <span style="font-size:0.72rem;color:{MUTED};margin-left:8px;
+                                background:#f1f5f9;padding:1px 7px;border-radius:3px">{_ese}</span>
+                </div>
+                <div style="font-size:0.8rem;color:{MUTED}">
+                    <b style="color:{GREEN if _ear>0 else RED}">{_ear:.1f}%</b> return &nbsp;·&nbsp;
+                    <b style="color:#0f172a">{_eav:.1f}%</b> vol &nbsp;·&nbsp;
+                    <b style="color:{_esc}">Sharpe {_esh:.2f}</b> &nbsp;·&nbsp;
+                    <b style="color:{BLUE}">{_ew*100:.1f}% weight</b>
+                </div>
+                <div style="font-size:0.7rem;color:{MUTED};font-style:italic">
+                    Top-ranked by Sharpe in {_ese}
+                </div>
+            </div>""", unsafe_allow_html=True)
 
         # Allocation pie chart
         col1, col2 = st.columns(2)
@@ -487,6 +581,48 @@ def render_portfolio_builder(api_key, is_pro=False):
             fig_corr.update_layout(height=320, margin=dict(l=0,r=0,t=10,b=0),
                                    font=dict(family="DM Sans"))
             st.plotly_chart(fig_corr, use_container_width=True)
+
+        # ── Sector Exposure vs. S&P 500 Benchmark ────────────────────────────
+        _section_header("Sector Exposure vs. S&P 500")
+        _SP500_SECTOR_W = {
+            "Technology": 29.5, "Health Care": 12.8, "Financials": 13.2,
+            "Consumer Discretionary": 10.4, "Communication Services": 8.6,
+            "Industrials": 8.9, "Consumer Staples": 6.2, "Energy": 3.9,
+            "Utilities": 2.5, "Materials": 2.3, "Real Estate": 2.2,
+        }
+        _sec_map2 = {}
+        for _s, _tl in SECTOR_UNIVERSE.items():
+            for _t in _tl: _sec_map2[_t] = _s
+        for _s, _etf in SECTOR_ETFS.items():
+            _sec_map2[_etf] = _s
+        _bond_set = {t for tl in BOND_UNIVERSE.values() for t in tl}
+        _port_sectors = {}
+        for _t, _w in selected_weights.items():
+            _s = _sec_map2.get(_t, "Bonds" if _t in _bond_set else "Other")
+            if _s in _SP500_SECTOR_W or _s == "Bonds":
+                _port_sectors[_s] = _port_sectors.get(_s, 0) + _w * 100
+
+        _sec_labels = sorted(set(list(_SP500_SECTOR_W.keys()) + list(_port_sectors.keys())))
+        _pv = [round(_port_sectors.get(s, 0), 1) for s in _sec_labels]
+        _sv = [_SP500_SECTOR_W.get(s, 0) for s in _sec_labels]
+
+        fig_sec = go.Figure()
+        fig_sec.add_trace(go.Bar(name="Your Portfolio", x=_sec_labels, y=_pv,
+            marker_color=BLUE, text=[f"{v:.1f}%" for v in _pv],
+            textposition="outside", textfont=dict(size=9)))
+        fig_sec.add_trace(go.Bar(name="S&P 500", x=_sec_labels, y=_sv,
+            marker_color=MUTED, opacity=0.55,
+            text=[f"{v:.1f}%" for v in _sv],
+            textposition="outside", textfont=dict(size=9)))
+        fig_sec.update_layout(
+            barmode="group", height=360, template="plotly_white",
+            margin=dict(l=0, r=0, t=30, b=100),
+            yaxis=dict(title="Weight (%)", ticksuffix="%"),
+            xaxis=dict(tickangle=-30),
+            legend=dict(orientation="h", y=1.06),
+            font=dict(family="DM Sans", size=11),
+        )
+        st.plotly_chart(fig_sec, use_container_width=True)
 
         st.markdown("---")
         col1, col2 = st.columns(2)
@@ -599,6 +735,63 @@ def render_portfolio_builder(api_key, is_pro=False):
             font=dict(family="DM Sans"),
         )
         st.plotly_chart(fig_dd, use_container_width=True)
+
+        # ── Historical Stress Tests ───────────────────────────────────────────
+        _section_header("Historical Stress Tests")
+        _STRESS_PERIODS = [
+            ("2022 Rate Hike Selloff", "2022-01-03", "2022-10-14", "Fed +425bps; S&P fell 25%",   -24.5),
+            ("COVID-19 Crash",          "2020-02-19", "2020-03-23", "Market fell 34% in 33 days", -33.9),
+            ("Q4 2018 Selloff",         "2018-09-20", "2018-12-24", "Trade war & rate fears",      -19.8),
+        ]
+        _stress_rows = []
+        for _sn, _ss, _se, _sdesc, _known_sp in _STRESS_PERIODS:
+            _ss_dt, _se_dt = pd.Timestamp(_ss), pd.Timestamp(_se)
+            _bt_min, _bt_max = bt_df.index.min(), bt_df.index.max()
+            if _ss_dt >= _bt_min and _se_dt <= _bt_max:
+                _psl = bt_df.loc[_ss_dt:_se_dt, "Portfolio"]
+                if len(_psl) > 1:
+                    _pr = (_psl.iloc[-1] / _psl.iloc[0] - 1) * 100
+                    _sr = None
+                    if "SP500" in bt_df.columns:
+                        _ssl = bt_df.loc[_ss_dt:_se_dt, "SP500"].dropna()
+                        if len(_ssl) > 1:
+                            _sr = (_ssl.iloc[-1] / _ssl.iloc[0] - 1) * 100
+                    _stress_rows.append({"name": _sn, "desc": _sdesc,
+                        "port": round(_pr, 1), "sp": round(_sr, 1) if _sr else None,
+                        "vs": round(_pr - _sr, 1) if _sr else None, "est": False})
+            else:
+                _p_ret = bt_df["Portfolio"].pct_change().dropna()
+                _s_ret = bt_df.get("SP500", pd.Series()).pct_change().dropna() if "SP500" in bt_df.columns else pd.Series()
+                _al = pd.concat([_p_ret.rename("p"), _s_ret.rename("s")], axis=1).dropna()
+                if len(_al) > 20:
+                    _beta = np.cov(_al["p"], _al["s"])[0,1] / max(np.var(_al["s"]), 1e-10)
+                    _est  = round(_beta * _known_sp, 1)
+                    _stress_rows.append({"name": _sn, "desc": _sdesc,
+                        "port": _est, "sp": _known_sp,
+                        "vs": round(_est - _known_sp, 1), "est": True})
+
+        if _stress_rows:
+            _scols = st.columns(len(_stress_rows))
+            for _scol, _sr in zip(_scols, _stress_rows):
+                _pc = RED if _sr["port"] < 0 else GREEN
+                _badge = " ·&nbsp;estimated" if _sr["est"] else " ·&nbsp;actual"
+                with _scol:
+                    st.markdown(f"""
+                    <div style="background:#ffffff;border:1px solid #e2e8f0;
+                                border-radius:8px;padding:1rem;text-align:center">
+                        <div style="font-size:0.67rem;font-weight:700;color:{MUTED};
+                                    text-transform:uppercase;letter-spacing:0.8px;
+                                    margin-bottom:0.5rem">{_sr['name']}</div>
+                        <div style="font-size:1.6rem;font-weight:700;color:{_pc}">
+                            {_sr['port']:+.1f}%</div>
+                        <div style="font-size:0.67rem;color:{MUTED};margin-bottom:0.4rem">
+                            Portfolio{_badge}</div>
+                        {f'<div style="font-size:0.82rem;color:#0f172a">vs S&amp;P:&nbsp;<b style="color:{GREEN if (_sr["vs"] or 0)>0 else RED}">{_sr["vs"]:+.1f}%</b></div>' if _sr["vs"] is not None else ""}
+                        <div style="font-size:0.67rem;color:{MUTED};margin-top:0.4rem;
+                                    font-style:italic">{_sr['desc']}</div>
+                    </div>""", unsafe_allow_html=True)
+        else:
+            st.info("Not enough backtest history for stress testing.")
 
         # Monthly heatmap
         _section_header("Monthly Returns Heatmap")
@@ -780,6 +973,58 @@ def render_portfolio_builder(api_key, is_pro=False):
                     </div>""", unsafe_allow_html=True)
             else:
                 st.success("Portfolio is balanced — no rebalancing needed.")
+
+        # ── Fee Drag Analysis ─────────────────────────────────────────────────
+        _section_header("Fee Drag Analysis")
+        _ETF_FEES = {
+            "SPY":0.0945,"QQQ":0.20,"XLK":0.10,"XLV":0.10,"XLF":0.10,
+            "XLY":0.10,"XLP":0.10,"XLI":0.10,"XLE":0.10,"XLB":0.10,
+            "XLRE":0.10,"XLU":0.10,"XLC":0.10,"IEF":0.15,"TLT":0.15,
+            "LQD":0.14,"HYG":0.48,"AGG":0.03,"BND":0.03,"SHY":0.15,
+            "TIP":0.19,"VTIP":0.04,"MUB":0.07,"BNDX":0.07,"EMB":0.39,
+        }
+        _wt_fee = sum(weights.get(t, 0) * _ETF_FEES.get(t, 0) / 100 for t in weights)
+        _fee_yrs = {"1 year":1,"3 years":3,"5 years":5,"10 years":10,"20+ years":20}.get(
+            prefs.get("horizon","5 years"), 5)
+        _fee_cap = prefs.get("starting_capital", 10000)
+        _fee_mo  = prefs.get("monthly_contribution", 500)
+        _fee_ret = bt_met.get("Ann. Return", 0) / 100
+        _fee_mr_with    = max((1 + max(_fee_ret - _wt_fee, -0.5)) ** (1/12) - 1, -0.5)
+        _fee_mr_without = (1 + _fee_ret) ** (1/12) - 1 if _fee_ret > -1 else 0
+
+        _vwf, _vwof = _fee_cap, _fee_cap
+        _vals_f, _vals_nf = [_vwf], [_vwof]
+        for _ in range(_fee_yrs * 12):
+            _vwf  = _vwf  * (1 + _fee_mr_with)    + _fee_mo
+            _vwof = _vwof * (1 + _fee_mr_without)  + _fee_mo
+            _vals_f.append(_vwf); _vals_nf.append(_vwof)
+        _fee_drag = _vwof - _vwf
+
+        _fx = list(range(len(_vals_f)))
+        fig_fee = go.Figure()
+        fig_fee.add_trace(go.Scatter(x=_fx, y=_vals_nf, name="Without Fees",
+            line=dict(color=BLUE, width=2.5)))
+        fig_fee.add_trace(go.Scatter(x=_fx, y=_vals_f, name="With Fees",
+            line=dict(color=AMBER, width=2, dash="dot"),
+            fill="tonexty", fillcolor="rgba(220,38,38,0.06)"))
+        fig_fee.update_layout(
+            title=dict(
+                text=f"Fee Drag Over {_fee_yrs}Y  ·  Weighted Expense: {_wt_fee*100:.3f}%  ·  Cost: ${_fee_drag:,.0f}",
+                font=dict(size=11)),
+            height=280, template="plotly_white",
+            margin=dict(l=0, r=0, t=44, b=0),
+            yaxis=dict(tickprefix="$"),
+            legend=dict(orientation="h", y=1.12),
+            font=dict(family="DM Sans"),
+        )
+        st.plotly_chart(fig_fee, use_container_width=True)
+        _fc1, _fc2, _fc3 = st.columns(3)
+        with _fc1:
+            st.markdown(_metric_card("Weighted Expense Ratio", f"{_wt_fee*100:.3f}%", DARK), unsafe_allow_html=True)
+        with _fc2:
+            st.markdown(_metric_card("Total Fee Drag", f"${_fee_drag:,.0f}", RED), unsafe_allow_html=True)
+        with _fc3:
+            st.markdown(_metric_card("Value After Fees", f"${_vwf:,.0f}", BLUE), unsafe_allow_html=True)
 
         st.markdown("---")
         col1, col2 = st.columns(2)
