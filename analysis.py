@@ -254,7 +254,8 @@ def run_custom_forecast(ticker, start_date, end_date,
     return pd.DataFrame(paths), garch_vols, ml_drift, summary
 
 
-def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, sortino):
+def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, sortino,
+                               forecast_method="Monte Carlo"):
     latest       = df.iloc[-1]
     first        = df.iloc[0]
     period_ret   = (latest["Close"] / first["Close"] - 1) * 100
@@ -297,7 +298,7 @@ def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, 
 
     mc_str = ""
     if mc_summary:
-        mc_str = (f"Monte Carlo simulation ({mc_summary['Simulations']:,} paths, "
+        mc_str = (f"{forecast_method} ({mc_summary['Simulations']:,} paths, "
                   f"{mc_summary['Forecast Horizon (days)']} days): median "
                   f"${mc_summary['Median (P50)']:,.2f} "
                   f"(bear ${mc_summary['Bear Case (P5)']:,.2f} / "

@@ -510,7 +510,7 @@ with st.sidebar:
         # ── Report modules ────────────────────────────────────────────────────
         st.markdown('<div class="sidebar-group" style="margin-top:1rem">Report Modules</div>',
                     unsafe_allow_html=True)
-        do_mc     = st.checkbox("Monte Carlo Forecast", value=True)
+        do_mc     = st.checkbox("Price Forecast", value=True)
         do_sector = st.checkbox("Sector Comparison",    value=True)
         do_corr   = st.checkbox("Correlation Matrix",   value=True)
         do_sr     = st.checkbox("Support & Resistance", value=True)
@@ -1110,7 +1110,8 @@ with tab1:
                 sharpe   = ann_ret / ann_std  if ann_std  else np.nan
                 sortino  = ann_ret / downside if downside else np.nan
                 summary_text = generate_summary_paragraph(
-                    ticker_input, df, company_details, mc_summary, sharpe, sortino)
+                    ticker_input, df, company_details, mc_summary, sharpe, sortino,
+                    forecast_method=forecast_method)
 
                 progress.progress(90, text="Building Excel report...")
                 excel_buf = build_excel(
