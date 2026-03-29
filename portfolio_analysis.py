@@ -328,7 +328,7 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
 
     ann_mu_pct = mu * 252 * 100
     log(f"   Assumed annual return: {ann_mu_pct:.1f}% "
-        f"(historical: {hist_mu*252*100:.1f}%, blended with 10% long-term avg, capped at 15%)")
+        f"(historical: {hist_mu*252*100:.1f}%, blended with 7% long-term avg, capped at 12%)")
 
     forecast_days = forecast_years * 252
     np.random.seed(None)

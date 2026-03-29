@@ -78,27 +78,6 @@ def render_portfolio_builder(api_key, is_pro=False):
             st.rerun()
         return
     
-    # if not is_pro:
-    #     st.markdown("""
-    #     <div style="background:#0f172a;border:1px solid #334155;border-radius:16px;
-    #                 padding:2.5rem;text-align:center;margin:1rem 0">
-    #         <div style="font-size:1.75rem;margin-bottom:0.75rem">📊</div>
-    #         <div style="color:#fff;font-weight:600;font-size:1.2rem;margin-bottom:0.5rem">
-    #             Portfolio Builder is a Pro Feature
-    #         </div>
-    #         <div style="color:#94a3b8;font-size:0.9rem;margin-bottom:1.5rem;max-width:480px;margin-left:auto;margin-right:auto">
-    #             Build custom portfolios with backtesting, efficient frontier optimisation,
-    #             Monte Carlo simulation, and full Excel report export.
-    #         </div>
-    #         <div style="color:#38bdf8;font-size:1.1rem;font-weight:600">$9.99 / month</div>
-    #         <div style="color:#64748b;font-size:0.8rem;margin-top:4px">Cancel anytime</div>
-    #     </div>
-    #     """, unsafe_allow_html=True)
-    #     if st.button("Upgrade to Pro", type="primary", key="upgrade_portfolio"):
-    #         st.session_state["show_payment"] = True
-    #         st.rerun()
-    #     return
-    
     st.markdown("""
     <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border:1px solid #334155;
                 border-radius:14px;padding:1.5rem 2rem;margin-bottom:1.5rem">
@@ -281,7 +260,10 @@ def render_portfolio_builder(api_key, is_pro=False):
 
             try:
                 # Build universe (top 5 per sector — broader scan for best candidates)
-                candidates, sector_map = build_candidate_universe(prefs, api_key, log=log)
+                candidates, sector_map, skipped_sectors = build_candidate_universe(prefs, api_key, log=log)
+                if skipped_sectors:
+                    st.info(f"Conservative risk profile: growth sectors excluded from this portfolio — "
+                            f"{', '.join(skipped_sectors)}. Increase your risk tolerance to include them.")
                 progress.progress(10, text=f"Fetching 3-year price history for {len(candidates)} candidates...")
 
                 # Fetch prices in parallel (3 years)
@@ -319,7 +301,7 @@ def render_portfolio_builder(api_key, is_pro=False):
 
                 # Get ticker info
                 ticker_info = {}
-                for t in list(returns_df.columns)[:10]:
+                for t in list(returns_df.columns):
                     ticker_info[t] = get_ticker_info(t, api_key)
 
                 progress.progress(95, text="Computing diversification score...")
@@ -389,10 +371,14 @@ def render_portfolio_builder(api_key, is_pro=False):
         selected_key     = choice_map[port_choice]
         selected_weights = portfolios[selected_key]
 
-        # Clean weights — remove tiny allocations
+        # Clean weights — remove tiny allocations (<1%) and warn user
+        dropped = [k for k, v in selected_weights.items() if v < 0.01]
         selected_weights = {k: v for k, v in selected_weights.items() if v >= 0.01}
         total = sum(selected_weights.values())
         selected_weights = {k: v/total for k, v in selected_weights.items()}
+        if dropped:
+            st.info(f"{len(dropped)} position(s) with weight <1% were removed by the optimizer "
+                    f"and excluded from the portfolio: {', '.join(dropped)}")
 
         # Portfolio metrics
         returns_df = opt["returns_df"]
@@ -962,9 +948,9 @@ def render_portfolio_builder(api_key, is_pro=False):
         if weights and close_df_rb is not None:
             latest_prices = {t: float(close_df_rb[t].iloc[-1])
                              for t in weights if t in close_df_rb.columns}
-            # Simulate equal share count as a proxy for current holdings
-            total_val = sum(weights[t] * 10000 for t in weights)
-            current_holdings = {t: (weights[t] * 10000) / latest_prices[t]
+            # Use actual starting capital from user preferences
+            _rb_capital = prefs.get("starting_capital", 10000)
+            current_holdings = {t: (_rb_capital * weights[t]) / latest_prices[t]
                                 for t in weights if t in latest_prices and latest_prices[t] > 0}
             recs = get_rebalancing_recommendations(current_holdings, weights, latest_prices)
             if recs:

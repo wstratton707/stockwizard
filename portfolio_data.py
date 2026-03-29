@@ -241,8 +241,9 @@ def build_candidate_universe(preferences, api_key, log=print):
     DEFENSIVE_SECTORS = {"Consumer Staples", "Utilities", "Health Care", "Real Estate"}
     ALWAYS_KEEP       = {"SPY", "QQQ", "GLD", "TLT"}
 
-    candidates  = []   # ordered
-    sector_map  = {}   # ticker → sector label
+    candidates    = []   # ordered
+    sector_map    = {}   # ticker → sector label
+    skipped_sectors = [] # sectors excluded due to risk profile
 
     def add(ticker, sector="Market"):
         if ticker not in excluded_tickers and ticker not in candidates:
@@ -269,10 +270,14 @@ def build_candidate_universe(preferences, api_key, log=print):
         if not stocks:
             continue
         if risk_tolerance <= 3 and sector not in DEFENSIVE_SECTORS:
-            continue  # Conservative: skip growth sectors entirely
+            skipped_sectors.append(sector)
+            continue  # Conservative: skip growth sectors
         n = 5  # fetch top 5 so Sharpe ranking has a meaningful pool to choose from
         for s in stocks[:n]:
             add(s, sector)
+
+    if skipped_sectors:
+        log(f"   ⚠ Conservative profile: skipped growth sectors — {', '.join(skipped_sectors)}")
 
     # 4. Bond ETFs (representative only — 1 per category)
     bond_slots = 3 if risk_tolerance <= 3 else (2 if risk_tolerance <= 6 else 0)
@@ -284,7 +289,7 @@ def build_candidate_universe(preferences, api_key, log=print):
     # Cap at 65 for fetching — Sharpe filter will trim to ~18 after prices arrive
     result = candidates[:65]
     log(f"   Scanning {len(result)} candidates across sectors for Sharpe ranking...")
-    return result, sector_map
+    return result, sector_map, skipped_sectors
 
 
 def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=18,
