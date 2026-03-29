@@ -623,6 +623,134 @@ def render_portfolio_builder(api_key, is_pro=False):
             fig_hmap.update_traces(textfont_size=9)
             st.plotly_chart(fig_hmap, use_container_width=True)
 
+        # ── Rolling Performance Metrics ───────────────────────────────────────
+        _section_header("Rolling Performance Metrics")
+        _port_ret_full = bt_df["Portfolio"].pct_change().dropna()
+        _roll_w = min(252, max(60, len(_port_ret_full) // 3))
+
+        _rc1, _rc2, _rc3 = st.columns(3)
+
+        with _rc1:
+            _roll_vol = (_port_ret_full.rolling(60).std() * np.sqrt(252) * 100).dropna()
+            _fig_rvol = go.Figure(go.Scatter(
+                x=_roll_vol.index, y=_roll_vol,
+                fill="tozeroy", fillcolor="rgba(245,158,11,0.08)",
+                line=dict(color=AMBER, width=2),
+                hovertemplate="Vol: %{y:.1f}%<extra></extra>",
+            ))
+            _fig_rvol.update_layout(
+                title=dict(text="Rolling 60D Volatility (%)", font=dict(size=12)),
+                height=230, template="plotly_white",
+                margin=dict(l=10, r=10, t=36, b=30),
+                yaxis=dict(ticksuffix="%", gridcolor="#f1f5f9"),
+                xaxis=dict(gridcolor="#f1f5f9"),
+                font=dict(family="DM Sans", size=10),
+                showlegend=False,
+            )
+            st.plotly_chart(_fig_rvol, use_container_width=True)
+
+        with _rc2:
+            _rret = _port_ret_full.rolling(_roll_w).mean() * 252 * 100
+            _rvol = _port_ret_full.rolling(_roll_w).std() * np.sqrt(252) * 100
+            _rsh  = (_rret / _rvol.replace(0, np.nan)).dropna()
+            _sh_colors = [GREEN if v >= 1 else AMBER if v >= 0 else RED for v in _rsh]
+            _fig_rsh = go.Figure(go.Scatter(
+                x=_rsh.index, y=_rsh,
+                line=dict(color=BLUE, width=2),
+                hovertemplate="Sharpe: %{y:.2f}<extra></extra>",
+            ))
+            _fig_rsh.add_hline(y=1.0, line_dash="dot", line_color=GREEN, opacity=0.5,
+                               annotation_text="1.0", annotation_font_size=9)
+            _fig_rsh.add_hline(y=0.0, line_dash="dot", line_color=RED, opacity=0.4)
+            _fig_rsh.update_layout(
+                title=dict(text=f"Rolling {_roll_w//21}M Sharpe Ratio", font=dict(size=12)),
+                height=230, template="plotly_white",
+                margin=dict(l=10, r=10, t=36, b=30),
+                yaxis=dict(gridcolor="#f1f5f9"),
+                xaxis=dict(gridcolor="#f1f5f9"),
+                font=dict(family="DM Sans", size=10),
+                showlegend=False,
+            )
+            st.plotly_chart(_fig_rsh, use_container_width=True)
+
+        with _rc3:
+            _sp_col = "SP500"
+            if _sp_col in bt_df.columns and not bt_df[_sp_col].isna().all():
+                _sp_ret = bt_df[_sp_col].pct_change().dropna()
+                _aligned = pd.concat([_port_ret_full.rename("port"),
+                                      _sp_ret.rename("sp")], axis=1).dropna()
+                if len(_aligned) > _roll_w:
+                    _rcorr = _aligned["port"].rolling(_roll_w).corr(_aligned["sp"]).dropna()
+                    _fig_rc = go.Figure(go.Scatter(
+                        x=_rcorr.index, y=_rcorr,
+                        fill="tozeroy", fillcolor="rgba(139,92,246,0.08)",
+                        line=dict(color=PURPLE, width=2),
+                        hovertemplate="Corr: %{y:.2f}<extra></extra>",
+                    ))
+                    _fig_rc.add_hline(y=0.7, line_dash="dot", line_color=AMBER, opacity=0.5,
+                                      annotation_text="0.7 high", annotation_font_size=9)
+                    _fig_rc.update_layout(
+                        title=dict(text="Rolling Correlation vs S&P 500", font=dict(size=12)),
+                        height=230, template="plotly_white",
+                        margin=dict(l=10, r=10, t=36, b=30),
+                        yaxis=dict(range=[-1.1, 1.1], gridcolor="#f1f5f9"),
+                        xaxis=dict(gridcolor="#f1f5f9"),
+                        font=dict(family="DM Sans", size=10),
+                        showlegend=False,
+                    )
+                    st.plotly_chart(_fig_rc, use_container_width=True)
+                else:
+                    st.info("Not enough data for rolling correlation.")
+            else:
+                st.info("S&P 500 benchmark data unavailable.")
+
+        # ── Holdings Return Attribution ────────────────────────────────────────
+        _section_header("Holdings Return Attribution")
+        _weights_for_attr = st.session_state.get("port_selected_weights", weights)
+        _sm_attr          = opt.get("stock_metrics", {})
+        _attr_rows = []
+        for _at, _aw in sorted(_weights_for_attr.items(), key=lambda x: x[1], reverse=True):
+            _m = _sm_attr.get(_at, {})
+            _ar = _m.get("ann_return", 0)
+            _contrib = _aw * _ar
+            _attr_rows.append({
+                "Ticker":         _at,
+                "Weight":         _aw,
+                "Ann. Return (%)":  round(_ar, 2),
+                "Contribution (%)": round(_contrib, 2),
+            })
+        if _attr_rows:
+            _attr_df = pd.DataFrame(_attr_rows).sort_values("Contribution (%)")
+            _attr_colors = [GREEN if v >= 0 else RED for v in _attr_df["Contribution (%)"]]
+            _fig_attr = go.Figure(go.Bar(
+                x=_attr_df["Contribution (%)"],
+                y=_attr_df["Ticker"],
+                orientation="h",
+                marker_color=_attr_colors,
+                text=[f"{v:+.2f}%" for v in _attr_df["Contribution (%)"]],
+                textposition="outside",
+                customdata=np.stack([_attr_df["Weight"]*100, _attr_df["Ann. Return (%)"]], axis=-1),
+                hovertemplate=(
+                    "<b>%{y}</b><br>"
+                    "Weight: %{customdata[0]:.1f}%<br>"
+                    "Ann. Return: %{customdata[1]:.2f}%<br>"
+                    "Contribution: %{x:+.2f}%<extra></extra>"
+                ),
+            ))
+            _fig_attr.update_layout(
+                title=dict(text="Weighted Return Contribution by Holding",
+                           font=dict(size=13)),
+                height=max(260, len(_attr_rows) * 38 + 60),
+                template="plotly_white",
+                margin=dict(l=60, r=80, t=44, b=30),
+                xaxis=dict(title="Contribution to Portfolio Return (%)",
+                           ticksuffix="%", gridcolor="#f1f5f9"),
+                yaxis=dict(gridcolor="#f1f5f9"),
+                font=dict(family="DM Sans"),
+                showlegend=False,
+            )
+            st.plotly_chart(_fig_attr, use_container_width=True)
+
         # Rebalancing recommendations
         _section_header("Rebalancing Recommendations")
         weights = st.session_state.get("port_selected_weights", {})

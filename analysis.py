@@ -68,19 +68,6 @@ def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print):
 
 # ── Custom Forecast (GARCH + ML + Monte Carlo) ────────────────────────────────
 
-def _fetch_yf_history(ticker, start_date, end_date):
-    """Fetch OHLCV history from Yahoo Finance."""
-    import yfinance as yf
-    start_str = start_date.strftime("%Y-%m-%d") if hasattr(start_date, "strftime") else str(start_date)
-    end_str   = end_date.strftime("%Y-%m-%d")   if hasattr(end_date,   "strftime") else str(end_date)
-    raw = yf.download(ticker, start=start_str, end=end_str, auto_adjust=True, progress=False)
-    if isinstance(raw.columns, pd.MultiIndex):
-        raw.columns = raw.columns.get_level_values(0)
-    df = raw[["Open", "High", "Low", "Close", "Volume"]].copy()
-    df.index = pd.to_datetime(df.index)
-    df["Daily_Return"] = df["Close"].pct_change()
-    return df.dropna(subset=["Daily_Return"])
-
 
 def _fit_garch_volatility(returns, forecast_days):
     """
@@ -187,10 +174,10 @@ def _train_ml_drift(df, log=print):
         return float(df["Daily_Return"].mean())
 
 
-def run_custom_forecast(ticker, start_date, end_date,
-                        n_simulations=1000, forecast_days=252, log=print):
+def run_custom_forecast(df, n_simulations=1000, forecast_days=252, log=print):
     """
     Custom Forecast: GARCH(1,1) volatility + ML-ensemble drift + Monte Carlo paths.
+    Uses the pre-fetched Polygon dataframe (same data as the rest of the analysis).
 
     Returns
     -------
@@ -199,8 +186,11 @@ def run_custom_forecast(ticker, start_date, end_date,
     ml_drift    : float         ML-predicted daily drift
     summary     : dict          same key structure as run_monte_carlo summary
     """
-    log(f"Custom Forecast: fetching {ticker} from Yahoo Finance...")
-    df = _fetch_yf_history(ticker, start_date, end_date)
+    log("Custom Forecast: preparing data...")
+    if "Daily_Return" not in df.columns:
+        df = df.copy()
+        df["Daily_Return"] = df["Close"].pct_change()
+    df = df.dropna(subset=["Daily_Return"])
 
     returns    = df["Daily_Return"].dropna()
     last_price = float(df["Close"].iloc[-1])
