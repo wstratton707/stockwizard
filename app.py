@@ -527,16 +527,23 @@ with st.sidebar:
             )
             if forecast_method == "Custom Forecast":
                 st.markdown(
-                    '<div style="font-size:0.75rem;color:#64748b;line-height:1.45;'
-                    'padding:0.55rem 0.6rem;background:#f8fafc;border-radius:6px;'
-                    'border-left:3px solid #0ea5e9;margin-bottom:0.5rem">'
-                    'Our <strong>Custom Forecast</strong> combines three models — '
-                    'GARCH volatility modeling, Monte Carlo simulation, and a machine '
-                    'learning ensemble (Random Forest / XGBoost) — to generate smarter, '
-                    'more adaptive price projections. GARCH captures volatility clustering, '
-                    'Monte Carlo simulates thousands of future price paths, and our ML model '
-                    'adds a data-driven directional signal — all powered by real-time '
-                    'Yahoo Finance data.</div>',
+                    '<div style="font-size:0.73rem;line-height:1.6;'
+                    'padding:0.65rem 0.75rem;'
+                    'background:rgba(14,165,233,0.07);'
+                    'border-radius:8px;'
+                    'border:1px solid #1e3a5f;'
+                    'border-left:3px solid #0ea5e9;'
+                    'margin-bottom:0.5rem;'
+                    'font-family:Inter,sans-serif">'
+                    'Our <span style="color:#38bdf8 !important;font-weight:600">Custom Forecast</span> '
+                    'combines three models — '
+                    '<span style="color:#38bdf8 !important;font-weight:500">GARCH</span> volatility modeling, '
+                    '<span style="color:#38bdf8 !important;font-weight:500">Monte Carlo</span> simulation, '
+                    'and a <span style="color:#38bdf8 !important;font-weight:500">ML ensemble</span> '
+                    '(Random Forest / XGBoost) — for smarter, more adaptive price projections. '
+                    'GARCH captures volatility clustering, Monte Carlo simulates thousands of '
+                    'price paths, and the ML model adds a data-driven drift signal — '
+                    'all powered by real-time Yahoo Finance data.</div>',
                     unsafe_allow_html=True,
                 )
             n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
