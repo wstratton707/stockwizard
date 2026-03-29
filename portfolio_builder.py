@@ -280,18 +280,19 @@ def render_portfolio_builder(api_key, is_pro=False):
                 log_area.code("\n".join(log_lines[-10:]), language=None)
 
             try:
-                # Build universe (top 3 per sector for Sharpe ranking)
+                # Build universe (top 5 per sector — broader scan for best candidates)
                 candidates, sector_map = build_candidate_universe(prefs, api_key, log=log)
-                progress.progress(15, text="Fetching price history...")
+                progress.progress(10, text=f"Fetching 3-year price history for {len(candidates)} candidates...")
 
                 # Fetch prices in parallel (3 years)
                 price_dict, close_df, returns_df, failed = fetch_portfolio_prices(
                     candidates, period_years=3, api_key=api_key, log=log)
                 progress.progress(40, text="Ranking stocks by Sharpe ratio...")
 
-                # Keep best stock per sector by Sharpe — trim to 14 for optimizer
-                best_tickers = select_by_sharpe(returns_df, sector_map, max_total=14)
-                log(f"   Selected {len(best_tickers)} stocks by Sharpe: {', '.join(best_tickers)}")
+                # Keep best 2 stocks per sector by Sharpe — trim to 18 for optimizer
+                best_tickers = select_by_sharpe(returns_df, sector_map,
+                                                max_total=18, top_n_per_sector=2)
+                log(f"   Selected {len(best_tickers)} stocks by Sharpe (top 2/sector): {', '.join(best_tickers)}")
                 returns_df = returns_df[best_tickers]
                 close_df   = close_df[[t for t in best_tickers if t in close_df.columns]]
                 price_dict = {t: v for t, v in price_dict.items() if t in best_tickers}
@@ -314,7 +315,7 @@ def render_portfolio_builder(api_key, is_pro=False):
                                                 target_return=target_ret)
                 progress.progress(80, text="Generating efficient frontier...")
 
-                ef_df = generate_efficient_frontier(returns_df, n_portfolios=2000)
+                ef_df = generate_efficient_frontier(returns_df, n_portfolios=8000)
 
                 # Get ticker info
                 ticker_info = {}
@@ -328,6 +329,15 @@ def render_portfolio_builder(api_key, is_pro=False):
                 progress.progress(100, text="Done!")
                 log_area.empty()
                 progress.empty()
+
+                if not portfolios.get("target_met", True):
+                    st.warning(
+                        f"Your target return of **{portfolios['target_requested']}%/yr** "
+                        f"could not be achieved with the selected tickers. "
+                        f"The best achievable is **{portfolios['target_achieved']}%/yr**. "
+                        f"The recommended portfolio has been optimised for the best "
+                        f"risk-adjusted return instead."
+                    )
 
                 st.session_state["port_optimised"] = {
                     "price_dict":    price_dict,
@@ -1137,6 +1147,12 @@ def render_portfolio_builder(api_key, is_pro=False):
         ]:
             with col:
                 st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
+
+        st.caption(
+            "⚠️ Monte Carlo assumes log-normally distributed returns and stationary volatility. "
+            "It does not model recessions, black-swan events, or regime changes. "
+            "Probabilities are illustrative, not guaranteed. Not investment advice."
+        )
 
         if prob_goal_val is not None:
             st.markdown(f"""

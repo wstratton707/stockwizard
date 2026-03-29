@@ -444,7 +444,7 @@ html, body, [class*="css"] {
 """, unsafe_allow_html=True)
 
 # ── Session state ─────────────────────────────────────────────────────────────
-if "is_pro"       not in st.session_state: st.session_state["is_pro"]       = True
+if "is_pro"       not in st.session_state: st.session_state["is_pro"]       = False
 if "user_email"   not in st.session_state: st.session_state["user_email"]   = ""
 if "show_payment" not in st.session_state: st.session_state["show_payment"] = False
 if "candle_tf"    not in st.session_state: st.session_state["candle_tf"]    = "5min"
@@ -674,7 +674,7 @@ if SHOW_PRICING and st.session_state["show_payment"] and not st.session_state["i
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
         if st.button("Continue to Payment →", type="primary"):
             if email_for_payment and "@" in email_for_payment:
-                base_url = "https://stockwizard-production.up.railway.app"
+                base_url = os.environ.get("BASE_URL", "https://stockwizard-production.up.railway.app")
                 session  = create_checkout_session(base_url, base_url, email=email_for_payment)
                 if session:
                     st.markdown(f"""

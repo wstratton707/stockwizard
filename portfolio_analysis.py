@@ -3,6 +3,10 @@ import pandas as pd
 from scipy.optimize import minimize
 from datetime import datetime, timedelta
 
+# Annualised risk-free rate used in all Sharpe / Sortino calculations.
+# Approximate 3-month US Treasury yield. Update periodically.
+RISK_FREE_RATE = 0.045  # 4.5%
+
 
 # ── Individual stock metrics ──────────────────────────────────────────────────
 
@@ -17,8 +21,8 @@ def compute_stock_metrics(returns_df):
         ann_ret = r.mean() * 252
         ann_std = r.std() * np.sqrt(252)
         down    = r[r < 0].std() * np.sqrt(252)
-        sharpe  = ann_ret / ann_std  if ann_std  else 0
-        sortino = ann_ret / down     if down     else 0
+        sharpe  = (ann_ret - RISK_FREE_RATE) / ann_std  if ann_std  else 0
+        sortino = (ann_ret - RISK_FREE_RATE) / down     if down     else 0
 
         # Max drawdown
         cumret   = (1 + r).cumprod()
@@ -46,8 +50,8 @@ def compute_correlation_matrix(returns_df):
 def portfolio_metrics(weights, returns_df):
     weights      = np.array(weights)
     port_ret     = returns_df.mean().values @ weights * 252
-    port_vol     = np.sqrt(weights @ returns_df.cov().values * 252 @ weights)
-    sharpe       = port_ret / port_vol if port_vol > 0 else 0
+    port_vol     = np.sqrt(weights @ (returns_df.cov().values * 252) @ weights)
+    sharpe       = (port_ret - RISK_FREE_RATE) / port_vol if port_vol > 0 else 0
     return port_ret, port_vol, sharpe
 
 
@@ -105,14 +109,25 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None):
         return {k: v/total for k,v in raw.items()}
 
     cols = list(returns_df.columns)
-    return {
+    result = {
         "max_sharpe":  w_to_dict(res_sharpe.x if res_sharpe.success else init, cols),
         "min_vol":     w_to_dict(res_minvol.x if res_minvol.success else init, cols),
         "recommended": w_to_dict(blended_w, cols),
+        "target_met":  True,
     }
+    # Check whether the target return constraint was actually satisfied
+    if target_return is not None:
+        achieved = portfolio_metrics(
+            np.array([result["recommended"][c] for c in cols]), returns_df
+        )[0]
+        if achieved < target_return * 0.95:   # 5% tolerance
+            result["target_met"]    = False
+            result["target_achieved"] = round(achieved * 100, 1)
+            result["target_requested"] = round(target_return * 100, 1)
+    return result
 
 
-def generate_efficient_frontier(returns_df, n_portfolios=3000):
+def generate_efficient_frontier(returns_df, n_portfolios=8000):
     """
     Generate random portfolios for efficient frontier scatter plot.
     Returns DataFrame with columns: Return, Volatility, Sharpe, Weights
@@ -128,7 +143,7 @@ def generate_efficient_frontier(returns_df, n_portfolios=3000):
         w     = np.random.dirichlet(np.ones(n))
         ret   = w @ mu
         vol   = np.sqrt(w @ cov @ w)
-        sr    = ret / vol if vol > 0 else 0
+        sr    = (ret - RISK_FREE_RATE) / vol if vol > 0 else 0
         rows.append({"Return": ret*100, "Volatility": vol*100,
                      "Sharpe": sr, "Weights": dict(zip(cols, w))})
 
@@ -183,12 +198,14 @@ def backtest_portfolio(close_df, weights, starting_capital, monthly_contribution
         else:
             contributions.append(total_contrib)
 
-        # Rebalance quarterly
+        # Rebalance quarterly (0.10% transaction cost per rebalance event)
+        TRANSACTION_COST = 0.001
         current_q = (date.month - 1) // 3
         if rebalance_freq == "quarterly" and current_q != last_rebal_q and i > 0:
             last_rebal_q = current_q
+            port_val_after_cost = port_val * (1 - TRANSACTION_COST)
             for t in avail:
-                shares[t] = (port_val * w_dict[t]) / current_prices[t]
+                shares[t] = (port_val_after_cost * w_dict[t]) / current_prices[t]
 
         portfolio_values.append(port_val)
 
@@ -227,10 +244,12 @@ def compute_backtest_metrics(backtest_df, starting_capital):
     # Fix 2: Annualised return from daily returns (handles contributions correctly)
     ann_ret = daily_ret.mean() * 252 * 100
 
-    # Fix 3: Sharpe consistently derived from same daily_ret series
-    sharpe   = (daily_ret.mean() * 252) / (daily_ret.std() * np.sqrt(252)) if daily_ret.std() > 0 else 0
-    down_ret = daily_ret[daily_ret < 0]
-    sortino  = (daily_ret.mean() * 252) / (down_ret.std() * np.sqrt(252)) if down_ret.std() > 0 else 0
+    # Fix 3: Sharpe/Sortino with risk-free rate (excess return basis)
+    rf_daily = RISK_FREE_RATE / 252
+    excess   = daily_ret - rf_daily
+    sharpe   = (excess.mean() * 252) / (excess.std() * np.sqrt(252)) if excess.std() > 0 else 0
+    down_ret = excess[excess < 0]
+    sortino  = (excess.mean() * 252) / (down_ret.std() * np.sqrt(252)) if down_ret.std() > 0 else 0
 
     # Drawdown
     peak     = port.cummax()
@@ -399,7 +418,7 @@ def compute_diversification_score(weights, returns_df):
     w_arr   = np.array([weights[t] for t in tickers])
     w_arr  /= w_arr.sum()
 
-    # Effective N (Herfindahl)
+    # Effective N (Herfindahl-Hirschman Index)
     hhi      = np.sum(w_arr ** 2)
     eff_n    = 1 / hhi
     n_score  = min(eff_n / len(tickers), 1.0)
@@ -410,7 +429,11 @@ def compute_diversification_score(weights, returns_df):
     avg_corr = corr.where(mask).stack().mean()
     c_score  = 1 - max(0, avg_corr)
 
-    raw   = (n_score * 0.5 + c_score * 0.5) * 10
+    # Concentration penalty: any single position >25% drags the score down
+    max_w        = w_arr.max()
+    conc_penalty = max(0.0, (max_w - 0.25) / 0.75)  # 0 at 25%, 1.0 at 100%
+
+    raw = (n_score * 0.5 + c_score * 0.4 + (1 - conc_penalty) * 0.1) * 10
     return round(min(10, max(1, raw)), 1)
 
 

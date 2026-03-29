@@ -10,17 +10,61 @@ _PORT_CACHE  = {}
 CACHE_TTL    = 300
 
 SECTOR_UNIVERSE = {
-    "Technology":             ["AAPL","MSFT","NVDA","GOOGL","META","AVGO","AMD","CRM","INTC","ORCL"],
-    "Health Care":            ["UNH","JNJ","LLY","ABBV","MRK","TMO","ABT","DHR","PFE","AMGN"],
-    "Financials":             ["JPM","V","MA","BAC","WFC","GS","MS","BLK","AXP","C"],
-    "Consumer Discretionary": ["AMZN","TSLA","HD","MCD","NKE","SBUX","TJX","BKNG","CMG","LOW"],
-    "Consumer Staples":       ["WMT","PG","KO","COST","PEP","PM","MDLZ","CL","GIS","KHC"],
-    "Industrials":            ["CAT","UPS","HON","BA","RTX","GE","DE","MMM","LMT","FDX"],
-    "Energy":                 ["XOM","CVX","COP","EOG","SLB","MPC","VLO","PSX","OXY","HES"],
-    "Materials":              ["LIN","APD","ECL","SHW","NEM","FCX","NUE","VMC","MLM","ALB"],
-    "Real Estate":            ["PLD","AMT","EQIX","CCI","PSA","O","DLR","WELL","SPG","VTR"],
-    "Utilities":              ["NEE","DUK","SO","D","AEP","EXC","XEL","ES","WEC","ED"],
-    "Communication Services": ["GOOGL","META","NFLX","DIS","CMCSA","T","VZ","TMUS","EA","TTWO"],
+    "Technology": [
+        "AAPL","MSFT","NVDA","AVGO","GOOGL","META","AMD","CRM","ADBE","QCOM",
+        "TXN","NOW","AMAT","MU","LRCX","KLAC","SNPS","CDNS","PANW","FTNT",
+        "CSCO","IBM","ORCL","INTC","HPQ","DELL","STX","KEYS","ANSS","PLTR",
+    ],
+    "Health Care": [
+        "UNH","LLY","JNJ","ABBV","MRK","TMO","ABT","DHR","AMGN","PFE",
+        "SYK","ISRG","MDT","BMY","GILD","ZTS","REGN","BSX","HCA","ELV",
+        "CI","CVS","MCK","BIIB","ILMN","BAX","VRTX","IQV","CNC","MOH",
+    ],
+    "Financials": [
+        "JPM","V","MA","BAC","WFC","GS","MS","BLK","AXP","C",
+        "SPGI","MCO","ICE","CME","CB","PGR","TRV","AFL","MET","PRU",
+        "USB","PNC","TFC","COF","DFS","SCHW","FIS","FI","PYPL","CBOE",
+    ],
+    "Consumer Discretionary": [
+        "AMZN","TSLA","HD","MCD","NKE","SBUX","TJX","BKNG","CMG","LOW",
+        "LULU","ROST","DHI","LEN","NVR","PHM","GM","F","ORLY","AZO",
+        "BBY","DG","DLTR","YUM","HLT","MAR","RCL","CCL","NCLH","WYNN",
+    ],
+    "Consumer Staples": [
+        "WMT","PG","KO","COST","PEP","PM","MDLZ","CL","GIS","KHC",
+        "SYY","MKC","HRL","TSN","CAG","CPB","K","CHD","CLX","KMB",
+        "STZ","BF.B","TAP","MO","BTI","EL","COTY","SPB","POST","CENT",
+    ],
+    "Industrials": [
+        "CAT","UPS","HON","BA","RTX","GE","DE","MMM","LMT","FDX",
+        "NOC","GD","ETN","EMR","PH","ROK","AME","FAST","PCAR","CTAS",
+        "RSG","WM","IR","XYL","ROP","VRSK","CPRT","EXPD","ODFL","JBHT",
+    ],
+    "Energy": [
+        "XOM","CVX","COP","EOG","SLB","MPC","VLO","PSX","OXY","HES",
+        "PXD","DVN","FANG","MRO","APA","HAL","BKR","NOV","RRC","EQT",
+        "CTRA","OVV","SM","MGY","MTDR","HP","DINO","DKL","TRGP","WMB",
+    ],
+    "Materials": [
+        "LIN","APD","ECL","SHW","NEM","FCX","NUE","VMC","MLM","ALB",
+        "CF","MOS","IFF","PPG","RPM","EMN","LYB","DD","DOW","CE",
+        "AXTA","PKG","IP","WRK","SEE","SON","GEF","SLVM","TREX","UFPI",
+    ],
+    "Real Estate": [
+        "PLD","AMT","EQIX","CCI","PSA","O","DLR","WELL","SPG","VTR",
+        "EXR","AVB","EQR","UDR","CPT","MAA","NNN","VICI","MPW","OHI",
+        "PEAK","ARE","BXP","SLG","KIM","REG","FRT","ACC","ELS","SUI",
+    ],
+    "Utilities": [
+        "NEE","DUK","SO","D","AEP","EXC","XEL","ES","WEC","ED",
+        "ETR","FE","PPL","AEE","CMS","NI","LNT","EVRG","PNW","SRE",
+        "PCG","EIX","AWK","CNP","NRG","AES","DTE","OGE","POR","AVA",
+    ],
+    "Communication Services": [
+        "GOOGL","META","NFLX","DIS","CMCSA","T","VZ","TMUS","EA","TTWO",
+        "ATVI","FOXA","IPG","OMC","PARA","WBD","LYV","MTCH","ZM","SNAP",
+        "PINS","RBLX","SPOT","ROKU","SIRI","IAC","NLSN","NYT","NWSA","LBRDA",
+    ],
 }
 
 SECTOR_ETFS = {
@@ -217,7 +261,7 @@ def build_candidate_universe(preferences, api_key, log=print):
         add("GLD", "Commodities")
         add("TLT", "Government")
 
-    # 3. Top 3 candidates per sector — Sharpe ranking happens after price fetch
+    # 3. Top 5 candidates per sector — Sharpe ranking picks best 2 after price fetch
     for sector in included_sectors:
         if sector in excluded_sectors:
             continue
@@ -226,7 +270,7 @@ def build_candidate_universe(preferences, api_key, log=print):
             continue
         if risk_tolerance <= 3 and sector not in DEFENSIVE_SECTORS:
             continue  # Conservative: skip growth sectors entirely
-        n = 3  # always fetch top 3 so we can rank by Sharpe
+        n = 5  # fetch top 5 so Sharpe ranking has a meaningful pool to choose from
         for s in stocks[:n]:
             add(s, sector)
 
@@ -237,15 +281,22 @@ def build_candidate_universe(preferences, api_key, log=print):
         if etf:
             add(etf, f"Bond-{category}")
 
-    # Cap at 24 for fetching — Sharpe filter will trim to 15 after prices arrive
-    result = candidates[:24]
-    log(f"   Fetching {len(result)} candidates for Sharpe ranking: {', '.join(result)}")
+    # Cap at 65 for fetching — Sharpe filter will trim to ~18 after prices arrive
+    result = candidates[:65]
+    log(f"   Scanning {len(result)} candidates across sectors for Sharpe ranking...")
     return result, sector_map
 
 
-def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=14):
-    """Rank candidates by Sharpe ratio within each sector, keep the best one.
-    Tickers in always_keep (SPY, QQQ, etc.) are always included regardless of Sharpe."""
+def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=18,
+                     top_n_per_sector=2):
+    """
+    Rank candidates by Sharpe ratio (excess return) within each sector.
+    Keeps the best `top_n_per_sector` stocks per sector.
+    Tickers in always_keep (SPY, QQQ, etc.) are pinned regardless of Sharpe.
+    """
+    from collections import defaultdict
+    RISK_FREE_RATE = 0.045  # keep in sync with portfolio_analysis.py
+
     if always_keep is None:
         always_keep = {"SPY", "QQQ", "GLD", "TLT"}
 
@@ -253,10 +304,8 @@ def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=14):
         r = returns_df[ticker].dropna()
         ann_ret = r.mean() * 252
         ann_std = r.std() * np.sqrt(252)
-        return ann_ret / ann_std if ann_std > 0 else -999.0
+        return (ann_ret - RISK_FREE_RATE) / ann_std if ann_std > 0 else -999.0
 
-    # Group by sector
-    from collections import defaultdict
     sector_groups = defaultdict(list)
     pinned = []
 
@@ -268,7 +317,7 @@ def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=14):
 
     selected = list(pinned)
     for sector, tickers in sector_groups.items():
-        best = max(tickers, key=sharpe)
-        selected.append(best)
+        ranked = sorted(tickers, key=sharpe, reverse=True)
+        selected.extend(ranked[:top_n_per_sector])
 
     return selected[:max_total]
