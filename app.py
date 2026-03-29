@@ -14,7 +14,7 @@ except ImportError:
     pass
 
 from data import (
-    validate_ticker, fetch_stock_data, fetch_company_details,
+    validate_ticker, fetch_stock_data, fetch_ohlcv, fetch_company_details,
     fetch_news, fetch_peer_comparison, fetch_sector_data, fetch_bond_data,
     fetch_next_earnings, detect_asset_type,
     fetch_crypto_data, fetch_crypto_details, fetch_etf_details,
@@ -1033,10 +1033,23 @@ with tab1:
                     progress.progress(35, text="Fetching news...")
                     news_list = fetch_news(ticker_input, POLYGON_API_KEY, log=log)
 
-                peer_df = None
+                peer_df       = None
+                peer_price_dfs = {}   # {ticker: df} with Cumulative_Index + Close
                 if do_peers and peers_list and not is_crypto:
                     progress.progress(45, text="Fetching peer data...")
                     peer_df = fetch_peer_comparison(ticker_input, peers_list, POLYGON_API_KEY, log=log)
+                    for _pt in [ticker_input] + peers_list[:4]:
+                        try:
+                            _pdf = fetch_ohlcv(_pt, "5y", POLYGON_API_KEY,
+                                               log=lambda m: None,
+                                               start_override=date_start,
+                                               end_override=date_end,
+                                               bar_size=bar_size)
+                            _pdf["Daily_Return"]     = _pdf["Close"].pct_change()
+                            _pdf["Cumulative_Index"] = (1 + _pdf["Daily_Return"].fillna(0)).cumprod() * 100
+                            peer_price_dfs[_pt] = _pdf
+                        except Exception:
+                            pass
 
                 sector_df = None
                 if do_sector and not is_crypto:
@@ -1407,7 +1420,153 @@ with tab1:
 
             if peer_df is not None and not peer_df.empty:
                 st.markdown('<div class="section-header">Peer Comparison</div>', unsafe_allow_html=True)
-                st.dataframe(peer_df, use_container_width=True, hide_index=True)
+
+                _peer_colors = ["#2E75B6", "#00B0F0", "#FFC000", "#FF4136", "#2ECC71"]
+                _chart_layout = dict(
+                    plot_bgcolor="#0f1117",
+                    paper_bgcolor="#161b27",
+                    font=dict(color="#e2e8f0", family="Inter, sans-serif"),
+                    xaxis=dict(gridcolor="#1e2a3a", showgrid=True),
+                    yaxis=dict(gridcolor="#1e2a3a", showgrid=True),
+                    legend=dict(orientation="h", y=1.04, x=0,
+                                bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                    margin=dict(l=60, r=20, t=50, b=50),
+                    hovermode="x unified",
+                )
+
+                # ── 1. Cumulative Return Overlay ──────────────────────────────
+                if peer_price_dfs:
+                    fig_cum = go.Figure()
+                    for _ci, (_pt, _pdf) in enumerate(peer_price_dfs.items()):
+                        if "Cumulative_Index" not in _pdf.columns or _pdf.empty:
+                            continue
+                        _x = _pdf["Date"] if "Date" in _pdf.columns else _pdf.index
+                        _is_main = (_pt == ticker_input)
+                        fig_cum.add_trace(go.Scatter(
+                            x=_x,
+                            y=_pdf["Cumulative_Index"],
+                            name=_pt,
+                            mode="lines",
+                            line=dict(
+                                color=_peer_colors[_ci % len(_peer_colors)],
+                                width=2.5 if _is_main else 1.8,
+                                dash="solid" if _is_main else "dot" if _ci > 0 else "solid",
+                            ),
+                            hovertemplate=f"<b>{_pt}</b>: %{{y:.1f}}<extra></extra>",
+                        ))
+                    fig_cum.update_layout(
+                        **_chart_layout,
+                        title=dict(text="Cumulative Return Comparison (Base = 100)",
+                                   font=dict(size=14, color="#e2e8f0")),
+                        yaxis_title="Index (Start = 100)",
+                        xaxis_title="Date",
+                        height=380,
+                    )
+                    st.plotly_chart(fig_cum, use_container_width=True)
+
+                # ── 2. Key Metrics Bar Charts ─────────────────────────────────
+                if peer_price_dfs:
+                    _mrows = []
+                    for _pt, _pdf in peer_price_dfs.items():
+                        if _pdf.empty or "Daily_Return" not in _pdf.columns:
+                            continue
+                        _ret = _pdf["Daily_Return"].dropna()
+                        if len(_ret) < 5:
+                            continue
+                        _ann_ret = (1 + _ret.mean()) ** 252 - 1
+                        _ann_vol = _ret.std() * np.sqrt(252)
+                        _sharpe  = (_ann_ret / _ann_vol) if _ann_vol > 0 else 0
+                        _cum     = _pdf["Cumulative_Index"]
+                        _max_dd  = ((_cum - _cum.cummax()) / _cum.cummax()).min()
+                        _mrows.append({
+                            "Ticker":           _pt,
+                            "Ann. Return (%)":  round(_ann_ret * 100, 2),
+                            "Volatility (%)":   round(_ann_vol * 100, 2),
+                            "Sharpe Ratio":     round(_sharpe, 2),
+                            "Max Drawdown (%)": round(_max_dd * 100, 2),
+                        })
+
+                    if _mrows:
+                        _mdf    = pd.DataFrame(_mrows)
+                        _ticks  = _mdf["Ticker"].tolist()
+                        _colors = [_peer_colors[i % len(_peer_colors)]
+                                   for i in range(len(_ticks))]
+
+                        _mc1, _mc2 = st.columns(2)
+
+                        with _mc1:
+                            # Annualised Return + Volatility grouped bar
+                            fig_rv = go.Figure()
+                            fig_rv.add_trace(go.Bar(
+                                name="Ann. Return (%)",
+                                x=_ticks,
+                                y=_mdf["Ann. Return (%)"],
+                                marker_color=[
+                                    "#2ECC71" if v >= 0 else "#FF4136"
+                                    for v in _mdf["Ann. Return (%)"]
+                                ],
+                                hovertemplate="%{x}: %{y:.2f}%<extra>Ann. Return</extra>",
+                            ))
+                            fig_rv.add_trace(go.Bar(
+                                name="Volatility (%)",
+                                x=_ticks,
+                                y=_mdf["Volatility (%)"],
+                                marker_color="#FFC000",
+                                hovertemplate="%{x}: %{y:.2f}%<extra>Volatility</extra>",
+                            ))
+                            fig_rv.update_layout(
+                                **_chart_layout,
+                                barmode="group",
+                                title=dict(text="Ann. Return vs Volatility",
+                                           font=dict(size=13, color="#e2e8f0")),
+                                yaxis_title="Percent (%)",
+                                height=300,
+                            )
+                            st.plotly_chart(fig_rv, use_container_width=True)
+
+                        with _mc2:
+                            # Sharpe Ratio bars
+                            fig_sh = go.Figure(go.Bar(
+                                x=_ticks,
+                                y=_mdf["Sharpe Ratio"],
+                                marker_color=[
+                                    "#2ECC71" if v >= 1 else "#FFC000" if v >= 0 else "#FF4136"
+                                    for v in _mdf["Sharpe Ratio"]
+                                ],
+                                hovertemplate="%{x}: %{y:.2f}<extra>Sharpe</extra>",
+                            ))
+                            fig_sh.update_layout(
+                                **_chart_layout,
+                                title=dict(text="Sharpe Ratio Comparison",
+                                           font=dict(size=13, color="#e2e8f0")),
+                                yaxis_title="Sharpe Ratio",
+                                showlegend=False,
+                                height=300,
+                            )
+                            st.plotly_chart(fig_sh, use_container_width=True)
+
+                        # Max Drawdown full-width
+                        fig_dd = go.Figure(go.Bar(
+                            x=_ticks,
+                            y=_mdf["Max Drawdown (%)"],
+                            marker_color="#FF4136",
+                            hovertemplate="%{x}: %{y:.2f}%<extra>Max Drawdown</extra>",
+                        ))
+                        fig_dd.update_layout(
+                            **_chart_layout,
+                            title=dict(text="Maximum Drawdown Comparison",
+                                       font=dict(size=13, color="#e2e8f0")),
+                            yaxis_title="Max Drawdown (%)",
+                            showlegend=False,
+                            height=280,
+                        )
+                        st.plotly_chart(fig_dd, use_container_width=True)
+
+                # ── 3. Company Info Table ─────────────────────────────────────
+                _show_cols = [c for c in
+                              ["Ticker", "Company", "Exchange", "Market Cap ($B)", "Employees", "Country"]
+                              if c in peer_df.columns]
+                st.dataframe(peer_df[_show_cols], use_container_width=True, hide_index=True)
 
             st.markdown('<div class="section-header">Automated Analysis Summary</div>', unsafe_allow_html=True)
             st.markdown(f"""
