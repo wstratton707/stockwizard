@@ -226,10 +226,11 @@ html, body, [class*="css"] {
 /* ── Metric cards ── */
 .metric-card {
   background: #ffffff; border: 1px solid #e8eef6;
-  border-radius: 12px; padding: 1.1rem 0.85rem; text-align: center;
-  position: relative; overflow: hidden;
+  border-radius: 12px; padding: 1.25rem 1.1rem; text-align: center;
+  position: relative; overflow: visible;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s, transform 0.2s;
+  min-width: 0;
 }
 .metric-card::before {
   content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
@@ -241,14 +242,15 @@ html, body, [class*="css"] {
   transform: translateY(-1px);
 }
 .metric-label {
-  font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 600;
-  letter-spacing: 0.6px; text-transform: uppercase; color: #94a3b8; margin-bottom: 0.5rem;
+  font-family: 'Inter', sans-serif; font-size: 0.68rem; font-weight: 600;
+  letter-spacing: 0.5px; text-transform: uppercase; color: #94a3b8;
+  margin-bottom: 0.55rem; white-space: nowrap;
 }
 .metric-value {
   font-family: 'JetBrains Mono', monospace;
-  font-size: clamp(0.88rem, 1.1vw, 1.2rem);
-  font-weight: 500; color: #0f172a;
-  overflow: hidden; text-overflow: ellipsis;
+  font-size: clamp(1rem, 1.25vw, 1.35rem);
+  font-weight: 600; color: #0f172a;
+  white-space: nowrap; line-height: 1.3;
 }
 .metric-value.positive { color: #059669; }
 .metric-value.negative { color: #dc2626; }
@@ -647,7 +649,7 @@ with st.sidebar:
                     '(Random Forest / XGBoost) — for smarter, more adaptive price projections. '
                     'GARCH captures volatility clustering, Monte Carlo simulates thousands of '
                     'price paths, and the ML model adds a data-driven drift signal — '
-                    'all powered by real-time Yahoo Finance data.</div>',
+                    'all powered by real-time market data via Polygon.io.</div>',
                     unsafe_allow_html=True,
                 )
             n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
@@ -1313,7 +1315,7 @@ with tab1:
                 extra_label = "Last Earnings"
                 extra_value = earnings_date[:10] if earnings_date and earnings_date != "N/A" else "N/A"
 
-            col1,col2,col3,col4,col5,col6,col7 = st.columns(7)
+            col1,col2,col3,col4,col5,col6,col7 = st.columns([1.3,1.2,1.3,1.3,1.1,1.2,1.2])
             vol_val = df["Volatility_20d"].iloc[-1]
             _TOOLTIPS = {
                 "Sharpe Ratio":    "Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent. Higher = better return per unit of risk.",
@@ -1512,35 +1514,37 @@ with tab1:
                 _header    = "Custom Forecast" if _is_custom else "Monte Carlo Forecast"
                 st.markdown(f'<div class="section-header">{_header}</div>', unsafe_allow_html=True)
 
-                # ── Metric cards ──────────────────────────────────────────────
-                if _is_custom:
-                    mc_cols = st.columns(8)
-                    _cards = [
-                        (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
-                        (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#1d4ed8"),
-                        (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
-                        (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#4a9eff"),
-                        (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#059669"),
-                        (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#1d4ed8"),
-                        (mc_cols[6],"GARCH Vol",  mc_summary.get("Ann. Volatility (GARCH)", "—"), "#4a9eff"),
-                        (mc_cols[7],"ML Drift",   mc_summary.get("ML Drift (daily)", "—"),        "#059669"),
-                    ]
-                else:
-                    mc_cols = st.columns(6)
-                    _cards = [
-                        (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
-                        (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#1d4ed8"),
-                        (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
-                        (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#4a9eff"),
-                        (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#059669"),
-                        (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#1d4ed8"),
-                    ]
-                for col, label, value, color in _cards:
+                # ── Metric cards — row 1: price scenarios ─────────────────────
+                _r1 = st.columns(5)
+                for col, label, value, color in [
+                    (_r1[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
+                    (_r1[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#1d4ed8"),
+                    (_r1[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
+                    (_r1[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#4a9eff"),
+                    (_r1[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#059669"),
+                ]:
                     with col:
                         st.markdown(f"""
                         <div class="metric-card">
                             <div class="metric-label">{label}</div>
                             <div class="metric-value" style="color:{color}">{value}</div>
+                        </div>""", unsafe_allow_html=True)
+
+                # ── Metric cards — row 2: stats ────────────────────────────────
+                _r2_items = [("Prob. of Gain", mc_summary["Prob. of Gain"], "#1d4ed8")]
+                if _is_custom:
+                    _r2_items += [
+                        ("GARCH Vol", mc_summary.get("Ann. Volatility (GARCH)", "—"), "#4a9eff"),
+                        ("ML Drift",  mc_summary.get("ML Drift (daily)", "—"),        "#059669"),
+                    ]
+                _r2 = st.columns(len(_r2_items))
+                for col, label, value, color in zip(_r2, _r2_items):
+                    _lbl, _val, _clr = label, value, color
+                    with col:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">{_lbl}</div>
+                            <div class="metric-value" style="color:{_clr}">{_val}</div>
                         </div>""", unsafe_allow_html=True)
 
                 # ── Simulated price-path fan chart ────────────────────────────
