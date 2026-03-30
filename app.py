@@ -229,7 +229,7 @@ html, body, [class*="css"] {
 /* ── Metric cards ── */
 .metric-card {
   background: #ffffff; border: 1px solid #e8eef6;
-  border-radius: 12px; padding: 1.25rem 1.1rem; text-align: center;
+  border-radius: 12px; padding: 1.1rem 0.6rem; text-align: center;
   position: relative; overflow: visible;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s, transform 0.2s;
@@ -245,13 +245,13 @@ html, body, [class*="css"] {
   transform: translateY(-1px);
 }
 .metric-label {
-  font-family: 'Inter', sans-serif; font-size: 0.68rem; font-weight: 600;
-  letter-spacing: 0.5px; text-transform: uppercase; color: #94a3b8;
-  margin-bottom: 0.55rem; white-space: nowrap;
+  font-family: 'Inter', sans-serif; font-size: 0.63rem; font-weight: 600;
+  letter-spacing: 0.4px; text-transform: uppercase; color: #94a3b8;
+  margin-bottom: 0.45rem; white-space: nowrap;
 }
 .metric-value {
   font-family: 'JetBrains Mono', monospace;
-  font-size: clamp(1rem, 1.25vw, 1.35rem);
+  font-size: clamp(0.82rem, 1.05vw, 1.05rem);
   font-weight: 600; color: #0f172a;
   white-space: nowrap; line-height: 1.3;
 }
