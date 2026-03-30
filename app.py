@@ -920,101 +920,52 @@ with tab1:
         with c1:
             st.markdown("""
             <div class="feature-card">
-              <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.85rem">
-                <div style="width:42px;height:42px;background:linear-gradient(135deg,#eff6ff,#dbeafe);
-                            border-radius:10px;display:flex;align-items:center;justify-content:center;
-                            font-size:1.25rem;flex-shrink:0;border:1px solid #bfdbfe">📊</div>
-                <div>
-                  <div class="feature-card-title">Investor Mode</div>
-                  <div style="font-size:0.7rem;font-weight:600;color:#059669;letter-spacing:0.3px">FREE</div>
-                </div>
-              </div>
-              <div class="feature-grid">
-                <div class="feature-chip"><span class="feature-chip-icon">📑</span>Excel Export</div>
-                <div class="feature-chip"><span class="feature-chip-icon">🎲</span>Monte Carlo</div>
-                <div class="feature-chip"><span class="feature-chip-icon">📈</span>RSI &amp; MACD</div>
-                <div class="feature-chip"><span class="feature-chip-icon">🎯</span>Support Levels</div>
-                <div class="feature-chip"><span class="feature-chip-icon">🔗</span>Correlation</div>
-                <div class="feature-chip"><span class="feature-chip-icon">📰</span>News Feed</div>
-              </div>
+                <span class="feature-card-icon">📊</span>
+                <div class="feature-card-title">Investor Mode</div>
+                <div class="feature-card-subtitle">Free · Full technical analysis</div>
+                <ul class="feature-card-list">
+                    <li>10-sheet Excel + PowerPoint export</li>
+                    <li>Monte Carlo simulation</li>
+                    <li>RSI, MACD, Bollinger Bands</li>
+                    <li>Support &amp; resistance levels</li>
+                    <li>Correlation matrix</li>
+                    <li>News headlines</li>
+                    <li>Up to 5 year history</li>
+                </ul>
             </div>""", unsafe_allow_html=True)
         with c2:
             st.markdown("""
-            <div class="feature-card" style="border-color:#1d4ed8;
-              box-shadow:0 0 0 1px #bfdbfe,0 4px 24px rgba(29,78,216,0.10)">
-              <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.85rem">
-                <div style="width:42px;height:42px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);
-                            border-radius:10px;display:flex;align-items:center;justify-content:center;
-                            font-size:1.25rem;flex-shrink:0;box-shadow:0 2px 8px rgba(29,78,216,0.35)">⚡</div>
-                <div>
-                  <div class="feature-card-title">Day Trader Mode</div>
-                  <div style="font-size:0.7rem;font-weight:600;color:#1d4ed8;letter-spacing:0.3px">PRO</div>
-                </div>
-              </div>
-              <div class="feature-grid">
-                <div class="feature-chip"><span class="feature-chip-icon">🕯️</span>Live Candles</div>
-                <div class="feature-chip"><span class="feature-chip-icon">⏱️</span>30s Refresh</div>
-                <div class="feature-chip"><span class="feature-chip-icon">📊</span>1m–1hr Charts</div>
-                <div class="feature-chip"><span class="feature-chip-icon">📶</span>Volume Spikes</div>
-                <div class="feature-chip"><span class="feature-chip-icon">📉</span>Live RSI/MACD</div>
-                <div class="feature-chip"><span class="feature-chip-icon">🌅</span>Pre/After Mkt</div>
-              </div>
+            <div class="feature-card" style="border-color:#1d4ed8;border-top-color:#1d4ed8">
+                <span class="feature-card-icon">⚡</span>
+                <div class="feature-card-title">Day Trader Mode</div>
+                <div class="feature-card-subtitle" style="color:#1d4ed8">Pro · Real-time intraday</div>
+                <ul class="feature-card-list">
+                    <li>Live candlestick charts</li>
+                    <li>Real-time price (30s refresh)</li>
+                    <li>1min / 5min / 15min / 1hr candles</li>
+                    <li>Volume spike detection</li>
+                    <li>Live RSI &amp; MACD overlays</li>
+                    <li>Pre &amp; after-market data</li>
+                </ul>
             </div>""", unsafe_allow_html=True)
         with c3:
             st.markdown("""
-            <div class="feature-card" style="border-color:#1d4ed8;
-              box-shadow:0 0 0 1px #bfdbfe,0 4px 24px rgba(29,78,216,0.10)">
-              <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.85rem">
-                <div style="width:42px;height:42px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);
-                            border-radius:10px;display:flex;align-items:center;justify-content:center;
-                            font-size:1.25rem;flex-shrink:0;box-shadow:0 2px 8px rgba(29,78,216,0.35)">💼</div>
-                <div>
-                  <div class="feature-card-title">Portfolio Builder</div>
-                  <div style="font-size:0.7rem;font-weight:600;color:#1d4ed8;letter-spacing:0.3px">PRO</div>
-                </div>
-              </div>
-              <div class="feature-grid">
-                <div class="feature-chip"><span class="feature-chip-icon">⚖️</span>Optimization</div>
-                <div class="feature-chip"><span class="feature-chip-icon">📐</span>Eff. Frontier</div>
-                <div class="feature-chip"><span class="feature-chip-icon">📅</span>3yr Backtest</div>
-                <div class="feature-chip"><span class="feature-chip-icon">🎲</span>Portfolio MC</div>
-                <div class="feature-chip"><span class="feature-chip-icon">🏁</span>Milestones</div>
-                <div class="feature-chip"><span class="feature-chip-icon">🔀</span>Diversification</div>
-              </div>
+            <div class="feature-card" style="border-color:#1d4ed8;border-top-color:#1d4ed8">
+                <span class="feature-card-icon">💼</span>
+                <div class="feature-card-title">Portfolio Builder</div>
+                <div class="feature-card-subtitle" style="color:#1d4ed8">Pro · Quant-grade optimisation</div>
+                <ul class="feature-card-list">
+                    <li>Mean-variance optimisation</li>
+                    <li>Efficient frontier chart</li>
+                    <li>3-year backtest vs S&amp;P 500</li>
+                    <li>Portfolio Monte Carlo</li>
+                    <li>Milestone projections</li>
+                    <li>Diversification scoring</li>
+                </ul>
             </div>""", unsafe_allow_html=True)
 
         if SHOW_PRICING:
             render_pricing_section()
-
-        # ── Social proof ──────────────────────────────────────────────────────
-        st.markdown("""
-        <div class="social-proof-bar">
-          <div class="social-proof-number">2,400+</div>
-          <div class="social-proof-label">analyses run by traders &amp; students across 14 universities</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        t1, t2, t3 = st.columns(3)
-        for tcol, stars, text, author, role in [
-            (t1, "★★★★★",
-             "I pulled a full TSLA report with Monte Carlo and Bollinger Bands in under 30 seconds. This would've taken me an hour in Excel.",
-             "Ryan M.", "Retail trader · Chicago"),
-            (t2, "★★★★★",
-             "The portfolio optimizer found an allocation I never would've considered. The efficient frontier chart alone is worth it.",
-             "Sarah K.", "Finance student · Indiana University"),
-            (t3, "★★★★☆",
-             "We use StockWizard to prep before earnings calls. The custom forecast with GARCH volatility is genuinely impressive.",
-             "James T.", "Analyst · Boutique fund"),
-        ]:
-            with tcol:
-                st.markdown(f"""
-                <div class="testimonial-card">
-                  <div class="testimonial-stars">{stars}</div>
-                  <div class="testimonial-text">{text}</div>
-                  <div class="testimonial-author">{author}</div>
-                  <div class="testimonial-role">{role}</div>
-                </div>""", unsafe_allow_html=True)
-        st.markdown("<div style='margin-bottom:1rem'></div>", unsafe_allow_html=True)
 
         # ── How it works ──────────────────────────────────────────────────────
         st.markdown('<div class="section-header">How It Works</div>', unsafe_allow_html=True)
@@ -1027,16 +978,13 @@ with tab1:
         ]:
             with col:
                 st.markdown(f"""
-                <div style="text-align:center;padding:1.5rem 0.75rem;background:#ffffff;
-                            border-radius:14px;border:1px solid #e8eef6;
-                            box-shadow:0 1px 3px rgba(15,23,42,0.06)">
-                    <div style="width:48px;height:48px;
-                                background:linear-gradient(135deg,#1d4ed8,#3b82f6);
-                                border-radius:50%;display:flex;align-items:center;justify-content:center;
-                                margin:0 auto 0.85rem;font-size:1.1rem;font-weight:700;color:#ffffff;
-                                box-shadow:0 4px 12px rgba(29,78,216,0.3)">{num}</div>
-                    <div style="font-weight:700;color:#0f172a;font-size:0.9rem;margin-bottom:0.4rem">{title}</div>
-                    <div style="color:#64748b;font-size:0.78rem;line-height:1.55">{desc}</div>
+                <div style="text-align:center;padding:1.25rem 0.5rem">
+                    <div style="width:44px;height:44px;background:#1d4ed8;
+                                border-radius:3px;display:flex;align-items:center;justify-content:center;
+                                margin:0 auto 0.75rem;font-size:1.1rem;font-weight:700;color:#0f172a;
+                                box-shadow:none">{num}</div>
+                    <div style="font-weight:700;color:#0f172a;font-size:0.9rem;margin-bottom:0.35rem">{title}</div>
+                    <div style="color:#6b7a8d;font-size:0.8rem;line-height:1.5">{desc}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -1481,17 +1429,6 @@ with tab1:
                 "52W Low":         "Lowest closing price in the last 52 weeks.",
                 "Current Price":   "Most recent closing price from Polygon.io.",
             }
-            _METRIC_ICONS = {
-                "Current Price":   "💲",
-                "Period Return":   "📈" if period_ret >= 0 else "📉",
-                "52W High":        "▲",
-                "52W Low":         "▼",
-                "Sharpe Ratio":    "⚡",
-                "Ann. Volatility": "〰",
-                "Market Cap":      "🏦",
-                "Expense Ratio":   "💼",
-                "Last Earnings":   "📅",
-            }
             _metric_rows = [
                 [
                     ("Current Price",   f"${latest['Close']:,.2f}",                            "neutral"),
@@ -1508,13 +1445,11 @@ with tab1:
             for row_items in _metric_rows:
                 row_cols = st.columns(len(row_items))
                 for col, (label, value, cls) in zip(row_cols, row_items):
-                    tip  = _TOOLTIPS.get(label, "")
-                    icon = _METRIC_ICONS.get(label, "◈")
+                    tip = _TOOLTIPS.get(label, "")
                     tip_html = f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{tip}</span></span>' if tip else ""
                     with col:
                         st.markdown(f"""
                         <div class="metric-card">
-                            <span class="metric-icon">{icon}</span>
                             <div class="metric-label">{label}{tip_html}</div>
                             <div class="metric-value {cls}">{value}</div>
                         </div>""", unsafe_allow_html=True)
