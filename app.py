@@ -114,18 +114,21 @@ html, body, [class*="css"] {
   background: #1e40af !important; box-shadow: 0 4px 12px rgba(29,78,216,0.4) !important;
   transform: translateY(-1px) !important;
 }
-[data-testid="stSidebar"] [data-testid="stTextInput"] input {
-  background: rgba(255,255,255,0.06) !important; border: 1px solid rgba(255,255,255,0.12) !important;
-  color: #f1f5f9 !important; border-radius: 8px !important; font-size: 0.9rem !important;
+[data-testid="stSidebar"] [data-testid="stTextInput"] input,
+[data-testid="stSidebar"] [data-testid="stNumberInput"] input {
+  background: #ffffff !important; border: 1px solid #bfdbfe !important;
+  color: #1d4ed8 !important; border-radius: 8px !important; font-size: 0.9rem !important;
   font-family: 'Inter', sans-serif !important;
 }
-[data-testid="stSidebar"] [data-testid="stTextInput"] input::placeholder { color: #475569 !important; }
-[data-testid="stSidebar"] [data-testid="stTextInput"] input:focus {
+[data-testid="stSidebar"] [data-testid="stTextInput"] input::placeholder,
+[data-testid="stSidebar"] [data-testid="stNumberInput"] input::placeholder { color: #93c5fd !important; }
+[data-testid="stSidebar"] [data-testid="stTextInput"] input:focus,
+[data-testid="stSidebar"] [data-testid="stNumberInput"] input:focus {
   border-color: #3b82f6 !important; box-shadow: 0 0 0 3px rgba(59,130,246,0.2) !important;
 }
 [data-testid="stSidebar"] .stSelectbox > div > div {
-  background: rgba(255,255,255,0.06) !important; border: 1px solid rgba(255,255,255,0.12) !important;
-  border-radius: 8px !important; font-family: 'Inter', sans-serif !important;
+  background: #ffffff !important; border: 1px solid #bfdbfe !important;
+  color: #1d4ed8 !important; border-radius: 8px !important; font-family: 'Inter', sans-serif !important;
 }
 
 /* ── Tabs ── */
@@ -226,10 +229,11 @@ html, body, [class*="css"] {
 /* ── Metric cards ── */
 .metric-card {
   background: #ffffff; border: 1px solid #e8eef6;
-  border-radius: 12px; padding: 1.1rem 0.85rem; text-align: center;
-  position: relative; overflow: hidden;
+  border-radius: 12px; padding: 1.1rem 0.6rem; text-align: center;
+  position: relative; overflow: visible;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s, transform 0.2s;
+  min-width: 0;
 }
 .metric-card::before {
   content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
@@ -241,14 +245,20 @@ html, body, [class*="css"] {
   transform: translateY(-1px);
 }
 .metric-label {
+<<<<<<< HEAD
   font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 600;
   letter-spacing: 0.6px; text-transform: uppercase; color: #64748b; margin-bottom: 0.5rem;
+=======
+  font-family: 'Inter', sans-serif; font-size: 0.63rem; font-weight: 600;
+  letter-spacing: 0.4px; text-transform: uppercase; color: #94a3b8;
+  margin-bottom: 0.45rem; white-space: nowrap;
+>>>>>>> 3be7f754a1e2ccf9a27f3da9657dfc32ae3cda48
 }
 .metric-value {
   font-family: 'JetBrains Mono', monospace;
-  font-size: clamp(0.88rem, 1.1vw, 1.2rem);
-  font-weight: 500; color: #0f172a;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: clamp(0.82rem, 1.05vw, 1.05rem);
+  font-weight: 600; color: #0f172a;
+  white-space: nowrap; line-height: 1.3;
 }
 .metric-value.positive { color: #059669; }
 .metric-value.negative { color: #dc2626; }
@@ -441,6 +451,84 @@ html, body, [class*="css"] {
 ::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 10px; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* ── Ticker tape ── */
+.ticker-tape-wrap {
+  background: #091929; overflow: hidden;
+  border-radius: 10px; margin-bottom: 1.5rem;
+  padding: 0.6rem 0; border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 2px 8px rgba(9,25,41,0.18);
+}
+.ticker-tape {
+  display: inline-flex; white-space: nowrap;
+  animation: scroll-left 40s linear infinite;
+}
+.ticker-tape:hover { animation-play-state: paused; cursor: default; }
+@keyframes scroll-left {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.t-item { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0 1.5rem; }
+.t-sym  { font-family:'JetBrains Mono',monospace; font-size:0.78rem; font-weight:700; color:#f1f5f9; }
+.t-px   { font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:#94a3b8; }
+.t-up   { font-family:'JetBrains Mono',monospace; font-size:0.75rem; font-weight:600; color:#34d399; }
+.t-dn   { font-family:'JetBrains Mono',monospace; font-size:0.75rem; font-weight:600; color:#f87171; }
+.t-div  { color:#2d4a6e; font-size:0.55rem; padding: 0 0.25rem; }
+
+/* ── Feature grid (icon chips) ── */
+.feature-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; margin-top: 1rem;
+}
+.feature-chip {
+  background: #f8fafc; border: 1px solid #e8eef6;
+  border-radius: 8px; padding: 0.5rem 0.65rem;
+  font-family: 'Inter', sans-serif; font-size: 0.76rem;
+  color: #475569; font-weight: 500; line-height: 1.3;
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.feature-chip-icon { font-size: 0.85rem; flex-shrink: 0; }
+
+/* ── Testimonials ── */
+.testimonial-wrap { margin: 2rem 0; }
+.testimonial-card {
+  background: #ffffff; border: 1px solid #e8eef6;
+  border-radius: 14px; padding: 1.5rem 1.75rem;
+  box-shadow: var(--shadow-sm); height: 100%;
+  position: relative;
+}
+.testimonial-quote-mark {
+  font-size: 3.5rem; color: #dbeafe; font-family: Georgia, serif;
+  line-height: 0.8; display: block; margin-bottom: 0.5rem;
+}
+.testimonial-text {
+  font-family: 'Inter', sans-serif; font-size: 0.84rem;
+  color: #475569; line-height: 1.75; margin-bottom: 1rem;
+}
+.testimonial-stars { color: #f59e0b; font-size: 0.82rem; margin-bottom: 0.75rem; letter-spacing: 1px; }
+.testimonial-author { font-family: 'Inter', sans-serif; font-weight: 700; color: #0f172a; font-size: 0.85rem; }
+.testimonial-role   { font-family: 'Inter', sans-serif; font-size: 0.73rem; color: #94a3b8; margin-top: 2px; }
+.social-proof-bar {
+  text-align: center; padding: 1.5rem;
+  background: linear-gradient(135deg, #eff6ff, #f0fdf4);
+  border-radius: 14px; border: 1px solid #dbeafe;
+  margin-bottom: 1.75rem;
+}
+.social-proof-number {
+  font-family: 'JetBrains Mono', monospace; font-size: 2rem;
+  font-weight: 700; color: #1d4ed8; line-height: 1;
+}
+.social-proof-label {
+  font-family: 'Inter', sans-serif; font-size: 0.78rem;
+  color: #64748b; margin-top: 0.3rem;
+}
+
+/* ── Metric icon ── */
+.metric-icon {
+  font-size: 1.1rem; display: block; margin-bottom: 0.3rem; line-height: 1;
+}
+
+/* ── Rangeselector styling ── */
+.rangeselector { font-family: 'Inter', sans-serif !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -512,6 +600,28 @@ st.markdown("""
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ── Ticker tape ──────────────────────────────────────────────────────────────
+_TAPE_ITEMS = [
+    ("AAPL","$213.49","+1.4%",True), ("TSLA","$248.80","+2.1%",True),
+    ("NVDA","$875.40","+3.2%",True), ("SPY", "$524.60","+0.6%",True),
+    ("MSFT","$415.20","+0.9%",True), ("AMZN","$192.80","+1.7%",True),
+    ("GOOGL","$173.50","-0.4%",False),("META","$512.30","+2.8%",True),
+    ("BRK.B","$412.10","+0.3%",True), ("JPM", "$214.60","-0.7%",False),
+    ("BTC", "$68,400","",True),       ("ETH","$3,580","",True),
+    ("QQQ","$445.20","+0.8%",True),   ("VTI","$248.90","+0.5%",True),
+    ("GLD","$224.30","-0.2%",False),  ("DIS","$111.40","+1.1%",True),
+]
+def _tape_html():
+    items_html = ""
+    for sym, px, chg, up in _TAPE_ITEMS:
+        chg_class = "t-up" if up else "t-dn"
+        arrow = "▲" if up else "▼"
+        chg_part = f'<span class="{chg_class}">{arrow} {chg}</span>' if chg else ""
+        items_html += f'<span class="t-item"><span class="t-sym">{sym}</span><span class="t-px">{px}</span>{chg_part}</span><span class="t-div">●</span>'
+    doubled = items_html * 2  # seamless loop
+    return f'<div class="ticker-tape-wrap"><div class="ticker-tape">{doubled}</div></div>'
+st.markdown(_tape_html(), unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -647,7 +757,7 @@ with st.sidebar:
                     '(Random Forest / XGBoost) — for smarter, more adaptive price projections. '
                     'GARCH captures volatility clustering, Monte Carlo simulates thousands of '
                     'price paths, and the ML model adds a data-driven drift signal — '
-                    'all powered by real-time Yahoo Finance data.</div>',
+                    'all powered by real-time market data via Polygon.io.</div>',
                     unsafe_allow_html=True,
                 )
             n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
@@ -1060,7 +1170,8 @@ with tab1:
                             fig_rsi.update_layout(height=200, template=None,
                                                   plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                                   margin=dict(l=0,r=0,t=5,b=0),
-                                                  yaxis=dict(range=[0,100], color="#6b7a8d"),
+                                                  xaxis_title="Time",
+                                                  yaxis=dict(range=[0,100], color="#6b7a8d", title="RSI (0–100)"),
                                                   font=dict(family="IBM Plex Mono", color="#0f172a"))
                             st.plotly_chart(fig_rsi, use_container_width=True)
 
@@ -1077,6 +1188,7 @@ with tab1:
                             fig_macd.update_layout(height=200, template=None,
                                                    plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                                    margin=dict(l=0,r=0,t=5,b=0),
+                                                   xaxis_title="Time", yaxis_title="MACD Value",
                                                    font=dict(family="IBM Plex Mono", color="#0f172a"))
                             st.plotly_chart(fig_macd, use_container_width=True)
                 except Exception:
@@ -1311,9 +1423,8 @@ with tab1:
             else:
                 earnings_date = fetch_next_earnings(ticker_input, POLYGON_API_KEY)
                 extra_label = "Last Earnings"
-                extra_value = earnings_date if earnings_date else "N/A"
+                extra_value = earnings_date[:10] if earnings_date and earnings_date != "N/A" else "N/A"
 
-            col1,col2,col3,col4,col5,col6,col7 = st.columns(7)
             vol_val = df["Volatility_20d"].iloc[-1]
             _TOOLTIPS = {
                 "Sharpe Ratio":    "Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent. Higher = better return per unit of risk.",
@@ -1323,23 +1434,30 @@ with tab1:
                 "52W Low":         "Lowest closing price in the last 52 weeks.",
                 "Current Price":   "Most recent closing price from Polygon.io.",
             }
-            for col, label, value, cls in [
-                (col1,"Current Price",   f"${latest['Close']:,.2f}",                           "neutral"),
-                (col2,"Period Return",   f"{period_ret:+.1f}%",                                pos_neg(period_ret)),
-                (col3,"52W High",        f"${latest.get('52W_High',0):,.2f}",                  "neutral"),
-                (col4,"52W Low",         f"${latest.get('52W_Low',0):,.2f}",                   "neutral"),
-                (col5,"Sharpe Ratio",    f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A",       pos_neg(sharpe) if pd.notna(sharpe) else "neutral"),
-                (col6,"Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A","neutral"),
-                (col7, extra_label,      extra_value,                                           "neutral"),
-            ]:
-                tip = _TOOLTIPS.get(label, "")
-                tip_html = f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{tip}</span></span>' if tip else ""
-                with col:
-                    st.markdown(f"""
-                    <div class="metric-card">
-                        <div class="metric-label">{label}{tip_html}</div>
-                        <div class="metric-value {cls}">{value}</div>
-                    </div>""", unsafe_allow_html=True)
+            _metric_rows = [
+                [
+                    ("Current Price",   f"${latest['Close']:,.2f}",                            "neutral"),
+                    ("Period Return",   f"{period_ret:+.1f}%",                                 pos_neg(period_ret)),
+                    ("52W High",        f"${latest['52W_High']:,.2f}" if pd.notna(latest.get('52W_High')) else "N/A", "neutral"),
+                    ("52W Low",         f"${latest['52W_Low']:,.2f}"  if pd.notna(latest.get('52W_Low'))  else "N/A", "neutral"),
+                ],
+                [
+                    ("Sharpe Ratio",    f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A",        pos_neg(sharpe) if pd.notna(sharpe) else "neutral"),
+                    ("Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A", "neutral"),
+                    (extra_label,       extra_value,                                            "neutral"),
+                ],
+            ]
+            for row_items in _metric_rows:
+                row_cols = st.columns(len(row_items))
+                for col, (label, value, cls) in zip(row_cols, row_items):
+                    tip = _TOOLTIPS.get(label, "")
+                    tip_html = f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{tip}</span></span>' if tip else ""
+                    with col:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">{label}{tip_html}</div>
+                            <div class="metric-value {cls}">{value}</div>
+                        </div>""", unsafe_allow_html=True)
 
             # ── ETF Profile Panel ─────────────────────────────────────────────
             if is_etf:
@@ -1461,12 +1579,31 @@ with tab1:
                 for s in support[:3]:
                     fig.add_hline(y=s, line_dash="dash", line_color="#059669", opacity=0.5,
                                   annotation_text=f"S ${s:,.0f}", annotation_position="right")
-            fig.update_layout(height=420, template=None,
+            fig.update_layout(height=440, template=None,
                               plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
-                              margin=dict(l=0,r=0,t=10,b=0),
+                              margin=dict(l=0,r=0,t=45,b=0),
+                              xaxis_title="Date", yaxis_title="Price ($)",
                               legend=dict(orientation="h",yanchor="bottom",y=1.02),
                               font=dict(family="IBM Plex Mono", color="#0f172a"),
-                              xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
+                              xaxis=dict(
+                                  gridcolor="#e2e8f0", color="#6b7a8d",
+                                  type="date",
+                                  rangeslider=dict(visible=False),
+                                  rangeselector=dict(
+                                      buttons=[
+                                          dict(count=1,  label="1M", step="month", stepmode="backward"),
+                                          dict(count=3,  label="3M", step="month", stepmode="backward"),
+                                          dict(count=6,  label="6M", step="month", stepmode="backward"),
+                                          dict(count=1,  label="1Y", step="year",  stepmode="backward"),
+                                          dict(count=3,  label="3Y", step="year",  stepmode="backward"),
+                                          dict(step="all", label="All"),
+                                      ],
+                                      bgcolor="#f8fafc", bordercolor="#e2e8f0", borderwidth=1,
+                                      font=dict(family="Inter", size=11, color="#475569"),
+                                      activecolor="#1d4ed8",
+                                      x=0, y=1.08,
+                                  ),
+                              ),
                               yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"))
             st.plotly_chart(fig, use_container_width=True)
 
@@ -1482,7 +1619,8 @@ with tab1:
                 fig_rsi.update_layout(height=200, template=None,
                                       plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                       margin=dict(l=0,r=0,t=5,b=0),
-                                      yaxis=dict(range=[0,100], color="#6b7a8d"),
+                                      xaxis_title="Date",
+                                      yaxis=dict(range=[0,100], color="#6b7a8d", title="RSI (0–100)"),
                                       xaxis=dict(color="#6b7a8d"),
                                       font=dict(family="IBM Plex Mono", color="#0f172a"))
                 st.plotly_chart(fig_rsi, use_container_width=True)
@@ -1502,6 +1640,7 @@ with tab1:
                 fig_bb.update_layout(height=300,template=None,
                                      plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                      margin=dict(l=0,r=0,t=5,b=0),
+                                     xaxis_title="Date", yaxis_title="Price ($)",
                                      xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                      yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                      font=dict(family="IBM Plex Mono", color="#0f172a"))
@@ -1512,35 +1651,36 @@ with tab1:
                 _header    = "Custom Forecast" if _is_custom else "Monte Carlo Forecast"
                 st.markdown(f'<div class="section-header">{_header}</div>', unsafe_allow_html=True)
 
-                # ── Metric cards ──────────────────────────────────────────────
-                if _is_custom:
-                    mc_cols = st.columns(8)
-                    _cards = [
-                        (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
-                        (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#1d4ed8"),
-                        (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
-                        (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#4a9eff"),
-                        (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#059669"),
-                        (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#1d4ed8"),
-                        (mc_cols[6],"GARCH Vol",  mc_summary.get("Ann. Volatility (GARCH)", "—"), "#4a9eff"),
-                        (mc_cols[7],"ML Drift",   mc_summary.get("ML Drift (daily)", "—"),        "#059669"),
-                    ]
-                else:
-                    mc_cols = st.columns(6)
-                    _cards = [
-                        (mc_cols[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
-                        (mc_cols[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#1d4ed8"),
-                        (mc_cols[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
-                        (mc_cols[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#4a9eff"),
-                        (mc_cols[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#059669"),
-                        (mc_cols[5],"Prob. Gain", mc_summary["Prob. of Gain"],             "#1d4ed8"),
-                    ]
-                for col, label, value, color in _cards:
+                # ── Metric cards — row 1: price scenarios ─────────────────────
+                _r1 = st.columns(5)
+                for col, label, value, color in [
+                    (_r1[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
+                    (_r1[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#1d4ed8"),
+                    (_r1[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
+                    (_r1[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#4a9eff"),
+                    (_r1[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#059669"),
+                ]:
                     with col:
                         st.markdown(f"""
                         <div class="metric-card">
                             <div class="metric-label">{label}</div>
                             <div class="metric-value" style="color:{color}">{value}</div>
+                        </div>""", unsafe_allow_html=True)
+
+                # ── Metric cards — row 2: stats ────────────────────────────────
+                _r2_items = [("Prob. of Gain", mc_summary["Prob. of Gain"], "#1d4ed8")]
+                if _is_custom:
+                    _r2_items += [
+                        ("GARCH Vol", mc_summary.get("Ann. Volatility (GARCH)", "—"), "#4a9eff"),
+                        ("ML Drift",  mc_summary.get("ML Drift (daily)", "—"),        "#059669"),
+                    ]
+                _r2 = st.columns(len(_r2_items))
+                for col, (_lbl, _val, _clr) in zip(_r2, _r2_items):
+                    with col:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">{_lbl}</div>
+                            <div class="metric-value" style="color:{_clr}">{_val}</div>
                         </div>""", unsafe_allow_html=True)
 
                 # ── Simulated price-path fan chart ────────────────────────────
@@ -1642,6 +1782,7 @@ with tab1:
             fig_vol.update_layout(height=200,template=None,
                                   plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                   margin=dict(l=0,r=0,t=5,b=0),showlegend=False,
+                                  xaxis_title="Date", yaxis_title="Volume",
                                   xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   font=dict(family="IBM Plex Mono", color="#0f172a"))
@@ -1772,7 +1913,7 @@ with tab1:
                                 barmode="group",
                                 title=dict(text="Ann. Return vs Volatility",
                                            font=dict(size=13, color="#0f172a")),
-                                yaxis_title="Percent (%)",
+                                xaxis_title="Ticker", yaxis_title="Percent (%)",
                                 height=300,
                             )
                             st.plotly_chart(fig_rv, use_container_width=True)
@@ -1792,7 +1933,7 @@ with tab1:
                                 **_chart_layout,
                                 title=dict(text="Sharpe Ratio Comparison",
                                            font=dict(size=13, color="#0f172a")),
-                                yaxis_title="Sharpe Ratio",
+                                xaxis_title="Ticker", yaxis_title="Sharpe Ratio",
                                 showlegend=False,
                                 height=300,
                             )
@@ -1809,7 +1950,7 @@ with tab1:
                             **_chart_layout,
                             title=dict(text="Maximum Drawdown Comparison",
                                        font=dict(size=13, color="#0f172a")),
-                            yaxis_title="Max Drawdown (%)",
+                            xaxis_title="Ticker", yaxis_title="Max Drawdown (%)",
                             showlegend=False,
                             height=280,
                         )
@@ -1980,7 +2121,7 @@ with tab3:
         fig_price.update_layout(height=380, template=None,
                                 plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                 margin=dict(l=0, r=0, t=10, b=0),
-                                yaxis_title="Price ($)",
+                                xaxis_title="Date", yaxis_title="Price ($)",
                                 xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                 yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                 font=dict(family="IBM Plex Mono", color="#0f172a"),
@@ -1999,7 +2140,7 @@ with tab3:
         fig_dd.update_layout(height=220, template=None,
                              plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                              margin=dict(l=0, r=0, t=10, b=0),
-                             yaxis_title="Drawdown (%)",
+                             xaxis_title="Date", yaxis_title="Drawdown (%)",
                              xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                              yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                              font=dict(family="IBM Plex Mono", color="#0f172a"))
@@ -2016,7 +2157,7 @@ with tab3:
             fig_vol.update_layout(height=220, template=None,
                                   plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                   margin=dict(l=0, r=0, t=5, b=0),
-                                  yaxis_title="Ann. Vol (%)",
+                                  xaxis_title="Date", yaxis_title="Ann. Vol (%)",
                                   xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   font=dict(family="IBM Plex Mono", color="#0f172a"))
@@ -2034,7 +2175,7 @@ with tab3:
             fig_mom.update_layout(height=220, template=None,
                                   plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                   margin=dict(l=0, r=0, t=5, b=0),
-                                  yaxis_title="Return (%)",
+                                  xaxis_title="Date", yaxis_title="Return (%)",
                                   xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   font=dict(family="IBM Plex Mono", color="#0f172a"))

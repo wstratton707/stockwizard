@@ -29,16 +29,22 @@ def _get(endpoint, api_key, params=None, raise_on_error=False):
     if cached and (time.time() - cached["ts"]) < _API_CACHE_TTL:
         return cached["data"]
 
-    r = requests.get(f"{POLYGON_BASE}{endpoint}", params=params, timeout=30)
-    if r.status_code == 200:
-        result = r.json()
-        _API_CACHE[cache_key] = {"ts": time.time(), "data": result}
-        return result
-    if raise_on_error:
+    for attempt in range(3):
+        r = requests.get(f"{POLYGON_BASE}{endpoint}", params=params, timeout=30)
+        if r.status_code == 200:
+            result = r.json()
+            _API_CACHE[cache_key] = {"ts": time.time(), "data": result}
+            return result
         if r.status_code == 429:
-            raise ValueError("Polygon API rate limit hit — wait a moment and try again.")
-        if r.status_code == 403:
-            raise ValueError("Polygon API key invalid or unauthorized (HTTP 403).")
+            wait = (attempt + 1) * 12   # 12s, 24s, 36s
+            time.sleep(wait)
+            continue
+        if raise_on_error:
+            if r.status_code == 403:
+                raise ValueError("Polygon API key invalid or unauthorized (HTTP 403).")
+        return None
+    if raise_on_error:
+        raise ValueError("Polygon API rate limit — please try again in a moment.")
     return None
 
 
@@ -123,8 +129,8 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
     df["Volatility_20d"] = df["Daily_Return"].rolling(20).std() * np.sqrt(252)
     df["Drawdown_20d"]   = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(20).max() - 1
     df["Drawdown_60d"]   = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(60).max() - 1
-    df["52W_High"]       = df["Close"].rolling(252).max()
-    df["52W_Low"]        = df["Close"].rolling(252).min()
+    df["52W_High"]       = df["Close"].rolling(252, min_periods=21).max()
+    df["52W_Low"]        = df["Close"].rolling(252, min_periods=21).min()
     df["Pct_From_52W_High"] = df["Close"] / df["52W_High"] - 1
     df["Pct_From_52W_Low"]  = df["Close"] / df["52W_Low"]  - 1
 
@@ -274,8 +280,8 @@ def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log
     df["Volatility_20d"] = df["Daily_Return"].rolling(20).std() * np.sqrt(252)
     df["Drawdown_20d"]   = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(20).max() - 1
     df["Drawdown_60d"]   = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(60).max() - 1
-    df["52W_High"]       = df["Close"].rolling(252).max()
-    df["52W_Low"]        = df["Close"].rolling(252).min()
+    df["52W_High"]       = df["Close"].rolling(252, min_periods=21).max()
+    df["52W_Low"]        = df["Close"].rolling(252, min_periods=21).min()
     df["Pct_From_52W_High"] = df["Close"] / df["52W_High"] - 1
     df["Pct_From_52W_Low"]  = df["Close"] / df["52W_Low"]  - 1
 
