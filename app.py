@@ -1547,8 +1547,7 @@ with tab1:
                         ("ML Drift",  mc_summary.get("ML Drift (daily)", "—"),        "#059669"),
                     ]
                 _r2 = st.columns(len(_r2_items))
-                for col, label, value, color in zip(_r2, _r2_items):
-                    _lbl, _val, _clr = label, value, color
+                for col, (_lbl, _val, _clr) in zip(_r2, _r2_items):
                     with col:
                         st.markdown(f"""
                         <div class="metric-card">
