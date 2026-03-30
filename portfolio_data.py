@@ -132,12 +132,15 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
             params={"adjusted":"true","sort":"asc","limit":50000,"apiKey":api_key},
             timeout=20)
         if r.status_code == 429:
-            log(f"   ⏳ {ticker} rate limited, waiting 15s...")
-            time.sleep(15)
-            r = requests.get(
-                f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
-                params={"adjusted":"true","sort":"asc","limit":50000,"apiKey":api_key},
-                timeout=20)
+            for _wait in (12, 24, 36):
+                log(f"   ⏳ {ticker} rate limited, retrying in {_wait}s...")
+                time.sleep(_wait)
+                r = requests.get(
+                    f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
+                    params={"adjusted":"true","sort":"asc","limit":50000,"apiKey":api_key},
+                    timeout=20)
+                if r.status_code != 429:
+                    break
         if r.status_code == 200:
             results = r.json().get("results", [])
             if results:

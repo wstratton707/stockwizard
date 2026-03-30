@@ -29,16 +29,22 @@ def _get(endpoint, api_key, params=None, raise_on_error=False):
     if cached and (time.time() - cached["ts"]) < _API_CACHE_TTL:
         return cached["data"]
 
-    r = requests.get(f"{POLYGON_BASE}{endpoint}", params=params, timeout=30)
-    if r.status_code == 200:
-        result = r.json()
-        _API_CACHE[cache_key] = {"ts": time.time(), "data": result}
-        return result
-    if raise_on_error:
+    for attempt in range(3):
+        r = requests.get(f"{POLYGON_BASE}{endpoint}", params=params, timeout=30)
+        if r.status_code == 200:
+            result = r.json()
+            _API_CACHE[cache_key] = {"ts": time.time(), "data": result}
+            return result
         if r.status_code == 429:
-            raise ValueError("Polygon API rate limit hit — wait a moment and try again.")
-        if r.status_code == 403:
-            raise ValueError("Polygon API key invalid or unauthorized (HTTP 403).")
+            wait = (attempt + 1) * 12   # 12s, 24s, 36s
+            time.sleep(wait)
+            continue
+        if raise_on_error:
+            if r.status_code == 403:
+                raise ValueError("Polygon API key invalid or unauthorized (HTTP 403).")
+        return None
+    if raise_on_error:
+        raise ValueError("Polygon API rate limit — please try again in a moment.")
     return None
 
 
