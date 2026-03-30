@@ -248,7 +248,7 @@ html, body, [class*="css"] {
   font-family: 'JetBrains Mono', monospace;
   font-size: clamp(0.88rem, 1.1vw, 1.2rem);
   font-weight: 500; color: #0f172a;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  overflow: hidden; text-overflow: ellipsis;
 }
 .metric-value.positive { color: #059669; }
 .metric-value.negative { color: #dc2626; }
@@ -1311,7 +1311,7 @@ with tab1:
             else:
                 earnings_date = fetch_next_earnings(ticker_input, POLYGON_API_KEY)
                 extra_label = "Last Earnings"
-                extra_value = earnings_date if earnings_date else "N/A"
+                extra_value = earnings_date[:10] if earnings_date and earnings_date != "N/A" else "N/A"
 
             col1,col2,col3,col4,col5,col6,col7 = st.columns(7)
             vol_val = df["Volatility_20d"].iloc[-1]
@@ -1326,8 +1326,8 @@ with tab1:
             for col, label, value, cls in [
                 (col1,"Current Price",   f"${latest['Close']:,.2f}",                           "neutral"),
                 (col2,"Period Return",   f"{period_ret:+.1f}%",                                pos_neg(period_ret)),
-                (col3,"52W High",        f"${latest.get('52W_High',0):,.2f}",                  "neutral"),
-                (col4,"52W Low",         f"${latest.get('52W_Low',0):,.2f}",                   "neutral"),
+                (col3,"52W High",        f"${latest['52W_High']:,.2f}" if pd.notna(latest.get('52W_High')) else "N/A", "neutral"),
+                (col4,"52W Low",         f"${latest['52W_Low']:,.2f}"  if pd.notna(latest.get('52W_Low'))  else "N/A", "neutral"),
                 (col5,"Sharpe Ratio",    f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A",       pos_neg(sharpe) if pd.notna(sharpe) else "neutral"),
                 (col6,"Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A","neutral"),
                 (col7, extra_label,      extra_value,                                           "neutral"),
