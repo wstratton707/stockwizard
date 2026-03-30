@@ -1065,7 +1065,8 @@ with tab1:
                             fig_rsi.update_layout(height=200, template=None,
                                                   plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                                   margin=dict(l=0,r=0,t=5,b=0),
-                                                  yaxis=dict(range=[0,100], color="#6b7a8d"),
+                                                  xaxis_title="Time",
+                                                  yaxis=dict(range=[0,100], color="#6b7a8d", title="RSI (0–100)"),
                                                   font=dict(family="IBM Plex Mono", color="#0f172a"))
                             st.plotly_chart(fig_rsi, use_container_width=True)
 
@@ -1082,6 +1083,7 @@ with tab1:
                             fig_macd.update_layout(height=200, template=None,
                                                    plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                                    margin=dict(l=0,r=0,t=5,b=0),
+                                                   xaxis_title="Time", yaxis_title="MACD Value",
                                                    font=dict(family="IBM Plex Mono", color="#0f172a"))
                             st.plotly_chart(fig_macd, use_container_width=True)
                 except Exception:
@@ -1475,6 +1477,7 @@ with tab1:
             fig.update_layout(height=420, template=None,
                               plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                               margin=dict(l=0,r=0,t=10,b=0),
+                              xaxis_title="Date", yaxis_title="Price ($)",
                               legend=dict(orientation="h",yanchor="bottom",y=1.02),
                               font=dict(family="IBM Plex Mono", color="#0f172a"),
                               xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
@@ -1493,7 +1496,8 @@ with tab1:
                 fig_rsi.update_layout(height=200, template=None,
                                       plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                       margin=dict(l=0,r=0,t=5,b=0),
-                                      yaxis=dict(range=[0,100], color="#6b7a8d"),
+                                      xaxis_title="Date",
+                                      yaxis=dict(range=[0,100], color="#6b7a8d", title="RSI (0–100)"),
                                       xaxis=dict(color="#6b7a8d"),
                                       font=dict(family="IBM Plex Mono", color="#0f172a"))
                 st.plotly_chart(fig_rsi, use_container_width=True)
@@ -1513,6 +1517,7 @@ with tab1:
                 fig_bb.update_layout(height=300,template=None,
                                      plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                      margin=dict(l=0,r=0,t=5,b=0),
+                                     xaxis_title="Date", yaxis_title="Price ($)",
                                      xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                      yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                      font=dict(family="IBM Plex Mono", color="#0f172a"))
@@ -1654,6 +1659,7 @@ with tab1:
             fig_vol.update_layout(height=200,template=None,
                                   plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                   margin=dict(l=0,r=0,t=5,b=0),showlegend=False,
+                                  xaxis_title="Date", yaxis_title="Volume",
                                   xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   font=dict(family="IBM Plex Mono", color="#0f172a"))
@@ -1784,7 +1790,7 @@ with tab1:
                                 barmode="group",
                                 title=dict(text="Ann. Return vs Volatility",
                                            font=dict(size=13, color="#0f172a")),
-                                yaxis_title="Percent (%)",
+                                xaxis_title="Ticker", yaxis_title="Percent (%)",
                                 height=300,
                             )
                             st.plotly_chart(fig_rv, use_container_width=True)
@@ -1804,7 +1810,7 @@ with tab1:
                                 **_chart_layout,
                                 title=dict(text="Sharpe Ratio Comparison",
                                            font=dict(size=13, color="#0f172a")),
-                                yaxis_title="Sharpe Ratio",
+                                xaxis_title="Ticker", yaxis_title="Sharpe Ratio",
                                 showlegend=False,
                                 height=300,
                             )
@@ -1821,7 +1827,7 @@ with tab1:
                             **_chart_layout,
                             title=dict(text="Maximum Drawdown Comparison",
                                        font=dict(size=13, color="#0f172a")),
-                            yaxis_title="Max Drawdown (%)",
+                            xaxis_title="Ticker", yaxis_title="Max Drawdown (%)",
                             showlegend=False,
                             height=280,
                         )
@@ -1992,7 +1998,7 @@ with tab3:
         fig_price.update_layout(height=380, template=None,
                                 plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                 margin=dict(l=0, r=0, t=10, b=0),
-                                yaxis_title="Price ($)",
+                                xaxis_title="Date", yaxis_title="Price ($)",
                                 xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                 yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                 font=dict(family="IBM Plex Mono", color="#0f172a"),
@@ -2011,7 +2017,7 @@ with tab3:
         fig_dd.update_layout(height=220, template=None,
                              plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                              margin=dict(l=0, r=0, t=10, b=0),
-                             yaxis_title="Drawdown (%)",
+                             xaxis_title="Date", yaxis_title="Drawdown (%)",
                              xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                              yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                              font=dict(family="IBM Plex Mono", color="#0f172a"))
@@ -2028,7 +2034,7 @@ with tab3:
             fig_vol.update_layout(height=220, template=None,
                                   plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                   margin=dict(l=0, r=0, t=5, b=0),
-                                  yaxis_title="Ann. Vol (%)",
+                                  xaxis_title="Date", yaxis_title="Ann. Vol (%)",
                                   xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   font=dict(family="IBM Plex Mono", color="#0f172a"))
@@ -2046,7 +2052,7 @@ with tab3:
             fig_mom.update_layout(height=220, template=None,
                                   plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
                                   margin=dict(l=0, r=0, t=5, b=0),
-                                  yaxis_title="Return (%)",
+                                  xaxis_title="Date", yaxis_title="Return (%)",
                                   xaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"),
                                   font=dict(family="IBM Plex Mono", color="#0f172a"))
