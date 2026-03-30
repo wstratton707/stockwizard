@@ -114,18 +114,21 @@ html, body, [class*="css"] {
   background: #1e40af !important; box-shadow: 0 4px 12px rgba(29,78,216,0.4) !important;
   transform: translateY(-1px) !important;
 }
-[data-testid="stSidebar"] [data-testid="stTextInput"] input {
-  background: rgba(255,255,255,0.06) !important; border: 1px solid rgba(255,255,255,0.12) !important;
-  color: #f1f5f9 !important; border-radius: 8px !important; font-size: 0.9rem !important;
+[data-testid="stSidebar"] [data-testid="stTextInput"] input,
+[data-testid="stSidebar"] [data-testid="stNumberInput"] input {
+  background: #ffffff !important; border: 1px solid #bfdbfe !important;
+  color: #1d4ed8 !important; border-radius: 8px !important; font-size: 0.9rem !important;
   font-family: 'Inter', sans-serif !important;
 }
-[data-testid="stSidebar"] [data-testid="stTextInput"] input::placeholder { color: #475569 !important; }
-[data-testid="stSidebar"] [data-testid="stTextInput"] input:focus {
+[data-testid="stSidebar"] [data-testid="stTextInput"] input::placeholder,
+[data-testid="stSidebar"] [data-testid="stNumberInput"] input::placeholder { color: #93c5fd !important; }
+[data-testid="stSidebar"] [data-testid="stTextInput"] input:focus,
+[data-testid="stSidebar"] [data-testid="stNumberInput"] input:focus {
   border-color: #3b82f6 !important; box-shadow: 0 0 0 3px rgba(59,130,246,0.2) !important;
 }
 [data-testid="stSidebar"] .stSelectbox > div > div {
-  background: rgba(255,255,255,0.06) !important; border: 1px solid rgba(255,255,255,0.12) !important;
-  border-radius: 8px !important; font-family: 'Inter', sans-serif !important;
+  background: #ffffff !important; border: 1px solid #bfdbfe !important;
+  color: #1d4ed8 !important; border-radius: 8px !important; font-family: 'Inter', sans-serif !important;
 }
 
 /* ── Tabs ── */
