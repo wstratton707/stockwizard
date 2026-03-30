@@ -1318,7 +1318,6 @@ with tab1:
                 extra_label = "Last Earnings"
                 extra_value = earnings_date[:10] if earnings_date and earnings_date != "N/A" else "N/A"
 
-            col1,col2,col3,col4,col5,col6,col7 = st.columns([1.3,1.2,1.3,1.3,1.1,1.2,1.2])
             vol_val = df["Volatility_20d"].iloc[-1]
             _TOOLTIPS = {
                 "Sharpe Ratio":    "Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent. Higher = better return per unit of risk.",
@@ -1328,23 +1327,30 @@ with tab1:
                 "52W Low":         "Lowest closing price in the last 52 weeks.",
                 "Current Price":   "Most recent closing price from Polygon.io.",
             }
-            for col, label, value, cls in [
-                (col1,"Current Price",   f"${latest['Close']:,.2f}",                           "neutral"),
-                (col2,"Period Return",   f"{period_ret:+.1f}%",                                pos_neg(period_ret)),
-                (col3,"52W High",        f"${latest['52W_High']:,.2f}" if pd.notna(latest.get('52W_High')) else "N/A", "neutral"),
-                (col4,"52W Low",         f"${latest['52W_Low']:,.2f}"  if pd.notna(latest.get('52W_Low'))  else "N/A", "neutral"),
-                (col5,"Sharpe Ratio",    f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A",       pos_neg(sharpe) if pd.notna(sharpe) else "neutral"),
-                (col6,"Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A","neutral"),
-                (col7, extra_label,      extra_value,                                           "neutral"),
-            ]:
-                tip = _TOOLTIPS.get(label, "")
-                tip_html = f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{tip}</span></span>' if tip else ""
-                with col:
-                    st.markdown(f"""
-                    <div class="metric-card">
-                        <div class="metric-label">{label}{tip_html}</div>
-                        <div class="metric-value {cls}">{value}</div>
-                    </div>""", unsafe_allow_html=True)
+            _metric_rows = [
+                [
+                    ("Current Price",   f"${latest['Close']:,.2f}",                            "neutral"),
+                    ("Period Return",   f"{period_ret:+.1f}%",                                 pos_neg(period_ret)),
+                    ("52W High",        f"${latest['52W_High']:,.2f}" if pd.notna(latest.get('52W_High')) else "N/A", "neutral"),
+                    ("52W Low",         f"${latest['52W_Low']:,.2f}"  if pd.notna(latest.get('52W_Low'))  else "N/A", "neutral"),
+                ],
+                [
+                    ("Sharpe Ratio",    f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A",        pos_neg(sharpe) if pd.notna(sharpe) else "neutral"),
+                    ("Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A", "neutral"),
+                    (extra_label,       extra_value,                                            "neutral"),
+                ],
+            ]
+            for row_items in _metric_rows:
+                row_cols = st.columns(len(row_items))
+                for col, (label, value, cls) in zip(row_cols, row_items):
+                    tip = _TOOLTIPS.get(label, "")
+                    tip_html = f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{tip}</span></span>' if tip else ""
+                    with col:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">{label}{tip_html}</div>
+                            <div class="metric-value {cls}">{value}</div>
+                        </div>""", unsafe_allow_html=True)
 
             # ── ETF Profile Panel ─────────────────────────────────────────────
             if is_etf:
