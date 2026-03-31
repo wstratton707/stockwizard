@@ -1560,28 +1560,54 @@ with tab1:
             st.markdown('<div class="section-header">Price & Moving Averages</div>', unsafe_allow_html=True)
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], name="Close",
-                                     line=dict(color="#4a9eff", width=2)))
-            for ma, color in [(20,"#1d4ed8"),(50,"#4a9eff"),(200,"#dc2626")]:
+                                     line=dict(color="#4a9eff", width=2),
+                                     fill="tozeroy", fillcolor="rgba(37,99,235,0.06)"))
+            _ma_dashes = ["solid", "dot", "dash", "dashdot"]
+            for _ma_i, (ma, color) in enumerate([(20,"#1d4ed8"),(50,"#4a9eff"),(200,"#dc2626")]):
                 if f"MA{ma}" in df.columns:
                     fig.add_trace(go.Scatter(x=df["Date"], y=df[f"MA{ma}"],
                                              name=f"{ma}-Day MA",
-                                             line=dict(color=color, width=1.2, dash="dot")))
+                                             line=dict(color=color, width=1.2,
+                                                       dash=_ma_dashes[_ma_i % len(_ma_dashes)])))
             if do_sr and resistance:
-                for r in resistance[:3]:
+                for _ri, r in enumerate(resistance[:3]):
                     fig.add_hline(y=r, line_dash="dash", line_color="#dc2626", opacity=0.5,
-                                  annotation_text=f"R ${r:,.0f}", annotation_position="right")
+                                  annotation_text=f"R{_ri+1}  ${r:,.0f}",
+                                  annotation_position="right",
+                                  annotation_font_color="#dc2626")
             if do_sr and support:
-                for s in support[:3]:
+                for _si, s in enumerate(support[:3]):
                     fig.add_hline(y=s, line_dash="dash", line_color="#059669", opacity=0.5,
-                                  annotation_text=f"S ${s:,.0f}", annotation_position="right")
+                                  annotation_text=f"S{_si+1}  ${s:,.0f}",
+                                  annotation_position="right",
+                                  annotation_font_color="#059669")
+            latest_close = df["Close"].iloc[-1]
+            fig.add_hline(
+                y=latest_close,
+                line_dash="dot", line_color="#1d4ed8", line_width=1,
+                annotation_text=f"  ${latest_close:,.2f}",
+                annotation_position="right",
+                annotation_font=dict(color="#1d4ed8", size=11)
+            )
             fig.update_layout(height=440, template=None,
-                              plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
-                              margin=dict(l=0,r=0,t=45,b=0),
+                              plot_bgcolor="#fafafa", paper_bgcolor="#f8fafc",
+                              margin=dict(l=10, r=90, t=40, b=10),
+                              hovermode="x unified",
                               xaxis_title="Date", yaxis_title="Price ($)",
-                              legend=dict(orientation="h",yanchor="bottom",y=1.02),
-                              font=dict(family="IBM Plex Mono", color="#0f172a"),
+                              legend=dict(
+                                  orientation="h", yanchor="bottom", y=1.02,
+                                  bgcolor="rgba(255,255,255,0.92)",
+                                  bordercolor="#e2e8f0", borderwidth=1,
+                                  font=dict(size=11),
+                              ),
+                              font=dict(family="Inter", size=12, color="#0f172a"),
+                              hoverlabel=dict(bgcolor="#0f172a", font_color="#f8fafc",
+                                              font_size=12, bordercolor="#0f172a"),
                               xaxis=dict(
-                                  gridcolor="#e2e8f0", color="#6b7a8d",
+                                  gridcolor="#f1f5f9", showline=True, linecolor="#e2e8f0",
+                                  tickfont=dict(size=11, color="#64748b"),
+                                  title_font=dict(size=12, color="#64748b"),
+                                  tickformat="%b '%y",
                                   type="date",
                                   rangeslider=dict(visible=False),
                                   rangeselector=dict(
@@ -1599,7 +1625,12 @@ with tab1:
                                       x=0, y=1.08,
                                   ),
                               ),
-                              yaxis=dict(gridcolor="#e2e8f0", color="#6b7a8d"))
+                              yaxis=dict(
+                                  gridcolor="#f1f5f9", showline=True, linecolor="#e2e8f0",
+                                  tickfont=dict(size=11, color="#64748b"),
+                                  title_font=dict(size=12, color="#64748b"),
+                                  tickprefix="$", tickformat=",.0f",
+                              ))
             st.plotly_chart(fig, use_container_width=True)
 
             if "RSI14" in df.columns:

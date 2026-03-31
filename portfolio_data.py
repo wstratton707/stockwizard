@@ -9,7 +9,7 @@ from constants import RISK_FREE_RATE
 
 POLYGON_BASE = "https://api.polygon.io"
 _PORT_CACHE  = {}
-CACHE_TTL    = 300
+CACHE_TTL    = 3600
 
 SECTOR_UNIVERSE = {
     "Technology": [

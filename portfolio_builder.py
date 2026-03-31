@@ -33,6 +33,22 @@ MUTED  = "#94a3b8"
 ALL_SECTORS        = list(SECTOR_UNIVERSE.keys())
 ALL_BOND_CATEGORIES = list(BOND_UNIVERSE.keys())
 
+# Built once at import time — reused in every render
+def _build_sector_lookup():
+    lkp = {}
+    for s, tl in SECTOR_UNIVERSE.items():
+        for t in tl:
+            lkp[t] = s
+    for s, etf in SECTOR_ETFS.items():
+        lkp[etf] = f"{s} ETF"
+    for cat, tl in BOND_UNIVERSE.items():
+        for t in tl:
+            lkp[t] = "Bonds"
+    bond_set = {t for tl in BOND_UNIVERSE.values() for t in tl}
+    return lkp, bond_set
+
+_SECTOR_LOOKUP, _BOND_SET = _build_sector_lookup()
+
 
 def _metric_card(label, value, color=DARK, subtitle=None):
     sub = f"<div style='font-size:0.75rem;color:{MUTED};margin-top:2px'>{subtitle}</div>" if subtitle else ""
@@ -303,10 +319,17 @@ def render_portfolio_builder(api_key, is_pro=False):
 
                 ef_df = generate_efficient_frontier(returns_df, n_portfolios=8000)
 
-                # Get ticker info
+                # Get ticker info — parallel fetches
+                from concurrent.futures import ThreadPoolExecutor, as_completed
                 ticker_info = {}
-                for t in list(returns_df.columns):
-                    ticker_info[t] = get_ticker_info(t, api_key)
+                with ThreadPoolExecutor(max_workers=5) as _exe:
+                    _futs = {_exe.submit(get_ticker_info, t, api_key): t for t in returns_df.columns}
+                    for _fut in as_completed(_futs):
+                        _t = _futs[_fut]
+                        try:
+                            ticker_info[_t] = _fut.result()
+                        except Exception:
+                            ticker_info[_t] = {"name": _t, "sector": "Unknown", "exchange": "", "market_cap": 0}
 
                 progress.progress(95, text="Computing diversification score...")
                 recommended_weights = portfolios["recommended"]
@@ -480,15 +503,7 @@ def render_portfolio_builder(api_key, is_pro=False):
 
         # ── Explainability Panel ──────────────────────────────────────────────
         _section_header("Why These Holdings Were Selected")
-        _sec_lookup = {}
-        for _s, _tl in SECTOR_UNIVERSE.items():
-            for _t in _tl:
-                _sec_lookup[_t] = _s
-        for _s, _etf in SECTOR_ETFS.items():
-            _sec_lookup[_etf] = f"{_s} ETF"
-        for _cat, _tl in BOND_UNIVERSE.items():
-            for _t in _tl:
-                _sec_lookup[_t] = "Bonds"
+        _sec_lookup = _SECTOR_LOOKUP
 
         for _et, _ew in sorted(selected_weights.items(), key=lambda x: x[1], reverse=True):
             _em  = stock_metrics.get(_et, {})
@@ -590,12 +605,8 @@ def render_portfolio_builder(api_key, is_pro=False):
             "Industrials": 8.9, "Consumer Staples": 6.2, "Energy": 3.9,
             "Utilities": 2.5, "Materials": 2.3, "Real Estate": 2.2,
         }
-        _sec_map2 = {}
-        for _s, _tl in SECTOR_UNIVERSE.items():
-            for _t in _tl: _sec_map2[_t] = _s
-        for _s, _etf in SECTOR_ETFS.items():
-            _sec_map2[_etf] = _s
-        _bond_set = {t for tl in BOND_UNIVERSE.values() for t in tl}
+        _sec_map2 = _SECTOR_LOOKUP
+        _bond_set = _BOND_SET
         _port_sectors = {}
         for _t, _w in selected_weights.items():
             _s = _sec_map2.get(_t, "Bonds" if _t in _bond_set else "Other")
