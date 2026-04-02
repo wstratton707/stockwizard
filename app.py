@@ -1611,94 +1611,132 @@ with tab1:
                         {"&nbsp;·&nbsp;<strong>ATH Date:</strong> " + ath_date if ath_date else ""}
                     </div>""", unsafe_allow_html=True)
 
-            st.markdown('<div class="section-header">Price & Moving Averages</div>', unsafe_allow_html=True)
             fig = go.Figure()
 
-            # ── Price line — dominant, strong blue, subtle fill ───────────────
+            # ── Price — dominant, strong blue ─────────────────────────────────
             fig.add_trace(go.Scatter(
-                x=df["Date"], y=df["Close"], name="Price",
+                x=df["Date"], y=df["Close"],
+                name="Price",
                 line=dict(color="#2563eb", width=2.5),
-                fill="tozeroy", fillcolor="rgba(37,99,235,0.04)",
-                hovertemplate="<b>%{x|%b %d, %Y}</b><br>Price: $%{y:,.2f}<extra></extra>",
+                fill="tozeroy",
+                fillcolor="rgba(37,99,235,0.04)",
+                hovertemplate="$%{y:,.2f}<extra>Price</extra>",
+                zorder=10,
             ))
 
-            # ── Moving averages — secondary, distinct styles ──────────────────
+            # ── Moving averages — thin, visually distinct ─────────────────────
             _ma_cfg = [
-                (20,  "#60a5fa", 1.2, "dot",    "MA 20"),
-                (50,  "#3b82f6", 1.2, "dash",   "MA 50"),
-                (200, "#f97316", 1.4, "solid",  "MA 200"),
+                (20,  "#93c5fd", 1.0, "dot",   "MA 20"),
+                (50,  "#3b82f6", 1.0, "dash",  "MA 50"),
+                (200, "#f97316", 1.5, "solid", "MA 200"),
             ]
             for ma, color, width, dash, label in _ma_cfg:
                 if f"MA{ma}" in df.columns:
                     fig.add_trace(go.Scatter(
-                        x=df["Date"], y=df[f"MA{ma}"], name=label,
+                        x=df["Date"], y=df[f"MA{ma}"],
+                        name=label,
                         line=dict(color=color, width=width, dash=dash),
-                        opacity=0.85,
-                        hovertemplate=f"<b>%{{x|%b %d, %Y}}</b><br>{label}: $%{{y:,.2f}}<extra></extra>",
+                        opacity=0.9,
+                        hovertemplate=f"$%{{y:,.2f}}<extra>{label}</extra>",
                     ))
 
-            # ── Support & Resistance — max 2 each, subtle ────────────────────
+            # ── S/R lines — top 2 only, very subtle ──────────────────────────
+            _y_min = df["Close"].min()
+            _y_max = df["Close"].max()
+            _price_range = _y_max - _y_min
+
             if do_sr and resistance:
-                for r in resistance[:2]:
-                    fig.add_hline(
-                        y=r, line_dash="dot", line_color="#dc2626",
-                        line_width=1, opacity=0.4,
-                        annotation_text=f"R  ${r:,.0f}",
-                        annotation_position="right",
-                        annotation_font=dict(color="#dc2626", size=10, family="Inter"),
-                        annotation_bgcolor="rgba(255,255,255,0.8)",
-                    )
-            if do_sr and support:
-                for s in support[:2]:
-                    fig.add_hline(
-                        y=s, line_dash="dot", line_color="#059669",
-                        line_width=1, opacity=0.4,
-                        annotation_text=f"S  ${s:,.0f}",
-                        annotation_position="right",
-                        annotation_font=dict(color="#059669", size=10, family="Inter"),
-                        annotation_bgcolor="rgba(255,255,255,0.8)",
+                # Only show resistance levels above current price, top 2
+                _res_above = sorted([r for r in resistance if r > _y_min], reverse=True)[:2]
+                for _i, r in enumerate(_res_above):
+                    # Stagger annotation yshift to prevent overlap
+                    fig.add_shape(type="line", x0=0, x1=1, xref="paper",
+                                  y0=r, y1=r,
+                                  line=dict(color="#ef4444", width=1, dash="dot"),
+                                  opacity=0.35, layer="below")
+                    fig.add_annotation(
+                        x=1.0, xref="paper", y=r, yref="y",
+                        text=f"R  ${r:,.0f}",
+                        showarrow=False, xanchor="left",
+                        font=dict(color="#ef4444", size=10, family="Inter"),
+                        bgcolor="rgba(255,255,255,0.85)",
+                        borderpad=2,
+                        yshift=(_i * 14),
                     )
 
-            # ── Current price reference line ──────────────────────────────────
+            if do_sr and support:
+                # Only show support levels below current price, bottom 2
+                _sup_below = sorted([s for s in support if s < _y_max])[:2]
+                for _i, s in enumerate(_sup_below):
+                    fig.add_shape(type="line", x0=0, x1=1, xref="paper",
+                                  y0=s, y1=s,
+                                  line=dict(color="#10b981", width=1, dash="dot"),
+                                  opacity=0.35, layer="below")
+                    fig.add_annotation(
+                        x=1.0, xref="paper", y=s, yref="y",
+                        text=f"S  ${s:,.0f}",
+                        showarrow=False, xanchor="left",
+                        font=dict(color="#10b981", size=10, family="Inter"),
+                        bgcolor="rgba(255,255,255,0.85)",
+                        borderpad=2,
+                        yshift=(_i * 14),
+                    )
+
+            # ── Current price tag ─────────────────────────────────────────────
             _last = df["Close"].iloc[-1]
-            _y_min = df["Close"].min() * 0.998
-            _y_max = df["Close"].max() * 1.002
-            fig.add_hline(
-                y=_last, line_dash="dot", line_color="#2563eb", line_width=1.5,
-                annotation_text=f"  ${_last:,.2f}",
-                annotation_position="right",
-                annotation_font=dict(color="#2563eb", size=11, family="Inter"),
-                annotation_bgcolor="rgba(255,255,255,0.9)",
+            fig.add_shape(type="line", x0=0, x1=1, xref="paper",
+                          y0=_last, y1=_last,
+                          line=dict(color="#2563eb", width=1, dash="dot"),
+                          opacity=0.6, layer="above")
+            fig.add_annotation(
+                x=1.0, xref="paper", y=_last, yref="y",
+                text=f"<b>${_last:,.2f}</b>",
+                showarrow=False, xanchor="left",
+                font=dict(color="#ffffff", size=11, family="Inter"),
+                bgcolor="#2563eb",
+                borderpad=4,
             )
 
             fig.update_layout(
-                height=480, template=None,
+                height=490, template=None,
                 plot_bgcolor="#ffffff", paper_bgcolor="#f8fafc",
-                margin=dict(l=10, r=100, t=55, b=10),
+                # Extra right margin for labels, top for rangeselector + legend
+                margin=dict(l=5, r=115, t=70, b=30),
                 hovermode="x unified",
                 font=dict(family="Inter", size=12, color="#0f172a"),
                 hoverlabel=dict(
                     bgcolor="#0f172a", font_color="#f8fafc",
-                    font_size=12, bordercolor="#334155",
+                    font_size=11, bordercolor="#334155",
                     namelength=-1,
                 ),
+                # Legend below the rangeselector row — no overlap
                 legend=dict(
                     orientation="h",
-                    x=0, y=1.0, xanchor="left", yanchor="bottom",
-                    bgcolor="rgba(255,255,255,0.95)",
-                    bordercolor="#e2e8f0", borderwidth=1,
-                    font=dict(size=11, color="#475569"),
+                    x=0.0, xanchor="left",
+                    y=1.13, yanchor="bottom",
+                    bgcolor="rgba(255,255,255,0)",
+                    borderwidth=0,
+                    font=dict(size=11, color="#64748b"),
                     itemsizing="constant",
+                    itemclick=False,
                     tracegroupgap=0,
+                ),
+                title=dict(
+                    text=f"<b>{ticker_input}</b>  Price & Moving Averages",
+                    font=dict(size=14, color="#0f172a", family="Inter"),
+                    x=0, xanchor="left",
+                    y=0.98, yanchor="top",
+                    pad=dict(l=0, t=0),
                 ),
                 xaxis=dict(
                     title=None,
                     type="date",
                     tickformat="%b '%y",
-                    tickfont=dict(size=11, color="#94a3b8"),
-                    gridcolor="#f1f5f9", gridwidth=1,
+                    tickfont=dict(size=11, color="#94a3b8", family="Inter"),
+                    gridcolor="rgba(241,245,249,0.8)", gridwidth=1,
                     showline=True, linecolor="#e2e8f0", linewidth=1,
                     zeroline=False,
+                    showgrid=True,
                     rangeslider=dict(visible=False),
                     rangeselector=dict(
                         buttons=[
@@ -1709,22 +1747,26 @@ with tab1:
                             dict(count=3,  label="3Y", step="year",  stepmode="backward"),
                             dict(step="all", label="All"),
                         ],
-                        bgcolor="#f8fafc", bordercolor="#e2e8f0", borderwidth=1,
+                        bgcolor="#f1f5f9", bordercolor="#e2e8f0", borderwidth=1,
                         font=dict(family="Inter", size=11, color="#475569"),
                         activecolor="#2563eb",
-                        x=0, y=1.0, xanchor="left",
+                        # Sits above the legend row — no conflict
+                        x=0.0, xanchor="left", y=1.26, yanchor="top",
                     ),
                 ),
                 yaxis=dict(
                     title=None,
-                    side="right",
-                    tickprefix="$", tickformat=",.0f",
-                    tickfont=dict(size=11, color="#94a3b8"),
-                    gridcolor="#f1f5f9", gridwidth=1,
+                    side="right",          # Y ticks on right only
+                    overlaying=None,
+                    tickprefix="$",
+                    tickformat=",.0f",
+                    tickfont=dict(size=11, color="#94a3b8", family="Inter"),
+                    gridcolor="rgba(241,245,249,0.8)", gridwidth=1,
                     showline=False,
                     zeroline=False,
-                    range=[_y_min, _y_max],
-                    nticks=8,
+                    showgrid=True,
+                    nticks=7,
+                    range=[_y_min * 0.997, _y_max * 1.003],
                 ),
             )
             st.plotly_chart(fig, use_container_width=True)
