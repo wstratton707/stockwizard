@@ -51,12 +51,12 @@ _SECTOR_LOOKUP, _BOND_SET = _build_sector_lookup()
 
 
 def _metric_card(label, value, color=DARK, subtitle=None):
-    sub = f"<div style='font-size:0.75rem;color:{MUTED};margin-top:2px'>{subtitle}</div>" if subtitle else ""
+    sub = f"<div style='font-size:0.75rem;color:#64748b;margin-top:2px'>{subtitle}</div>" if subtitle else ""
     return f"""
     <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;
                 padding:1.1rem;text-align:center">
         <div style="font-size:0.68rem;font-weight:600;letter-spacing:0.5px;
-                    text-transform:uppercase;color:{MUTED};margin-bottom:0.35rem">{label}</div>
+                    text-transform:uppercase;color:#64748b;margin-bottom:0.35rem">{label}</div>
         <div style="font-family:'DM Mono',monospace;font-size:1.25rem;
                     font-weight:500;color:{color}">{value}</div>
         {sub}
@@ -114,7 +114,7 @@ def render_portfolio_builder(api_key, is_pro=False):
     curr_step  = st.session_state.get("port_step", 0)
     step_html  = "".join(
         f'<div style="flex:1;padding:8px 4px;border-radius:8px;text-align:center;font-size:11px;'
-        f'{"background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;font-weight:500" if i==curr_step else "background:#f8fafc;border:1px solid #e2e8f0;color:#94a3b8" if i>curr_step else "background:#f0fdf4;border:1px solid #86efac;color:#15803d;font-weight:500"}">'
+        f'{"background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;font-weight:500" if i==curr_step else "background:#f8fafc;border:1px solid #e2e8f0;color:#64748b" if i>curr_step else "background:#f0fdf4;border:1px solid #86efac;color:#15803d;font-weight:500"}">'
         f'{s}</div>'
         for i, s in enumerate(steps))
     st.markdown(f'<div style="display:flex;gap:5px;margin-bottom:1.5rem">{step_html}</div>',
@@ -140,7 +140,7 @@ def render_portfolio_builder(api_key, is_pro=False):
                 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
                             padding:0.85rem 1rem;margin-top:0.5rem">
                     <span style="font-weight:600;color:{DARK}">{label}</span>
-                    <span style="color:{MUTED};font-size:0.85rem;margin-left:8px">{desc}</span>
+                    <span style="color:#64748b;font-size:0.85rem;margin-left:8px">{desc}</span>
                 </div>""", unsafe_allow_html=True)
 
         _section_header("Investment Parameters")
@@ -468,20 +468,20 @@ def render_portfolio_builder(api_key, is_pro=False):
                     <div style="background:{_cbg};border:{_cborder};border-radius:8px;
                                 padding:1rem;text-align:center">
                         <div style="font-size:0.68rem;font-weight:700;letter-spacing:1px;
-                                    color:{BLUE if _is_sel else MUTED};text-transform:uppercase;
+                                    color:{BLUE if _is_sel else "#64748b"};text-transform:uppercase;
                                     margin-bottom:0.75rem">{_clbl}</div>
                         <div style="font-size:1.5rem;font-weight:700;
                                     color:{GREEN if _crow['ann_ret']>0 else RED}">
                             {_crow['ann_ret']:+.1f}%</div>
-                        <div style="font-size:0.68rem;color:{MUTED};margin-bottom:0.6rem">Ann. Return</div>
+                        <div style="font-size:0.68rem;color:#64748b;margin-bottom:0.6rem">Ann. Return</div>
                         <div style="font-size:0.82rem;color:#0f172a;margin-bottom:2px">
                             {_crow['sharpe']:.2f} Sharpe</div>
                         <div style="font-size:0.82rem;color:#0f172a;margin-bottom:2px">
                             {_crow['vol']:.1f}% Volatility</div>
                         <div style="font-size:0.82rem;color:{RED};margin-bottom:0.5rem">
                             {_crow['max_dd']:.1f}% Max DD</div>
-                        <div style="font-size:0.7rem;color:{MUTED}">{_crow['holdings']} holdings</div>
-                        <div style="font-size:0.68rem;color:{MUTED}">{_crow['top']}</div>
+                        <div style="font-size:0.7rem;color:#64748b">{_crow['holdings']} holdings</div>
+                        <div style="font-size:0.68rem;color:#64748b">{_crow['top']}</div>
                     </div>""", unsafe_allow_html=True)
 
         # Holdings table
@@ -519,16 +519,16 @@ def render_portfolio_builder(api_key, is_pro=False):
                         display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">
                 <div>
                     <span style="font-weight:700;color:#0f172a;font-size:0.9rem">{_et}</span>
-                    <span style="font-size:0.72rem;color:{MUTED};margin-left:8px;
+                    <span style="font-size:0.72rem;color:#64748b;margin-left:8px;
                                 background:#f1f5f9;padding:1px 7px;border-radius:3px">{_ese}</span>
                 </div>
-                <div style="font-size:0.8rem;color:{MUTED}">
+                <div style="font-size:0.8rem;color:#64748b">
                     <b style="color:{GREEN if _ear>0 else RED}">{_ear:.1f}%</b> return &nbsp;·&nbsp;
                     <b style="color:#0f172a">{_eav:.1f}%</b> vol &nbsp;·&nbsp;
                     <b style="color:{_esc}">Sharpe {_esh:.2f}</b> &nbsp;·&nbsp;
                     <b style="color:{BLUE}">{_ew*100:.1f}% weight</b>
                 </div>
-                <div style="font-size:0.7rem;color:{MUTED};font-style:italic">
+                <div style="font-size:0.7rem;color:#64748b;font-style:italic">
                     Top-ranked by Sharpe in {_ese}
                 </div>
             </div>""", unsafe_allow_html=True)
@@ -790,15 +790,15 @@ def render_portfolio_builder(api_key, is_pro=False):
                     st.markdown(f"""
                     <div style="background:#ffffff;border:1px solid #e2e8f0;
                                 border-radius:8px;padding:1rem;text-align:center">
-                        <div style="font-size:0.67rem;font-weight:700;color:{MUTED};
+                        <div style="font-size:0.67rem;font-weight:700;color:#64748b;
                                     text-transform:uppercase;letter-spacing:0.8px;
                                     margin-bottom:0.5rem">{_sr['name']}</div>
                         <div style="font-size:1.6rem;font-weight:700;color:{_pc}">
                             {_sr['port']:+.1f}%</div>
-                        <div style="font-size:0.67rem;color:{MUTED};margin-bottom:0.4rem">
+                        <div style="font-size:0.67rem;color:#64748b;margin-bottom:0.4rem">
                             Portfolio{_badge}</div>
                         {f'<div style="font-size:0.82rem;color:#0f172a">vs S&amp;P:&nbsp;<b style="color:{GREEN if (_sr["vs"] or 0)>0 else RED}">{_sr["vs"]:+.1f}%</b></div>' if _sr["vs"] is not None else ""}
-                        <div style="font-size:0.67rem;color:{MUTED};margin-top:0.4rem;
+                        <div style="font-size:0.67rem;color:#64748b;margin-top:0.4rem;
                                     font-style:italic">{_sr['desc']}</div>
                     </div>""", unsafe_allow_html=True)
         else:
@@ -1160,12 +1160,12 @@ def render_portfolio_builder(api_key, is_pro=False):
             <div style="background:#f8fafc;border:2px solid #8b5cf6;border-radius:12px;
                         padding:1rem;text-align:center;margin-top:0.75rem">
                 <div style="font-size:0.68rem;font-weight:600;letter-spacing:0.5px;
-                            text-transform:uppercase;color:{MUTED}">Prob. of Reaching Your Goal</div>
+                            text-transform:uppercase;color:#64748b">Prob. of Reaching Your Goal</div>
                 <div style="font-family:'DM Mono',monospace;font-size:2rem;
                             font-weight:500;color:{PURPLE};margin-top:4px">
                     {prob_goal_val}
                 </div>
-                <div style="font-size:0.78rem;color:{MUTED};margin-top:4px">
+                <div style="font-size:0.78rem;color:#64748b;margin-top:4px">
                     Target: ${prefs.get('target_value',0):,.0f} by {sel_horizon}
                 </div>
             </div>""", unsafe_allow_html=True)

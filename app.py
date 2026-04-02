@@ -245,9 +245,14 @@ html, body, [class*="css"] {
   transform: translateY(-1px);
 }
 .metric-label {
+<<<<<<< HEAD
+  font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 600;
+  letter-spacing: 0.6px; text-transform: uppercase; color: #64748b; margin-bottom: 0.5rem;
+=======
   font-family: 'Inter', sans-serif; font-size: 0.63rem; font-weight: 600;
   letter-spacing: 0.4px; text-transform: uppercase; color: #94a3b8;
   margin-bottom: 0.45rem; white-space: nowrap;
+>>>>>>> 3be7f754a1e2ccf9a27f3da9657dfc32ae3cda48
 }
 .metric-value {
   font-family: 'JetBrains Mono', monospace;
@@ -325,7 +330,7 @@ html, body, [class*="css"] {
   font-weight: 600; color: #1d4ed8;
 }
 .stats-bar-lbl {
-  font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #94a3b8;
+  font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #64748b;
   text-transform: uppercase; letter-spacing: 0.6px; margin-top: 4px; font-weight: 500;
 }
 
@@ -350,7 +355,7 @@ html, body, [class*="css"] {
   border-left: 3px solid #3b82f6; padding-left: 1rem;
 }
 .founder-name  { font-family: 'Inter', sans-serif; font-weight: 700; color: #0f172a; font-size: 0.92rem; }
-.founder-school{ font-family: 'Inter', sans-serif; font-size: 0.75rem; color: #94a3b8; margin-top: 3px; }
+.founder-school{ font-family: 'Inter', sans-serif; font-size: 0.75rem; color: #64748b; margin-top: 3px; }
 .founder-role  { font-family: 'Inter', sans-serif; font-size: 0.72rem; color: #1d4ed8; margin-top: 3px; font-weight: 600; }
 
 /* ── Disclaimer ── */
@@ -422,7 +427,7 @@ html, body, [class*="css"] {
 /* ── Page footer ── */
 .page-footer {
   text-align: center; padding: 2rem 0 1rem; border-top: 1px solid #e2e8f0;
-  margin-top: 3rem; font-family: 'Inter', sans-serif; color: #94a3b8;
+  margin-top: 3rem; font-family: 'Inter', sans-serif; color: #64748b;
   font-size: 0.72rem; font-weight: 400;
 }
 .page-footer a { color: #3b82f6; text-decoration: none; font-weight: 500; }

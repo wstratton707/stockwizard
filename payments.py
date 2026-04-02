@@ -91,7 +91,7 @@ def render_pricing_section():
                         text-transform:uppercase;color:#64748b;margin-bottom:0.75rem">Free</div>
             <div style="font-family:'DM Mono',monospace;font-size:2.5rem;font-weight:500;
                         color:#0f172a;margin-bottom:0.25rem">$0</div>
-            <div style="font-size:0.85rem;color:#94a3b8;margin-bottom:1.5rem">Forever free</div>
+            <div style="font-size:0.85rem;color:#64748b;margin-bottom:1.5rem">Forever free</div>
             <div style="font-size:0.88rem;color:#334155;line-height:2.2">
                 ✓ &nbsp;Full Excel report download<br>
                 ✓ &nbsp;Monte Carlo simulation<br>
