@@ -15,6 +15,8 @@ STRIPE_PRICE_ID   = os.environ.get("STRIPE_PRICE_ID", "")
 
 # Only initialise Stripe with the live key when payments are active.
 if not DEV_MODE_FREE:
+    if not STRIPE_SECRET_KEY:
+        raise EnvironmentError("STRIPE_SECRET_KEY is not set. Payments cannot be processed.")
     stripe.api_key = STRIPE_SECRET_KEY
 
 
@@ -48,7 +50,7 @@ def verify_session(session_id):
     # ── Original Stripe logic preserved below — do not delete ──
     try:
         session = stripe.checkout.Session.retrieve(session_id)
-        if session.payment_status == "paid" or session.status == "complete":
+        if session.payment_status == "paid" and session.status == "complete":
             return True, session.customer_email
         return False, None
     except Exception:
