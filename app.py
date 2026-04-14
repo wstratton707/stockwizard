@@ -32,7 +32,7 @@ from analysis import (
 )
 from excel_builder import build_excel
 from pptx_builder import build_stock_pptx, build_portfolio_pptx, PPTX_AVAILABLE
-from live_data import get_live_price, get_intraday_data, get_top_movers
+from live_data import get_live_price, get_intraday_data, get_top_movers, get_tape_prices
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
 from stress_test import render_stress_test
@@ -602,26 +602,26 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Ticker tape ──────────────────────────────────────────────────────────────
-_TAPE_ITEMS = [
-    ("AAPL","$213.49","+1.4%",True), ("TSLA","$248.80","+2.1%",True),
-    ("NVDA","$875.40","+3.2%",True), ("SPY", "$524.60","+0.6%",True),
-    ("MSFT","$415.20","+0.9%",True), ("AMZN","$192.80","+1.7%",True),
-    ("GOOGL","$173.50","-0.4%",False),("META","$512.30","+2.8%",True),
-    ("BRK.B","$412.10","+0.3%",True), ("JPM", "$214.60","-0.7%",False),
-    ("BTC", "$68,400","",True),       ("ETH","$3,580","",True),
-    ("QQQ","$445.20","+0.8%",True),   ("VTI","$248.90","+0.5%",True),
-    ("GLD","$224.30","-0.2%",False),  ("DIS","$111.40","+1.1%",True),
-]
-def _tape_html():
+def _tape_html(items):
     items_html = ""
-    for sym, px, chg, up in _TAPE_ITEMS:
+    for sym, px, chg, up in items:
         chg_class = "t-up" if up else "t-dn"
-        arrow = "▲" if up else "▼"
-        chg_part = f'<span class="{chg_class}">{arrow} {chg}</span>' if chg else ""
-        items_html += f'<span class="t-item"><span class="t-sym">{sym}</span><span class="t-px">{px}</span>{chg_part}</span><span class="t-div">●</span>'
+        arrow     = "▲" if up else "▼"
+        chg_part  = f'<span class="{chg_class}">{arrow} {chg}</span>' if chg else ""
+        items_html += (f'<span class="t-item"><span class="t-sym">{sym}</span>'
+                       f'<span class="t-px">{px}</span>{chg_part}</span>'
+                       f'<span class="t-div">●</span>')
     doubled = items_html * 2  # seamless loop
     return f'<div class="ticker-tape-wrap"><div class="ticker-tape">{doubled}</div></div>'
-st.markdown(_tape_html(), unsafe_allow_html=True)
+
+_tape_items = get_tape_prices(POLYGON_API_KEY)
+if not _tape_items:
+    # Static fallback if market is closed or API is unavailable
+    _tape_items = [
+        ("AAPL","$—","",True),("TSLA","$—","",True),("NVDA","$—","",True),
+        ("SPY","$—","",True),("MSFT","$—","",True),("QQQ","$—","",True),
+    ]
+st.markdown(_tape_html(_tape_items), unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:

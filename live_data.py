@@ -79,6 +79,53 @@ def get_intraday_data(ticker, api_key, multiplier=5, timespan="minute"):
     return _INTRADAY_CACHE.get(cache_key, {}).get("df")
 
 
+_TAPE_CACHE = {"ts": 0, "items": []}
+_TAPE_TTL   = 300   # refresh every 5 minutes
+
+TAPE_TICKERS = ["AAPL","TSLA","NVDA","SPY","MSFT","AMZN","GOOGL",
+                "META","JPM","QQQ","GLD","BRK.B","DIS","VTI","AMD","NFLX"]
+
+
+def get_tape_prices(api_key: str) -> list:
+    """
+    Fetch live prices for all tape tickers in a single Polygon batch call.
+    Returns list of (symbol, price_str, change_str, is_up).
+    Cached for 5 minutes.
+    """
+    now = time.time()
+    if now - _TAPE_CACHE["ts"] < _TAPE_TTL and _TAPE_CACHE["items"]:
+        return _TAPE_CACHE["items"]
+
+    try:
+        r = requests.get(
+            f"{POLYGON_BASE}/v2/snapshot/locale/us/markets/stocks/tickers",
+            params={"tickers": ",".join(TAPE_TICKERS), "apiKey": api_key},
+            timeout=12,
+        )
+        if r.status_code == 200:
+            items = []
+            for t in r.json().get("tickers", []):
+                sym     = t.get("ticker", "")
+                price   = (t.get("lastTrade", {}).get("p")
+                           or t.get("day", {}).get("c") or 0)
+                chg_pct = t.get("todaysChangePerc", 0) or 0
+                if not sym or not price:
+                    continue
+                is_up   = chg_pct >= 0
+                sign    = "+" if is_up else ""
+                items.append((sym, f"${float(price):,.2f}",
+                              f"{sign}{float(chg_pct):.2f}%", is_up))
+            if items:
+                _TAPE_CACHE["ts"]    = now
+                _TAPE_CACHE["items"] = items
+                return items
+    except Exception:
+        pass
+
+    # Fallback — return cached even if stale
+    return _TAPE_CACHE["items"] or []
+
+
 _MOVERS_CACHE = {"ts": 0, "gainers": [], "losers": []}
 _MOVERS_TTL   = 300  # refresh every 5 minutes
 
