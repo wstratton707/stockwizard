@@ -816,7 +816,6 @@ with tab1:
         <div style="background:linear-gradient(135deg,#0c1e35 0%,#1e3a5f 100%);
                     border-radius:12px;padding:3rem 2.5rem 2.5rem;margin-bottom:2rem;
                     border:1px solid rgba(255,255,255,0.08)">
-
             <div style="display:inline-block;background:rgba(29,78,216,0.2);
                         border:1px solid rgba(29,78,216,0.4);border-radius:20px;
                         padding:0.3rem 0.9rem;margin-bottom:1.25rem">
@@ -825,27 +824,23 @@ with tab1:
                     Institutional Tools · Retail Price
                 </span>
             </div>
-
             <h2 style="color:#ffffff;font-size:2rem;font-weight:700;
                        line-height:1.2;margin:0 0 1rem;font-family:'DM Sans',sans-serif">
                 Portfolio Analysis That Actually<br>Tells You What to Do
             </h2>
-
             <p style="color:#94a3b8;font-size:1rem;max-width:560px;
                       line-height:1.7;margin:0 0 2rem">
                 Build optimized portfolios from 330+ ranked stocks, backtest 7 years of history,
                 stress test through real crashes, and get a complete Excel report —
-                all for <strong style="color:#60a5fa">$9.99/month</strong>.
+                all for <strong style="color:#60a5fa">&#36;9.99/month</strong>.
             </p>
-
             <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:2.5rem">
                 <div style="background:#1d4ed8;color:#fff;padding:0.75rem 1.75rem;
                             border-radius:6px;font-weight:600;font-size:0.9rem;
                             cursor:default">
-                    ↑ Enter a ticker in the sidebar to start free
+                    &#8593; Enter a ticker in the sidebar to start free
                 </div>
             </div>
-
             <div style="display:flex;gap:3rem;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,0.08);
                         padding-top:1.5rem">
                 <div>
