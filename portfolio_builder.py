@@ -6,6 +6,8 @@ import plotly.express as px
 from datetime import datetime
 
 from constants import DEV_MODE_FREE
+from disclaimers import render_inline, render_section
+import disclaimers as _disc
 
 from portfolio_data import (
     fetch_portfolio_prices, fetch_portfolio_prices_cached,
@@ -1548,11 +1550,10 @@ reflects that.
                             del st.session_state["found_portfolios"]
                             st.rerun()
 
-        st.markdown("""
-        <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;
-                    padding:0.75rem 1rem;font-size:0.78rem;color:#92400e;margin-top:1rem">
-            ⚠ This analysis is for informational purposes only and does not constitute
-            financial advice. Past performance is not indicative of future results.
-            Always consult a qualified financial advisor before making investment decisions.
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(render_section("Backtesting Methodology", _disc.BACKTEST),
+                    unsafe_allow_html=True)
+        st.markdown(render_section("Portfolio Optimisation", _disc.OPTIMISATION),
+                    unsafe_allow_html=True)
+        st.markdown(render_section("Monte Carlo Projections", _disc.MONTE_CARLO),
+                    unsafe_allow_html=True)
+        st.markdown(render_inline(_disc.FULL_FOOTER), unsafe_allow_html=True)

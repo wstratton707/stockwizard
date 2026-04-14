@@ -12,6 +12,8 @@ import plotly.graph_objects as go
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import time
+from disclaimers import render_section, render_inline
+import disclaimers as _disc
 
 POLYGON_BASE  = "https://api.polygon.io"
 _STRESS_CACHE: dict = {}
@@ -615,3 +617,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
         except Exception as e:
             st.error(f"❌ Error processing CSV: {e}")
             st.exception(e)
+
+    st.markdown(render_section("Stress Test Methodology", _disc.STRESS_TEST),
+                unsafe_allow_html=True)
+    st.markdown(render_inline(_disc.SHORT), unsafe_allow_html=True)

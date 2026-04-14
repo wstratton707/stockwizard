@@ -37,6 +37,8 @@ from payments import render_pricing_section, create_checkout_session, verify_ses
 from portfolio_builder import render_portfolio_builder
 from stress_test import render_stress_test
 from constants import DEV_MODE_FREE
+from disclaimers import render_inline, render_section, render_footer
+import disclaimers as _disc
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -1121,22 +1123,7 @@ with tab1:
             """, unsafe_allow_html=True)
 
         # ── Footer ────────────────────────────────────────────────────────────
-        st.markdown("""
-        <div class="page-footer">
-            <div style="margin-bottom:0.5rem">
-                <strong>StockWizard</strong> &nbsp;·&nbsp;
-                Institutional-grade portfolio analysis &nbsp;·&nbsp;
-                Powered by <a href="https://polygon.io" target="_blank"
-                style="color:#1d4ed8">Polygon.io</a>
-            </div>
-            <div>
-                StockWizard provides financial data and analytics for informational purposes only.
-                This is <strong>not investment advice</strong>. Past performance does not guarantee
-                future results. Always consult a licensed financial advisor before making
-                investment decisions.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(render_footer(), unsafe_allow_html=True)
 
     # ── Analysis (ticker entered or run clicked) ──────────────────────────────
     elif run_btn or ticker_input:
@@ -2453,13 +2440,8 @@ with tab1:
                         use_container_width=True, type="primary", key="download_pptx_bottom",
                     )
 
-        st.markdown("""
-        <div class="disclaimer">
-            ⚠ This report is generated programmatically and does not constitute financial advice.
-            Data provided by Polygon.io. Past performance is not indicative of future results.
-            Always do your own research before making investment decisions.
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(render_section("Data & Methodology", _disc.DIVIDENDS), unsafe_allow_html=True)
+        st.markdown(render_inline(_disc.SHORT), unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 2 — PORTFOLIO BUILDER
