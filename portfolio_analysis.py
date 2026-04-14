@@ -3,7 +3,7 @@ import pandas as pd
 from scipy.optimize import minimize
 from datetime import datetime, timedelta
 
-from constants import RISK_FREE_RATE
+from constants import get_risk_free_rate
 
 
 # ── Individual stock metrics ──────────────────────────────────────────────────
@@ -19,8 +19,9 @@ def compute_stock_metrics(returns_df):
         ann_ret = r.mean() * 252
         ann_std = r.std() * np.sqrt(252)
         down    = r[r < 0].std() * np.sqrt(252)
-        sharpe  = (ann_ret - RISK_FREE_RATE) / ann_std  if ann_std  else 0
-        sortino = (ann_ret - RISK_FREE_RATE) / down     if down     else 0
+        rfr     = get_risk_free_rate()
+        sharpe  = (ann_ret - rfr) / ann_std  if ann_std  else 0
+        sortino = (ann_ret - rfr) / down     if down     else 0
 
         # Max drawdown
         cumret   = (1 + r).cumprod()
@@ -49,7 +50,7 @@ def portfolio_metrics(weights, returns_df):
     weights      = np.array(weights)
     port_ret     = returns_df.mean().values @ weights * 252
     port_vol     = np.sqrt(weights @ (returns_df.cov().values * 252) @ weights)
-    sharpe       = (port_ret - RISK_FREE_RATE) / port_vol if port_vol > 0 else 0
+    sharpe       = (port_ret - get_risk_free_rate()) / port_vol if port_vol > 0 else 0
     return port_ret, port_vol, sharpe
 
 
@@ -63,16 +64,37 @@ def _portfolio_vol(weights, returns_df):
     return vol
 
 
-def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None):
+def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
+                       sector_map=None, max_sector_weight=0.40):
     """
     Run mean-variance optimisation.
     Returns weights dict for max Sharpe, min vol, and target return portfolios.
+
+    sector_map       : {ticker: sector_label} — used to cap sector concentration.
+    max_sector_weight: maximum combined weight for any single sector (default 40%).
     """
     n      = len(returns_df.columns)
-    # Scale min weight down so n * min_w never exceeds 1.0; keep max at 40%
+    cols   = list(returns_df.columns)
+    # Scale min weight down so n * min_w never exceeds 1.0; keep max at 30%
     min_w  = min(0.02, 0.80 / n)
-    bounds = [(min_w, 0.40)] * n
-    constraints = [{"type":"eq","fun": lambda w: np.sum(w) - 1}]
+    bounds = [(min_w, 0.30)] * n
+    constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
+
+    # Sector concentration caps — prevent >max_sector_weight in any single sector
+    if sector_map:
+        from collections import defaultdict
+        sector_indices: dict = defaultdict(list)
+        for i, ticker in enumerate(cols):
+            sector = sector_map.get(ticker, "Unknown")
+            # Don't cap Market/benchmark tickers (SPY, QQQ) or single-ticker sectors
+            if sector not in ("Market", "Commodities", "User"):
+                sector_indices[sector].append(i)
+        for sector, indices in sector_indices.items():
+            if len(indices) > 1:
+                constraints.append({
+                    "type": "ineq",
+                    "fun": lambda w, idx=indices: max_sector_weight - sum(w[i] for i in idx),
+                })
 
     # Add target return constraint if specified
     if target_return is not None:
@@ -139,7 +161,8 @@ def generate_efficient_frontier(returns_df, n_portfolios=8000):
     W    = np.random.dirichlet(np.ones(n), size=n_portfolios)   # (n_portfolios, n)
     rets = W @ mu                                                # (n_portfolios,)
     vols = np.sqrt(np.einsum("ij,jk,ik->i", W, cov, W))        # (n_portfolios,)
-    srs  = np.where(vols > 0, (rets - RISK_FREE_RATE) / vols, 0)
+    rfr  = get_risk_free_rate()
+    srs  = np.where(vols > 0, (rets - rfr) / vols, 0)
 
     return pd.DataFrame({
         "Return":     rets * 100,

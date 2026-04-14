@@ -8,7 +8,7 @@ on:
 jobs:
   precompute:
     runs-on: ubuntu-latest
-    timeout-minutes: 45        # Kill if it hangs
+    timeout-minutes: 90        # Serial fetch of ~338 tickers needs up to 75 min on free tier
 
     steps:
       - name: Checkout code

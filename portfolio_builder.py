@@ -295,8 +295,13 @@ def render_portfolio_builder(api_key, is_pro=False):
                 rankings = get_sharpe_rankings(api_key)
 
                 if rankings:
-                    log(f"   ⚡ Pre-computed rankings loaded — {len(rankings)} tickers evaluated")
-                    progress.progress(10, text=f"Selecting best stocks from {len(rankings)}-ticker universe...")
+                    meta        = rankings.pop("_meta", {})
+                    computed_at = meta.get("computed_at", "unknown")
+                    is_partial  = meta.get("partial", False)
+                    n_ranked    = len(rankings)
+                    freshness   = f"{'⚠ partial — ' + str(meta.get('tickers_done','?')) + '/' + str(meta.get('tickers_total','?')) + ' tickers · ' if is_partial else ''}{computed_at}"
+                    log(f"   ⚡ Pre-computed rankings loaded — {n_ranked} tickers · computed {freshness}")
+                    progress.progress(10, text=f"Selecting best stocks from {n_ranked}-ticker universe...")
 
                     # Group by sector, respecting user preferences
                     sector_groups: dict = defaultdict(list)
@@ -377,6 +382,7 @@ def render_portfolio_builder(api_key, is_pro=False):
                 returns_df = returns_df[best_tickers]
                 close_df   = close_df[[t for t in best_tickers if t in close_df.columns]]
                 price_dict = {t: v for t, v in price_dict.items() if t in best_tickers}
+                sector_map = {t: sector_map.get(t, "Unknown") for t in best_tickers}
                 progress.progress(50, text="Computing stock metrics...")
 
                 # Metrics
@@ -392,8 +398,9 @@ def render_portfolio_builder(api_key, is_pro=False):
                     target_ret = ((prefs["target_value"]/prefs["starting_capital"])**(1/yrs)-1) if yrs > 0 else None
 
                 portfolios = optimise_portfolio(returns_df,
-                                                risk_tolerance=prefs.get("risk_tolerance",5),
-                                                target_return=target_ret)
+                                                risk_tolerance=prefs.get("risk_tolerance", 5),
+                                                target_return=target_ret,
+                                                sector_map=sector_map)
                 progress.progress(80, text="Generating efficient frontier...")
 
                 ef_df = generate_efficient_frontier(returns_df, n_portfolios=8000)

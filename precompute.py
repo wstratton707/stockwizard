@@ -37,7 +37,7 @@ POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
 
 from portfolio_data import SECTOR_UNIVERSE, BOND_ETFS
 from database import cache_get, cache_set
-from constants import RISK_FREE_RATE
+from constants import get_risk_free_rate
 
 TODAY     = datetime.today().strftime("%Y-%m-%d")
 CACHE_KEY = f"sharpe_rankings_{TODAY}"
@@ -53,23 +53,18 @@ def _fetch_year(ticker: str) -> tuple:
     start   = end - timedelta(days=400)   # buffer for weekends/holidays
     end_s   = end.strftime("%Y-%m-%d")
     start_s = start.strftime("%Y-%m-%d")
+    url     = f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start_s}/{end_s}"
+    params  = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": POLYGON_API_KEY}
 
-    try:
-        r = requests.get(
-            f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start_s}/{end_s}",
-            params={"adjusted": "true", "sort": "asc", "limit": 50000,
-                    "apiKey": POLYGON_API_KEY},
-            timeout=20,
-        )
-        if r.status_code == 429:
-            print(f"   ⏳ {ticker} rate limited — waiting 30s...")
-            time.sleep(30)
-            r = requests.get(
-                f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start_s}/{end_s}",
-                params={"adjusted": "true", "sort": "asc", "limit": 50000,
-                        "apiKey": POLYGON_API_KEY},
-                timeout=20,
-            )
+    # 4 total attempts: initial + 3 retries at 30s / 60s / 90s
+    retry_waits = [30, 60, 90]
+    for attempt in range(len(retry_waits) + 1):
+        try:
+            r = requests.get(url, params=params, timeout=20)
+        except Exception as e:
+            print(f"   ⚠ {ticker}: {e}")
+            return ticker, None
+
         if r.status_code == 200:
             results = r.json().get("results", [])
             if len(results) >= 60:
@@ -77,8 +72,21 @@ def _fetch_year(ticker: str) -> tuple:
                 df["Date"]  = pd.to_datetime(df["t"], unit="ms")
                 prices = df.set_index("Date")["c"]
                 return ticker, prices
-    except Exception as e:
-        print(f"   ⚠ {ticker}: {e}")
+            return ticker, None  # valid response but not enough data
+
+        if r.status_code == 429:
+            if attempt < len(retry_waits):
+                wait = retry_waits[attempt]
+                print(f"   ⏳ {ticker} rate limited — waiting {wait}s "
+                      f"(attempt {attempt + 1}/{len(retry_waits) + 1})...")
+                time.sleep(wait)
+            else:
+                print(f"   ✗ {ticker} — rate limited after {len(retry_waits) + 1} attempts")
+                return ticker, None
+        else:
+            print(f"   ⚠ {ticker} HTTP {r.status_code}")
+            return ticker, None
+
     return ticker, None
 
 
@@ -92,12 +100,12 @@ def _compute_factors(prices: pd.Series) -> dict | None:
 
     ann_ret = float(returns.mean() * 252)
     ann_vol = float(returns.std() * np.sqrt(252))
-    sharpe  = (ann_ret - RISK_FREE_RATE) / ann_vol if ann_vol > 0 else -999.0
+    sharpe  = (ann_ret - get_risk_free_rate()) / ann_vol if ann_vol > 0 else -999.0
 
-    # Momentum: skip most recent week (avoids short-term reversal noise)
-    mom_6m = float((prices.iloc[-6]  / prices.iloc[max(0, len(prices)-132)] - 1) * 100) \
+    # Momentum: price today vs. N trading days ago
+    mom_6m = float((prices.iloc[-1] / prices.iloc[max(0, len(prices)-132)] - 1) * 100) \
              if len(prices) >= 132 else 0.0
-    mom_3m = float((prices.iloc[-6]  / prices.iloc[max(0, len(prices)-69)]  - 1) * 100) \
+    mom_3m = float((prices.iloc[-1] / prices.iloc[max(0, len(prices)-69)]  - 1) * 100) \
              if len(prices) >= 69  else 0.0
 
     return {
@@ -165,8 +173,9 @@ def compute_rankings() -> dict:
 
     raw: dict = {}
     done = 0
+    CHECKPOINT_EVERY = 50  # write partial results to Supabase every N tickers
 
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    with ThreadPoolExecutor(max_workers=1) as ex:
         futures = {ex.submit(_fetch_year, t): t for t in all_tickers}
         for future in as_completed(futures):
             ticker = futures[future]
@@ -187,6 +196,14 @@ def compute_rankings() -> dict:
                     print(f"  [{done:>3}/{len(all_tickers)}] ✗ {ticker} — fetch failed")
             except Exception as e:
                 print(f"  [{done:>3}/{len(all_tickers)}] ✗ {ticker} — {e}")
+
+            # Checkpoint: save partial results so a killed run isn't wasted
+            if done % CHECKPOINT_EVERY == 0 and raw:
+                partial = _add_combined_scores(dict(raw))
+                partial["_meta"] = {"computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+                                    "partial": True, "tickers_done": done, "tickers_total": len(all_tickers)}
+                cache_set(CACHE_KEY, partial, ttl_hours=26)
+                print(f"  💾 Checkpoint saved — {len(partial) - 1} tickers ranked so far")
 
     # Add normalised combined score
     return _add_combined_scores(raw)
@@ -215,6 +232,8 @@ def main():
         print("ERROR: No rankings computed — check API key and connectivity.")
         sys.exit(1)
 
+    # Stamp when rankings were computed so the UI can show freshness
+    rankings["_meta"] = {"computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}
     ok      = cache_set(CACHE_KEY, rankings, ttl_hours=26)
     elapsed = time.time() - t0
 
@@ -243,7 +262,7 @@ def warm_portfolio_cache(rankings: dict):
     from collections import defaultdict
     from portfolio_data import fetch_portfolio_prices_cached
 
-    print("\nPre-warming portfolio price cache...")
+    print("\nUpdating portfolio price cache (bootstrap once, append daily)...")
 
     # Select top 2 per sector (default: all sectors, risk tolerance 5)
     sector_groups: dict = defaultdict(list)

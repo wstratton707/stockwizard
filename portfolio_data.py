@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from constants import RISK_FREE_RATE
+from constants import get_risk_free_rate
 from database import cache_get, cache_set
 
 POLYGON_BASE = "https://api.polygon.io"
@@ -335,7 +335,7 @@ def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=18,
         r = returns_df[ticker].dropna()
         ann_ret = r.mean() * 252
         ann_std = r.std() * np.sqrt(252)
-        return (ann_ret - RISK_FREE_RATE) / ann_std if ann_std > 0 else -999.0
+        return (ann_ret - get_risk_free_rate()) / ann_std if ann_std > 0 else -999.0
 
     sector_groups = defaultdict(list)
     pinned = []
@@ -356,59 +356,123 @@ def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=18,
 
 # ── Supabase-cached portfolio price fetcher ───────────────────────────────────
 
+def _close_df_to_payload(close_df: pd.DataFrame, failed: list) -> dict:
+    reset = close_df.reset_index()
+    reset["Date"] = reset["Date"].astype(str)
+    return {"close": reset.to_dict(orient="records"), "failed": failed}
+
+
+def _payload_to_close_df(cached: dict) -> pd.DataFrame:
+    close_df = pd.DataFrame(cached["close"]).set_index("Date")
+    close_df.index = pd.to_datetime(close_df.index)
+    return close_df.apply(pd.to_numeric, errors="coerce")
+
+
+def _close_df_to_price_dict(close_df: pd.DataFrame) -> dict:
+    price_dict = {}
+    for t in close_df.columns:
+        s = close_df[t].dropna().reset_index()
+        s.columns = ["Date", "Close"]
+        s["Ticker"] = t
+        price_dict[t] = s
+    return price_dict
+
+
 def fetch_portfolio_prices_cached(tickers, period_years=7, api_key="", log=print):
     """
-    Drop-in replacement for fetch_portfolio_prices that caches the full
-    close_df in Supabase once per day.  Subsequent callers with the same
-    ticker set skip all Polygon calls and get data in ~1 second.
+    Fetches portfolio price history with a persistent Supabase cache.
 
-    Cache key: portfolio_prices_<YYYYMMDD>_<sorted-tickers-hash>
-    TTL: 25 hours (covers full trading day + buffer)
+    Strategy — bootstrap once, append daily:
+      - First call: fetches full `period_years` of history from Polygon and
+        stores it under a stable key (no date in key).
+      - Subsequent calls: checks how many trading days are missing since the
+        last cached date, fetches only those days, appends them, and re-saves.
+        Typically 0–5 API calls instead of hundreds.
+
+    Cache key: portfolio_prices_hist_<sorted-tickers-hash>
+    TTL: refreshed to 400 days on every daily update.
     """
     import hashlib
 
-    today     = datetime.today().strftime("%Y-%m-%d")
-    tk_key    = hashlib.md5(",".join(sorted(tickers)).encode()).hexdigest()[:10]
-    cache_key = f"portfolio_prices_{today}_{tk_key}"
+    tk_key   = hashlib.md5(",".join(sorted(tickers)).encode()).hexdigest()[:10]
+    hist_key = f"portfolio_prices_hist_{tk_key}"
 
-    cached = cache_get(cache_key)
+    cached = cache_get(hist_key)
     if cached is not None:
-        log("   ⚡ Using cached price data from Supabase (instant)")
         try:
-            close_df   = pd.DataFrame(cached["close"]).set_index("Date")
-            close_df.index = pd.to_datetime(close_df.index)
-            close_df   = close_df.apply(pd.to_numeric, errors="coerce")
+            close_df = _payload_to_close_df(cached)
+            failed   = cached.get("failed", [])
+
+            # ── Check freshness and append any missing trading days ────────────
+            latest   = close_df.index.max()
+            today    = pd.Timestamp.today().normalize()
+            # Allow 1-day lag for market close + data pipeline
+            cutoff   = today - pd.Timedelta(days=1)
+
+            if latest < cutoff:
+                fetch_start = (latest + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+                fetch_end   = today.strftime("%Y-%m-%d")
+                log(f"   🔄 Cache is {(cutoff - latest).days} day(s) stale — "
+                    f"fetching {fetch_start} → {fetch_end}")
+
+                new_dfs = {}
+                thread_logs = []
+
+                def _fetch_new(ticker):
+                    msgs = []
+                    df = _fetch_ohlcv(ticker, fetch_start, fetch_end, api_key,
+                                      log=lambda m: msgs.append(m))
+                    return ticker, df, msgs
+
+                with ThreadPoolExecutor(max_workers=3) as ex:
+                    for ticker, df, msgs in ex.map(_fetch_new, close_df.columns):
+                        thread_logs.extend(msgs)
+                        if df is not None and len(df) > 0:
+                            new_dfs[ticker] = df.set_index("Date")["Close"].rename(ticker)
+
+                for msg in thread_logs:
+                    log(msg)
+
+                if new_dfs:
+                    new_close = pd.DataFrame(new_dfs)
+                    close_df  = pd.concat([close_df, new_close])
+                    close_df  = close_df[~close_df.index.duplicated(keep="last")].sort_index()
+                    # Trim to period_years so the dataframe doesn't grow forever
+                    cutoff_date = today - pd.Timedelta(days=int(period_years * 365.25))
+                    close_df    = close_df[close_df.index >= cutoff_date]
+                    log(f"   ✅ Appended {len(new_close)} new row(s) — "
+                        f"{len(close_df)} total trading days in cache")
+                    try:
+                        cache_set(hist_key, _close_df_to_payload(close_df, failed),
+                                  ttl_hours=400 * 24)
+                    except Exception as e:
+                        log(f"   ⚠ Could not update cache: {e}")
+                else:
+                    log("   ⚡ No new trading data available yet — using existing cache")
+            else:
+                log(f"   ⚡ Cache is current (latest: {latest.date()}) — skipping fetch")
+
             returns_df = close_df.pct_change().dropna()
-            # Rebuild minimal price_dict from close_df
-            price_dict = {}
-            for t in close_df.columns:
-                s = close_df[t].dropna().reset_index()
-                s.columns = ["Date", "Close"]
-                s["Ticker"] = t
-                price_dict[t] = s
-            failed = cached.get("failed", [])
+            price_dict = _close_df_to_price_dict(close_df)
             log(f"   ✅ {len(price_dict)} tickers loaded from cache")
             return price_dict, close_df, returns_df, failed
-        except Exception as e:
-            log(f"   ⚠ Cache parse failed ({e}), fetching fresh...")
 
-    # Cache miss — fetch from Polygon as normal
+        except Exception as e:
+            log(f"   ⚠ Cache parse failed ({e}) — bootstrapping full history...")
+
+    # ── Bootstrap: full history fetch (runs once per ticker set) ──────────────
+    log(f"   📦 No cached history found — fetching {period_years}-year history "
+        f"for {len(tickers)} tickers (one-time bootstrap)...")
     price_dict, close_df, returns_df, failed = fetch_portfolio_prices(
         tickers, period_years=period_years, api_key=api_key, log=log
     )
 
-    # Store in Supabase for next caller
     try:
-        payload = {
-            "close":  close_df.reset_index().assign(
-                          Date=close_df.reset_index()["Date"].astype(str)
-                      ).to_dict(orient="records"),
-            "failed": failed,
-        }
-        if cache_set(cache_key, payload, ttl_hours=720):
-            log("   ✅ Price data cached in Supabase for future users")
+        if cache_set(hist_key, _close_df_to_payload(close_df, failed),
+                     ttl_hours=400 * 24):
+            log("   ✅ Full history cached in Supabase — future runs will only fetch new days")
     except Exception as e:
-        log(f"   ⚠ Could not cache to Supabase: {e}")
+        log(f"   ⚠ Could not write bootstrap cache: {e}")
 
     return price_dict, close_df, returns_df, failed
 
