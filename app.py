@@ -107,7 +107,8 @@ html, body, [class*="css"] {
   color: #94a3b8 !important; font-size: 0.8rem !important;
   font-family: 'Inter', sans-serif !important; font-weight: 500 !important;
 }
-[data-testid="stSidebar"] .stCheckbox label { color: #cbd5e1 !important; }
+[data-testid="stSidebar"] .stCheckbox label,
+[data-testid="stSidebar"] .stCheckbox p { color: #cbd5e1 !important; }
 [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.08) !important; }
 [data-testid="stSidebar"] .stButton button {
   background: #1d4ed8 !important; color: #ffffff !important;

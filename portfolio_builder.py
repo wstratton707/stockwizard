@@ -120,7 +120,8 @@ def render_portfolio_builder(api_key, is_pro=False):
     .main [data-testid="stSlider"] label,
     .main [data-testid="stSelectbox"] label,
     .main [data-testid="stNumberInput"] label,
-    .main [data-testid="stCheckbox"] label {
+    .main [data-testid="stCheckbox"] label,
+    [data-testid="stCheckbox"] p {
         color: #38bdf8 !important;
     }
     </style>
