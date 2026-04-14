@@ -78,6 +78,20 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
     # Scale min weight down so n * min_w never exceeds 1.0; keep max at 30%
     min_w  = min(0.02, 0.80 / n)
     bounds = [(min_w, 0.30)] * n
+
+    # Pre-compute constants once — the optimizer calls the objective O(n²) times
+    # per run, so recomputing mean/cov inside the objective is massively redundant.
+    _mu  = returns_df.mean().values * 252
+    _cov = returns_df.cov().values * 252
+    _rfr = get_risk_free_rate()
+
+    def _obj_sharpe(w):
+        vol = float(np.sqrt(w @ _cov @ w))
+        return -(_mu @ w - _rfr) / vol if vol > 0 else 0.0
+
+    def _obj_vol(w):
+        return float(np.sqrt(w @ _cov @ w))
+
     constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
 
     # Sector concentration caps — prevent >max_sector_weight in any single sector
@@ -100,17 +114,17 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
     if target_return is not None:
         constraints.append({
             "type": "ineq",
-            "fun": lambda w: portfolio_metrics(w, returns_df)[0] - target_return
+            "fun": lambda w: _mu @ np.array(w) - target_return
         })
 
     init = np.ones(n) / n
 
     # 1. Maximum Sharpe ratio
-    res_sharpe = minimize(_neg_sharpe, init, args=(returns_df,),
+    res_sharpe = minimize(_obj_sharpe, init,
                           method="SLSQP", bounds=bounds, constraints=constraints)
 
     # 2. Minimum volatility
-    res_minvol = minimize(_portfolio_vol, init, args=(returns_df,),
+    res_minvol = minimize(_obj_vol, init,
                           method="SLSQP", bounds=bounds,
                           constraints=[{"type":"eq","fun":lambda w: np.sum(w)-1}])
 

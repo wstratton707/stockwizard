@@ -95,11 +95,14 @@ def fetch_ohlcv(ticker, period, api_key, log=print,
     return df
 
 
-def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print,
-                     start_override=None, end_override=None, bar_size="day"):
-    df = fetch_ohlcv(ticker, period, api_key, log=log,
-                     start_override=start_override, end_override=end_override, bar_size=bar_size)
+def _enrich_ohlcv(df, w52_min_periods=21):
+    """Add standard derived columns to a raw OHLCV DataFrame in-place.
 
+    Called by fetch_stock_data, fetch_bond_data, and fetch_crypto_data to avoid
+    repeating the same 14-line block verbatim in each function.
+    w52_min_periods: min_periods for the 52-week rolling window (stock/bond=21,
+                     crypto=None which pandas resolves to the full window size).
+    """
     df["Daily_Return"]     = df["Close"].pct_change()
     df["Cumulative_Index"] = (1 + df["Daily_Return"].fillna(0)).cumprod() * 100
 
@@ -107,8 +110,23 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
         df[f"MA{ma}"]          = df["Close"].rolling(ma).mean()
         df[f"Close_vs_MA{ma}"] = (df["Close"] / df[f"MA{ma}"] - 1).where(df[f"MA{ma}"].notna())
 
-    df["Vol_MA20"]      = df["Volume"].rolling(20).mean()
-    df["Volume_vs_Avg"] = np.where(df["Vol_MA20"] > 0, df["Volume"] / df["Vol_MA20"], np.nan)
+    df["Vol_MA20"]           = df["Volume"].rolling(20).mean()
+    df["Volume_vs_Avg"]      = np.where(df["Vol_MA20"] > 0, df["Volume"] / df["Vol_MA20"], np.nan)
+    df["Volatility_20d"]     = df["Daily_Return"].rolling(20).std() * np.sqrt(252)
+    df["Drawdown_20d"]       = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(20).max() - 1
+    df["Drawdown_60d"]       = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(60).max() - 1
+    df["52W_High"]           = df["Close"].rolling(252, min_periods=w52_min_periods).max()
+    df["52W_Low"]            = df["Close"].rolling(252, min_periods=w52_min_periods).min()
+    df["Pct_From_52W_High"]  = df["Close"] / df["52W_High"] - 1
+    df["Pct_From_52W_Low"]   = df["Close"] / df["52W_Low"]  - 1
+    return df
+
+
+def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print,
+                     start_override=None, end_override=None, bar_size="day"):
+    df = fetch_ohlcv(ticker, period, api_key, log=log,
+                     start_override=start_override, end_override=end_override, bar_size=bar_size)
+    _enrich_ohlcv(df)
 
     try:
         import ta
@@ -125,14 +143,6 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
         df["BB_Pct"]      = bb.bollinger_pband()
     except Exception as e:
         log(f"   Technical indicators skipped: {e}")
-
-    df["Volatility_20d"] = df["Daily_Return"].rolling(20).std() * np.sqrt(252)
-    df["Drawdown_20d"]   = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(20).max() - 1
-    df["Drawdown_60d"]   = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(60).max() - 1
-    df["52W_High"]       = df["Close"].rolling(252, min_periods=21).max()
-    df["52W_Low"]        = df["Close"].rolling(252, min_periods=21).min()
-    df["Pct_From_52W_High"] = df["Close"] / df["52W_High"] - 1
-    df["Pct_From_52W_Low"]  = df["Close"] / df["52W_Low"]  - 1
 
     if benchmark_tickers:
         for bench in benchmark_tickers:
@@ -266,24 +276,7 @@ def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log
 
     df = fetch_ohlcv(ticker, period, api_key, log=log,
                      start_override=start_override, end_override=end_override, bar_size=bar_size)
-
-    df["Daily_Return"]     = df["Close"].pct_change()
-    df["Cumulative_Index"] = (1 + df["Daily_Return"].fillna(0)).cumprod() * 100
-
-    for ma in [20, 50, 200]:
-        df[f"MA{ma}"]          = df["Close"].rolling(ma).mean()
-        df[f"Close_vs_MA{ma}"] = (df["Close"] / df[f"MA{ma}"] - 1).where(df[f"MA{ma}"].notna())
-
-    df["Vol_MA20"]      = df["Volume"].rolling(20).mean()
-    df["Volume_vs_Avg"] = np.where(df["Vol_MA20"] > 0, df["Volume"] / df["Vol_MA20"], np.nan)
-
-    df["Volatility_20d"] = df["Daily_Return"].rolling(20).std() * np.sqrt(252)
-    df["Drawdown_20d"]   = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(20).max() - 1
-    df["Drawdown_60d"]   = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(60).max() - 1
-    df["52W_High"]       = df["Close"].rolling(252, min_periods=21).max()
-    df["52W_Low"]        = df["Close"].rolling(252, min_periods=21).min()
-    df["Pct_From_52W_High"] = df["Close"] / df["52W_High"] - 1
-    df["Pct_From_52W_Low"]  = df["Close"] / df["52W_Low"]  - 1
+    _enrich_ohlcv(df)
 
     # Annualised price return as a rough total-return yield proxy
     df["Return_1Y_Proxy"] = df["Close"].pct_change(252)
@@ -484,16 +477,8 @@ def fetch_crypto_data(symbol, period="1y", api_key="", log=print,
     poly_ticker, _ = CRYPTO_TICKERS.get(symbol.upper(), (f"X:{symbol.upper()}USD", None))
     df = fetch_ohlcv(poly_ticker, period, api_key, log=log,
                      start_override=start_override, end_override=end_override, bar_size=bar_size)
-
-    df["Daily_Return"]     = df["Close"].pct_change()
-    df["Cumulative_Index"] = (1 + df["Daily_Return"].fillna(0)).cumprod() * 100
-
-    for ma in [20, 50, 200]:
-        df[f"MA{ma}"]          = df["Close"].rolling(ma).mean()
-        df[f"Close_vs_MA{ma}"] = (df["Close"] / df[f"MA{ma}"] - 1).where(df[f"MA{ma}"].notna())
-
-    df["Vol_MA20"]      = df["Volume"].rolling(20).mean()
-    df["Volume_vs_Avg"] = np.where(df["Vol_MA20"] > 0, df["Volume"] / df["Vol_MA20"], np.nan)
+    # w52_min_periods=None preserves original rolling(252) behaviour (no early values)
+    _enrich_ohlcv(df, w52_min_periods=None)
 
     try:
         import ta
@@ -510,14 +495,6 @@ def fetch_crypto_data(symbol, period="1y", api_key="", log=print,
         df["BB_Pct"]      = bb.bollinger_pband()
     except Exception as e:
         log(f"   Technical indicators skipped: {e}")
-
-    df["Volatility_20d"]    = df["Daily_Return"].rolling(20).std() * np.sqrt(252)
-    df["Drawdown_20d"]      = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(20).max() - 1
-    df["Drawdown_60d"]      = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(60).max() - 1
-    df["52W_High"]          = df["Close"].rolling(252).max()
-    df["52W_Low"]           = df["Close"].rolling(252).min()
-    df["Pct_From_52W_High"] = df["Close"] / df["52W_High"] - 1
-    df["Pct_From_52W_Low"]  = df["Close"] / df["52W_Low"]  - 1
 
     ret      = df["Daily_Return"].dropna()
     ann_ret  = ret.mean() * 252
