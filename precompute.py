@@ -222,6 +222,9 @@ def main():
     print(f"Done in {elapsed:.0f}s — {len(rankings)} tickers ranked")
     print(f"Supabase write: {'✓ success' if ok else '✗ failed (check credentials)'}")
 
+    # Pre-warm portfolio price cache so first user run is instant
+    warm_portfolio_cache(rankings)
+
     # Top 15 by combined score
     top = sorted(rankings.values(), key=lambda x: x.get("score", 0), reverse=True)[:15]
     print(f"\nTop 15 by combined score (Sharpe + Momentum):")
@@ -230,6 +233,45 @@ def main():
               f"Score={r.get('score',0):.3f}  "
               f"Sharpe={r['sharpe']:+.2f}  "
               f"6M={r['mom_6m']:+.1f}%")
+
+
+def warm_portfolio_cache(rankings: dict):
+    """
+    Pre-fetch 7-year price data for the default top-18 portfolio so the
+    portfolio builder is instant even on the very first user run of the day.
+    """
+    from collections import defaultdict
+    from portfolio_data import fetch_portfolio_prices_cached
+
+    print("\nPre-warming portfolio price cache...")
+
+    # Select top 2 per sector (default: all sectors, risk tolerance 5)
+    sector_groups: dict = defaultdict(list)
+    for ticker, data in rankings.items():
+        sector = data.get("sector", "Unknown")
+        if sector.startswith("Bond"):
+            continue
+        sector_groups[sector].append((ticker, data.get("score", 0)))
+
+    candidates = ["SPY", "QQQ"]
+    for sector, ticker_scores in sector_groups.items():
+        ranked = sorted(ticker_scores, key=lambda x: x[1], reverse=True)
+        for t, _ in ranked[:2]:
+            if t not in candidates:
+                candidates.append(t)
+
+    candidates = candidates[:22]
+    print(f"Pre-fetching 7-year prices for {len(candidates)} tickers: {', '.join(candidates)}")
+
+    try:
+        _, close_df, _, failed = fetch_portfolio_prices_cached(
+            candidates, period_years=7, api_key=POLYGON_API_KEY, log=print
+        )
+        print(f"Portfolio cache warmed — {len(close_df.columns)} tickers ready")
+        if failed:
+            print(f"Failed: {failed}")
+    except Exception as e:
+        print(f"Portfolio cache warm failed: {e}")
 
 
 if __name__ == "__main__":

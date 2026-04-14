@@ -442,8 +442,23 @@ def render_portfolio_builder(api_key, is_pro=False):
 
             except Exception as e:
                 progress.empty()
-                st.error(f"❌ Optimisation failed: {e}")
-                st.exception(e)
+                log_area.empty()
+                err_str = str(e).lower()
+                if "rate limit" in err_str or "429" in err_str:
+                    st.warning(
+                        "⏳ **Market data API is busy right now.** "
+                        "Wait 30 seconds and try again — this happens during peak hours."
+                    )
+                elif "api key" in err_str or "missing" in err_str:
+                    st.error("❌ API key error — contact support.")
+                elif "no valid price" in err_str or "all" in err_str and "failed" in err_str:
+                    st.error(
+                        "❌ Could not fetch price data for the selected tickers. "
+                        "Check that your tickers are valid US stock symbols."
+                    )
+                else:
+                    st.error(f"❌ Something went wrong: {e}")
+                    st.exception(e)
                 if st.button("← Back", key="step2_err_back"):
                     st.session_state["port_step"] = 1
                     del st.session_state["port_optimised"]
@@ -508,6 +523,29 @@ def render_portfolio_builder(api_key, is_pro=False):
         ]:
             with col:
                 st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
+
+        with st.expander("ℹ️ About these numbers — methodology & assumptions"):
+            st.markdown("""
+**Expected Ann. Return** — Arithmetic mean of daily returns × 252, based on 7 years of historical data.
+Past returns do not guarantee future performance.
+
+**Expected Volatility** — Annualised standard deviation of daily returns over the 7-year window.
+Higher volatility = wider range of possible outcomes.
+
+**Sharpe Ratio** — Excess return above the risk-free rate (4.5%) divided by volatility.
+A Sharpe above 1.0 is generally considered good. Above 2.0 is exceptional.
+Calculated using 7 years of historical data — short-term market conditions may differ.
+
+**Diversification Score** — Proprietary 1–10 score combining:
+effective number of holdings (Herfindahl index), average pairwise correlation, and
+concentration penalty for any single position above 25%.
+
+**Important caveats:**
+- All metrics are based on historical data and will not perfectly predict future returns
+- Survivorship bias: the universe only includes stocks that still exist today
+- Maximum weight per stock is capped at 40% to prevent over-concentration
+- Stock selection uses a multi-factor score: Sharpe (50%) + 6-month momentum (30%) + 3-month momentum (20%)
+            """)
 
         # ── Side-by-Side Portfolio Strategy Comparison ───────────────────────
         _section_header("Compare Portfolio Strategies")
@@ -1227,6 +1265,35 @@ def render_portfolio_builder(api_key, is_pro=False):
         ]:
             with col:
                 st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
+
+        with st.expander("ℹ️ How Monte Carlo probabilities are calculated"):
+            st.markdown("""
+**What this simulation does:**
+Runs 1,000 independent scenarios for your portfolio using correlated daily returns
+sampled from historical data. Each scenario compounds daily over the forecast period
+with monthly contributions added throughout.
+
+**Return assumption:**
+Daily returns are blended — 70% from your portfolio's 7-year historical average,
+30% from a long-run 7% annual market mean. Individual stock drift is capped at 12%/year.
+This prevents recent bull or bear runs from distorting long-range projections.
+
+**Correlation:**
+Cross-asset correlations are preserved using Cholesky decomposition of the
+historical covariance matrix — so when tech stocks fall together, the simulation
+reflects that.
+
+**What these probabilities mean:**
+- **Prob. of Any Gain** — % of simulations where final value exceeds total amount invested
+- **Prob. of Doubling** — % of simulations where final value exceeds 2× total invested
+- **Prob. of >20% Loss** — % of simulations where final value is more than 20% below total invested
+
+**Limitations:**
+- Assumes returns are log-normally distributed (fat tails in real markets are larger)
+- Does not model tax drag, fund fees, or trading costs
+- Black swan events (2008, COVID) are underweighted relative to their real-world impact
+- Probabilities are illustrative — not a guarantee of any outcome
+            """)
 
         st.caption(
             "⚠️ Monte Carlo assumes log-normally distributed returns and stationary volatility. "

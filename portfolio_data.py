@@ -167,11 +167,11 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
                 df = df[["Date","Ticker","Open","High","Low","Close","Volume"]]
                 df = df.sort_values("Date").reset_index(drop=True)
                 _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
-                # Write to Supabase — TTL 24h for daily data
+                # Write to Supabase — 30 day TTL (historical prices don't change)
                 try:
                     cache_set(f"ohlcv_{cache_key}",
                               df.assign(Date=df["Date"].astype(str)).to_dict(orient="records"),
-                              ttl_hours=24)
+                              ttl_hours=720)
                 except Exception:
                     pass
                 return df
@@ -405,7 +405,7 @@ def fetch_portfolio_prices_cached(tickers, period_years=7, api_key="", log=print
                       ).to_dict(orient="records"),
             "failed": failed,
         }
-        if cache_set(cache_key, payload, ttl_hours=25):
+        if cache_set(cache_key, payload, ttl_hours=720):
             log("   ✅ Price data cached in Supabase for future users")
     except Exception as e:
         log(f"   ⚠ Could not cache to Supabase: {e}")
