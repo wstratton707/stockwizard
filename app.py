@@ -532,6 +532,19 @@ html, body, [class*="css"] {
 
 /* ── Rangeselector styling ── */
 .rangeselector { font-family: 'Inter', sans-serif !important; }
+
+/* ── Widget label visibility (main content area) ── */
+[data-testid="stSlider"] label p,
+[data-testid="stRadio"] label p,
+[data-testid="stRadio"] > label,
+[data-testid="stCheckbox"] p,
+[data-testid="stSelectbox"] label p,
+[data-testid="stNumberInput"] label p,
+[data-testid="stTextInput"] label p,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stExpander"] summary p {
+  color: #38bdf8 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
