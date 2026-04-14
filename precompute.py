@@ -256,7 +256,7 @@ def main():
 
 def warm_portfolio_cache(rankings: dict):
     """
-    Pre-fetch 7-year price data for the default top-18 portfolio so the
+    Pre-fetch 2-year price data for the default top-18 portfolio so the
     portfolio builder is instant even on the very first user run of the day.
     """
     from collections import defaultdict
@@ -280,7 +280,7 @@ def warm_portfolio_cache(rankings: dict):
                 candidates.append(t)
 
     candidates = candidates[:22]
-    print(f"Pre-fetching 7-year prices for {len(candidates)} tickers: {', '.join(candidates)}")
+    print(f"Pre-fetching 2-year prices for {len(candidates)} tickers: {', '.join(candidates)}")
 
     try:
         _, close_df, _, failed = fetch_portfolio_prices_cached(

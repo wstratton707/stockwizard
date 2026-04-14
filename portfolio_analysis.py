@@ -266,7 +266,7 @@ def compute_backtest_metrics(backtest_df, starting_capital):
     ann_ret = daily_ret.mean() * 252 * 100
 
     # Fix 3: Sharpe/Sortino with risk-free rate (excess return basis)
-    rf_daily = RISK_FREE_RATE / 252
+    rf_daily = get_risk_free_rate() / 252
     excess   = daily_ret - rf_daily
     sharpe   = (excess.mean() * 252) / (excess.std() * np.sqrt(252)) if excess.std() > 0 else 0
     down_ret = excess[excess < 0]

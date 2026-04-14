@@ -14,7 +14,7 @@ CACHE_TTL    = 3600
 
 SECTOR_UNIVERSE = {
     "Technology": [
-        "AAPL","MSFT","NVDA","AVGO","GOOGL","META","AMD","CRM","ADBE","QCOM",
+        "AAPL","MSFT","NVDA","AVGO","AMD","CRM","ADBE","QCOM",
         "TXN","NOW","AMAT","MU","LRCX","KLAC","SNPS","CDNS","PANW","FTNT",
         "CSCO","IBM","ORCL","INTC","HPQ","DELL","STX","KEYS","ANSS","PLTR",
     ],
@@ -122,6 +122,32 @@ BOND_DURATION_MAP = {
 }
 
 
+def _polygon_fetch_chunk(ticker: str, start: str, end: str, api_key: str,
+                          log=print) -> list:
+    """
+    Fetch one chunk of daily OHLCV from Polygon with retry on 429.
+    Polygon free tier caps results per request at ~180 regardless of limit=.
+    Call this repeatedly with 6-month windows and concatenate.
+    """
+    url    = f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}"
+    params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": api_key}
+    for wait in (0, 12, 24, 36):
+        if wait:
+            log(f"   ⏳ {ticker} rate limited, retrying in {wait}s...")
+            time.sleep(wait)
+        try:
+            r = requests.get(url, params=params, timeout=20)
+            if r.status_code == 200:
+                return r.json().get("results", [])
+            if r.status_code != 429:
+                log(f"   ⚠ {ticker} HTTP {r.status_code}: {r.text[:120]}")
+                return []
+        except Exception as e:
+            log(f"   ⚠ {ticker} exception: {e}")
+            return []
+    return []
+
+
 def _fetch_ohlcv(ticker, start, end, api_key, log=print):
     cache_key = f"{ticker}_{start}_{end}"
 
@@ -141,50 +167,47 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
         except Exception:
             pass
 
+    # 3. Fetch from Polygon in 6-month chunks (free tier caps ~180 rows per request)
+    all_results = []
+    current = datetime.strptime(start, "%Y-%m-%d")
+    end_dt  = datetime.strptime(end,   "%Y-%m-%d")
+
+    while current <= end_dt:
+        chunk_end = min(current + timedelta(days=180), end_dt)
+        chunk     = _polygon_fetch_chunk(
+            ticker,
+            current.strftime("%Y-%m-%d"),
+            chunk_end.strftime("%Y-%m-%d"),
+            api_key, log=log,
+        )
+        all_results.extend(chunk)
+        current = chunk_end + timedelta(days=1)
+        if current <= end_dt:
+            time.sleep(0.3)   # gentle pacing between chunks
+
+    if not all_results:
+        log(f"   ⚠ {ticker} — no data returned")
+        return None
+
+    df = pd.DataFrame(all_results)
+    df = df.rename(columns={"t": "Date", "o": "Open", "h": "High",
+                              "l": "Low",  "c": "Close", "v": "Volume"})
+    df["Date"]   = pd.to_datetime(df["Date"], unit="ms")
+    df["Ticker"] = ticker
+    df = df[["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]]
+    df = df.drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
+
+    _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
     try:
-        r = requests.get(
-            f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
-            params={"adjusted":"true","sort":"asc","limit":50000,"apiKey":api_key},
-            timeout=20)
-        if r.status_code == 429:
-            for _wait in (12, 24, 36):
-                log(f"   ⏳ {ticker} rate limited, retrying in {_wait}s...")
-                time.sleep(_wait)
-                r = requests.get(
-                    f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
-                    params={"adjusted":"true","sort":"asc","limit":50000,"apiKey":api_key},
-                    timeout=20)
-                if r.status_code != 429:
-                    break
-        if r.status_code == 200:
-            results = r.json().get("results", [])
-            if results:
-                df = pd.DataFrame(results)
-                df = df.rename(columns={"t":"Date","o":"Open","h":"High",
-                                         "l":"Low","c":"Close","v":"Volume"})
-                df["Date"]   = pd.to_datetime(df["Date"], unit="ms")
-                df["Ticker"] = ticker
-                df = df[["Date","Ticker","Open","High","Low","Close","Volume"]]
-                df = df.sort_values("Date").reset_index(drop=True)
-                _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
-                # Write to Supabase — 30 day TTL (historical prices don't change)
-                try:
-                    cache_set(f"ohlcv_{cache_key}",
-                              df.assign(Date=df["Date"].astype(str)).to_dict(orient="records"),
-                              ttl_hours=720)
-                except Exception:
-                    pass
-                return df
-            else:
-                log(f"   ⚠ {ticker} HTTP 200 but empty results")
-        else:
-            log(f"   ⚠ {ticker} HTTP {r.status_code}: {r.text[:120]}")
-    except Exception as e:
-        log(f"   ⚠ {ticker} exception: {e}")
-    return None
+        cache_set(f"ohlcv_{cache_key}",
+                  df.assign(Date=df["Date"].astype(str)).to_dict(orient="records"),
+                  ttl_hours=720)
+    except Exception:
+        pass
+    return df
 
 
-def fetch_portfolio_prices(tickers, period_years=7, api_key="", log=print):
+def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
     end     = datetime.today()
     start   = end - timedelta(days=period_years*365)
     end_s   = end.strftime("%Y-%m-%d")
@@ -378,7 +401,7 @@ def _close_df_to_price_dict(close_df: pd.DataFrame) -> dict:
     return price_dict
 
 
-def fetch_portfolio_prices_cached(tickers, period_years=7, api_key="", log=print):
+def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print):
     """
     Fetches portfolio price history with a persistent Supabase cache.
 

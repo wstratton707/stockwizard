@@ -45,7 +45,7 @@ STRESS_TEST = (
 # ── Portfolio optimisation disclosure ────────────────────────────────────────
 OPTIMISATION = (
     "Portfolio weights are derived from mean-variance optimisation (Markowitz, 1952) "
-    "using 7 years of historical returns. Optimised weights are sensitive to the "
+    "using 2 years of historical returns. Optimised weights are sensitive to the "
     "input return and covariance estimates, which change over time. The 'recommended' "
     "portfolio blends maximum-Sharpe and minimum-volatility allocations weighted by "
     "your risk tolerance. This is a mathematical output, not a personalised financial "

@@ -1,6 +1,14 @@
 """
 validate.py — Backtest accuracy validation suite
 
+KNOWN LIMITATION — Polygon free tier data cap:
+  The Polygon free tier returns ~180 rows per API request max, and HTTP 403 for data
+  older than ~18 months. The 5-year test cases below require a paid Polygon plan
+  (Starter or above). On the free tier all tests fail — only ~180 days of recent data
+  are accessible, missing COVID crash, 2022 bear market, etc.
+  The reference benchmarks and tolerances are correct; only data access is the bottleneck.
+  See claudenotes.md for full context.
+
 Runs known portfolios through StockWizard's backtest engine and compares
 results against independently verifiable benchmarks.
 
@@ -87,35 +95,63 @@ REFERENCE_BENCHMARKS = {
 
 # ── Price fetch (direct Polygon, no in-memory caching) ───────────────────────
 
+def _fetch_chunk(ticker: str, start: str, end: str) -> list:
+    """Single Polygon request with 429 retry."""
+    url    = f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}"
+    params = {"adjusted": "true", "sort": "asc", "limit": 50000,
+              "apiKey": POLYGON_API_KEY}
+    for wait in (0, 30, 60):
+        if wait:
+            print(f"   Rate limited — waiting {wait}s...")
+            time.sleep(wait)
+        try:
+            r = requests.get(url, params=params, timeout=20)
+            if r.status_code == 200:
+                return r.json().get("results", [])
+            if r.status_code != 429:
+                print(f"   HTTP {r.status_code} for {ticker}")
+                return []
+        except Exception as e:
+            print(f"   {ticker} error: {e}")
+            return []
+    return []
+
+
 def _fetch_prices(tickers: list, start: str, end: str) -> pd.DataFrame:
-    """Fetch daily adjusted close prices for a list of tickers."""
+    """
+    Fetch daily adjusted close prices in 6-month chunks.
+    Polygon free tier caps results per request at ~180 rows regardless of limit=.
+    Chunking ensures we get the full date range.
+    """
     closes = {}
     for ticker in tickers:
-        print(f"   Fetching {ticker} {start}→{end}...")
-        for attempt in range(3):
-            try:
-                r = requests.get(
-                    f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
-                    params={"adjusted": "true", "sort": "asc",
-                            "limit": 50000, "apiKey": POLYGON_API_KEY},
-                    timeout=20,
-                )
-                if r.status_code == 429:
-                    wait = 30 * (attempt + 1)
-                    print(f"   Rate limited — waiting {wait}s...")
-                    time.sleep(wait)
-                    continue
-                if r.status_code == 200:
-                    results = r.json().get("results", [])
-                    if results:
-                        df = pd.DataFrame(results)
-                        df["Date"] = pd.to_datetime(df["t"], unit="ms")
-                        closes[ticker] = df.set_index("Date")["c"].rename(ticker)
-                    break
-            except Exception as e:
-                print(f"   {ticker} error: {e}")
-                break
-        time.sleep(0.5)   # gentle rate limiting
+        print(f"   Fetching {ticker} {start}→{end} (chunked)...")
+        all_results = []
+        current = datetime.strptime(start, "%Y-%m-%d")
+        end_dt  = datetime.strptime(end,   "%Y-%m-%d")
+
+        while current <= end_dt:
+            chunk_end = min(current + timedelta(days=180), end_dt)
+            chunk     = _fetch_chunk(
+                ticker,
+                current.strftime("%Y-%m-%d"),
+                chunk_end.strftime("%Y-%m-%d"),
+            )
+            all_results.extend(chunk)
+            current = chunk_end + timedelta(days=1)
+            if current <= end_dt:
+                time.sleep(0.4)
+
+        if all_results:
+            df = pd.DataFrame(all_results)
+            df["Date"] = pd.to_datetime(df["t"], unit="ms")
+            series = df.drop_duplicates("Date").set_index("Date")["c"].rename(ticker)
+            closes[ticker] = series
+            print(f"   {ticker}: {len(series)} trading days fetched")
+        else:
+            print(f"   {ticker}: no data returned")
+
+        time.sleep(0.5)
 
     if not closes:
         raise ValueError("No price data fetched — check API key and connectivity.")

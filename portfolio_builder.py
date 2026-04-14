@@ -294,9 +294,11 @@ def render_portfolio_builder(api_key, is_pro=False):
                 user_tickers   = [t.upper() for t in prefs.get("user_tickers", [])]
 
                 # ── Try pre-computed multi-factor rankings (considers ALL ~330 tickers) ──
+                used_precompute = False
                 rankings = get_sharpe_rankings(api_key)
 
                 if rankings:
+                    used_precompute = True
                     meta        = rankings.pop("_meta", {})
                     computed_at = meta.get("computed_at", "unknown")
                     is_partial  = meta.get("partial", False)
@@ -370,17 +372,31 @@ def render_portfolio_builder(api_key, is_pro=False):
                         st.info(f"Conservative profile: growth sectors excluded — "
                                 f"{', '.join(skipped_sectors)}.")
 
-                progress.progress(15, text=f"Fetching 7-year price history for {len(candidates)} candidates...")
+                progress.progress(15, text=f"Fetching 2-year price history for {len(candidates)} candidates...")
 
                 # Fetch prices — uses Supabase cache if available (instant on repeat runs)
                 price_dict, close_df, returns_df, failed = fetch_portfolio_prices_cached(
-                    candidates, period_years=7, api_key=api_key, log=log)
+                    candidates, period_years=2, api_key=api_key, log=log)
                 progress.progress(40, text="Finalising stock selection...")
 
-                # Keep best 2 stocks per sector — trim to 18 for optimizer
-                best_tickers = select_by_sharpe(returns_df, sector_map,
-                                                max_total=18, top_n_per_sector=2)
-                log(f"   Final portfolio: {len(best_tickers)} stocks — {', '.join(best_tickers)}")
+                # Trim to 18 for optimizer.
+                # When precompute was used: rank by precompute score (avoids in-sample bias).
+                # Fallback: rank by 2-year Sharpe (only option when precompute unavailable).
+                if used_precompute:
+                    available = [t for t in candidates if t in returns_df.columns]
+                    pinned_set = {t for t, s in sector_map.items()
+                                  if s in ("Market", "Commodities", "User")}
+                    best_tickers = sorted(
+                        available,
+                        key=lambda t: float('inf') if t in pinned_set
+                                      else rankings.get(t, {}).get("score", 0),
+                        reverse=True
+                    )[:18]
+                    log(f"   Final portfolio: {len(best_tickers)} stocks (precompute-ranked) — {', '.join(best_tickers)}")
+                else:
+                    best_tickers = select_by_sharpe(returns_df, sector_map,
+                                                    max_total=18, top_n_per_sector=2)
+                    log(f"   Final portfolio: {len(best_tickers)} stocks — {', '.join(best_tickers)}")
                 returns_df = returns_df[best_tickers]
                 close_df   = close_df[[t for t in best_tickers if t in close_df.columns]]
                 price_dict = {t: v for t, v in price_dict.items() if t in best_tickers}
@@ -535,15 +551,15 @@ def render_portfolio_builder(api_key, is_pro=False):
 
         with st.expander("ℹ️ About these numbers — methodology & assumptions"):
             st.markdown("""
-**Expected Ann. Return** — Arithmetic mean of daily returns × 252, based on 7 years of historical data.
+**Expected Ann. Return** — Arithmetic mean of daily returns × 252, based on 2 years of historical data.
 Past returns do not guarantee future performance.
 
-**Expected Volatility** — Annualised standard deviation of daily returns over the 7-year window.
+**Expected Volatility** — Annualised standard deviation of daily returns over the 2-year window.
 Higher volatility = wider range of possible outcomes.
 
 **Sharpe Ratio** — Excess return above the risk-free rate (4.5%) divided by volatility.
 A Sharpe above 1.0 is generally considered good. Above 2.0 is exceptional.
-Calculated using 7 years of historical data — short-term market conditions may differ.
+Calculated using 2 years of historical data — short-term market conditions may differ.
 
 **Diversification Score** — Proprietary 1–10 score combining:
 effective number of holdings (Herfindahl index), average pairwise correlation, and
@@ -1283,7 +1299,7 @@ sampled from historical data. Each scenario compounds daily over the forecast pe
 with monthly contributions added throughout.
 
 **Return assumption:**
-Daily returns are blended — 70% from your portfolio's 7-year historical average,
+Daily returns are blended — 70% from your portfolio's 2-year historical average,
 30% from a long-run 7% annual market mean. Individual stock drift is capped at 12%/year.
 This prevents recent bull or bear runs from distorting long-range projections.
 

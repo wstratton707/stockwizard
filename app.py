@@ -669,8 +669,8 @@ with st.sidebar:
     if mode == "Investor Mode":
         st.markdown('<div class="sidebar-group" style="margin-top:1rem">Date Range</div>',
                     unsafe_allow_html=True)
-        _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y","5Y"]
-        _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730,"5Y":1825}
+        _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y"]
+        _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730}
         period_key = st.select_slider("", options=_SLIDER_OPTIONS, value="1Y",
                                       label_visibility="collapsed")
         _today      = datetime.today().date()
@@ -832,7 +832,7 @@ with tab1:
             </h2>
             <p style="color:#94a3b8;font-size:1rem;max-width:560px;
                       line-height:1.7;margin:0 0 2rem">
-                Build optimized portfolios from 330+ ranked stocks, backtest 7 years of history,
+                Build optimized portfolios from 330+ ranked stocks, backtest 2 years of history,
                 stress test through real crashes, and get a complete Excel report —
                 all for <strong style="color:#60a5fa">&#36;9.99/month</strong>.
             </p>
@@ -853,7 +853,7 @@ with tab1:
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'IBM Plex Mono',monospace">7 Years</div>
+                                font-family:'IBM Plex Mono',monospace">2 Years</div>
                     <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Price History</div>
                 </div>
@@ -962,7 +962,7 @@ with tab1:
              ["Bollinger Bands, RSI, GARCH volatility", "Monte Carlo simulation (1,000 paths)",
               "Peer comparison vs sector", "Intraday candlestick chart", "Excel + PowerPoint export"]),
             (fc2, "💼", "Portfolio Builder", "Pro",
-             ["330+ stocks ranked by multi-factor score", "7-year backtest with quarterly rebalancing",
+             ["330+ stocks ranked by multi-factor score", "2-year backtest with quarterly rebalancing",
               "Mean-variance optimization", "Portfolio Monte Carlo with milestone projections",
               "Diversification score + correlation heatmap"]),
             (fc3, "🔥", "Stress Test", "Pro",
@@ -1013,7 +1013,7 @@ with tab1:
             (h2, "2", "We Rank & Optimize",
              "StockWizard scores 330+ stocks daily using Sharpe ratio and momentum, selects the best per sector, then runs mean-variance optimization."),
             (h3, "3", "Get Your Full Report",
-             "7-year backtest, Monte Carlo forecast with milestone probabilities, stress test results, and a downloadable Excel + PowerPoint report."),
+             "2-year backtest, Monte Carlo forecast with milestone probabilities, stress test results, and a downloadable Excel + PowerPoint report."),
         ]:
             with col:
                 st.markdown(f"""
@@ -1067,7 +1067,7 @@ with tab1:
                 <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">Cancel anytime</div>
                 <ul style="color:#0f172a;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0 0 1.25rem">
                     <li>Everything in Free</li>
-                    <li><strong>Portfolio Builder</strong> — 330+ stocks, 7-year backtest</li>
+                    <li><strong>Portfolio Builder</strong> — 330+ stocks, 2-year backtest</li>
                     <li><strong>Stress Test</strong> — 5 historical crash scenarios</li>
                     <li><strong>Bond Analysis</strong> — 60+ ETFs</li>
                     <li><strong>Portfolio Autopsy</strong> — CSV upload + P&L attribution</li>
