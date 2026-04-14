@@ -8,10 +8,13 @@ from datetime import datetime
 from constants import DEV_MODE_FREE
 
 from portfolio_data import (
-    fetch_portfolio_prices, build_candidate_universe, select_by_sharpe,
-    get_ticker_info, SECTOR_UNIVERSE, SECTOR_ETFS,
+    fetch_portfolio_prices, fetch_portfolio_prices_cached,
+    build_candidate_universe, select_by_sharpe,
+    get_ticker_info, get_sharpe_rankings,
+    SECTOR_UNIVERSE, SECTOR_ETFS,
     BOND_UNIVERSE, BOND_ETFS,
 )
+from database import save_portfolio, load_portfolios, delete_portfolio
 from portfolio_analysis import (
     compute_stock_metrics, compute_correlation_matrix,
     optimise_portfolio, generate_efficient_frontier,
@@ -279,22 +282,98 @@ def render_portfolio_builder(api_key, is_pro=False):
                 log_area.code("\n".join(log_lines[-10:]), language=None)
 
             try:
-                # Build universe (top 5 per sector — broader scan for best candidates)
-                candidates, sector_map, skipped_sectors = build_candidate_universe(prefs, api_key, log=log)
-                if skipped_sectors:
-                    st.info(f"Conservative risk profile: growth sectors excluded from this portfolio — "
-                            f"{', '.join(skipped_sectors)}. Increase your risk tolerance to include them.")
-                progress.progress(10, text=f"Fetching 3-year price history for {len(candidates)} candidates...")
+                from collections import defaultdict
 
-                # Fetch prices in parallel (3 years)
-                price_dict, close_df, returns_df, failed = fetch_portfolio_prices(
-                    candidates, period_years=3, api_key=api_key, log=log)
-                progress.progress(40, text="Ranking stocks by Sharpe ratio...")
+                ALWAYS_KEEP    = {"SPY", "QQQ", "GLD", "TLT"}
+                risk_tolerance = prefs.get("risk_tolerance", 5)
+                excl_sectors   = set(prefs.get("exclude_sectors", []))
+                incl_sectors   = set(prefs.get("include_sectors", list(SECTOR_UNIVERSE.keys())))
+                excl_tickers   = set(t.upper() for t in prefs.get("exclude_tickers", []))
+                user_tickers   = [t.upper() for t in prefs.get("user_tickers", [])]
 
-                # Keep best 2 stocks per sector by Sharpe — trim to 18 for optimizer
+                # ── Try pre-computed multi-factor rankings (considers ALL ~330 tickers) ──
+                rankings = get_sharpe_rankings(api_key)
+
+                if rankings:
+                    log(f"   ⚡ Pre-computed rankings loaded — {len(rankings)} tickers evaluated")
+                    progress.progress(10, text=f"Selecting best stocks from {len(rankings)}-ticker universe...")
+
+                    # Group by sector, respecting user preferences
+                    sector_groups: dict = defaultdict(list)
+                    for ticker, data in rankings.items():
+                        if ticker in excl_tickers:
+                            continue
+                        sector = data.get("sector", "Unknown")
+                        if sector in excl_sectors:
+                            continue
+                        if sector not in incl_sectors and sector not in {"Market", "Commodities"}:
+                            continue
+                        sector_groups[sector].append((ticker, data.get("score", data.get("sharpe", 0))))
+
+                    # Conservative profile — skip growth sectors
+                    GROWTH_SECTORS = {"Technology", "Consumer Discretionary",
+                                      "Communication Services", "Financials"}
+                    skipped_sectors = []
+                    if risk_tolerance <= 3:
+                        for gs in GROWTH_SECTORS:
+                            if gs in sector_groups:
+                                del sector_groups[gs]
+                                skipped_sectors.append(gs)
+
+                    if skipped_sectors:
+                        st.info(f"Conservative profile: growth sectors excluded — "
+                                f"{', '.join(skipped_sectors)}.")
+
+                    # Pin benchmarks
+                    pinned = ["SPY"]
+                    if risk_tolerance >= 4:
+                        pinned.append("QQQ")
+                    if risk_tolerance <= 3:
+                        pinned += ["GLD", "TLT"]
+
+                    # Top 2 per sector by combined score
+                    candidates = list(user_tickers)
+                    for t in pinned:
+                        if t not in candidates and t not in excl_tickers:
+                            candidates.append(t)
+
+                    for sector, ticker_scores in sector_groups.items():
+                        ranked = sorted(ticker_scores, key=lambda x: x[1], reverse=True)
+                        added  = 0
+                        for t, _ in ranked:
+                            if t not in candidates and added < 2:
+                                candidates.append(t)
+                                added += 1
+
+                    # Build sector_map from rankings
+                    sector_map = {t: rankings[t]["sector"] for t in candidates if t in rankings}
+                    for t in pinned:
+                        sector_map.setdefault(t, "Market")
+                    for t in user_tickers:
+                        sector_map.setdefault(t, "User")
+
+                    log(f"   Selected {len(candidates)} candidates from full universe")
+                else:
+                    # ── Fallback: original candidate building (top 5 per sector) ──
+                    log("   ℹ No pre-computed rankings — using live candidate building")
+                    log("   Tip: run precompute.py daily to enable full-universe selection")
+                    candidates, sector_map, skipped_sectors = build_candidate_universe(
+                        prefs, api_key, log=log)
+                    if skipped_sectors:
+                        st.info(f"Conservative profile: growth sectors excluded — "
+                                f"{', '.join(skipped_sectors)}.")
+
+                progress.progress(15, text=f"Fetching 7-year price history for {len(candidates)} candidates...")
+
+                # Fetch prices — uses Supabase cache if available (instant on repeat runs)
+                price_dict, close_df, returns_df, failed = fetch_portfolio_prices_cached(
+                    candidates, period_years=7, api_key=api_key, log=log)
+                progress.progress(40, text="Finalising stock selection...")
+
+                # Keep best 2 stocks per sector — trim to 18 for optimizer
                 best_tickers = select_by_sharpe(returns_df, sector_map,
                                                 max_total=18, top_n_per_sector=2)
-                log(f"   Selected {len(best_tickers)} stocks by Sharpe (top 2/sector): {', '.join(best_tickers)}")
+                log(f"   Final portfolio: {len(best_tickers)} stocks — {', '.join(best_tickers)}")
                 returns_df = returns_df[best_tickers]
                 close_df   = close_df[[t for t in best_tickers if t in close_df.columns]]
                 price_dict = {t: v for t, v in price_dict.items() if t in best_tickers}
@@ -1330,6 +1409,70 @@ def render_portfolio_builder(api_key, is_pro=False):
                           "port_selected_weights","port_backtest","port_mc","port_excel"]:
                     st.session_state.pop(k, None)
                 st.rerun()
+
+        # ── Save / Load portfolio ──────────────────────────────────────────────
+        st.markdown("---")
+        _section_header("Save & Load Portfolios")
+
+        _sv_col, _ld_col = st.columns(2)
+
+        with _sv_col:
+            st.markdown("**Save this portfolio**")
+            _save_email = st.text_input("Your email", placeholder="you@example.com",
+                                        key="save_port_email")
+            _save_name  = st.text_input("Portfolio name", placeholder="My Growth Portfolio",
+                                        key="save_port_name")
+            if st.button("💾  Save Portfolio", key="save_port_btn"):
+                if _save_email.strip() and _save_name.strip():
+                    _weights  = st.session_state.get("port_selected_weights", {})
+                    _prefs    = st.session_state.get("port_prefs", {})
+                    _bt       = st.session_state.get("port_backtest", {})
+                    _metrics  = _bt.get("metrics", {}) if isinstance(_bt, dict) else {}
+                    _ok = save_portfolio(
+                        user_email=_save_email,
+                        name=_save_name,
+                        weights=_weights,
+                        preferences=_prefs,
+                        metrics=_metrics,
+                    )
+                    if _ok:
+                        st.success("Portfolio saved!")
+                    else:
+                        st.error("Save failed — check your connection.")
+                else:
+                    st.warning("Enter both an email and a name.")
+
+        with _ld_col:
+            st.markdown("**Load a saved portfolio**")
+            _load_email = st.text_input("Your email", placeholder="you@example.com",
+                                        key="load_port_email")
+            if st.button("🔍  Find My Portfolios", key="load_port_btn"):
+                if _load_email.strip():
+                    _saved = load_portfolios(_load_email)
+                    if _saved:
+                        st.session_state["found_portfolios"] = _saved
+                    else:
+                        st.info("No saved portfolios found for that email.")
+
+            if "found_portfolios" in st.session_state:
+                _saved = st.session_state["found_portfolios"]
+                for _p in _saved:
+                    _pcols = st.columns([3, 1, 1])
+                    with _pcols[0]:
+                        _date = _p.get("created_at", "")[:10]
+                        st.markdown(f"**{_p['name']}** <span style='color:#94a3b8;font-size:0.78rem'>"
+                                    f"saved {_date}</span>", unsafe_allow_html=True)
+                        _tickers = ", ".join(list(_p.get("weights", {}).keys())[:6])
+                        st.caption(_tickers)
+                    with _pcols[1]:
+                        if st.button("Load", key=f"load_{_p['id']}"):
+                            st.session_state["port_selected_weights"] = _p["weights"]
+                            st.success(f"Loaded: {_p['name']}")
+                    with _pcols[2]:
+                        if st.button("Delete", key=f"del_{_p['id']}"):
+                            delete_portfolio(_p["id"])
+                            del st.session_state["found_portfolios"]
+                            st.rerun()
 
         st.markdown("""
         <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;

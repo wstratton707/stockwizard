@@ -184,7 +184,7 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
     return None
 
 
-def fetch_portfolio_prices(tickers, period_years=3, api_key="", log=print):
+def fetch_portfolio_prices(tickers, period_years=7, api_key="", log=print):
     end     = datetime.today()
     start   = end - timedelta(days=period_years*365)
     end_s   = end.strftime("%Y-%m-%d")
@@ -352,3 +352,74 @@ def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=18,
         selected.extend(ranked[:top_n_per_sector])
 
     return selected[:max_total]
+
+
+# ── Supabase-cached portfolio price fetcher ───────────────────────────────────
+
+def fetch_portfolio_prices_cached(tickers, period_years=7, api_key="", log=print):
+    """
+    Drop-in replacement for fetch_portfolio_prices that caches the full
+    close_df in Supabase once per day.  Subsequent callers with the same
+    ticker set skip all Polygon calls and get data in ~1 second.
+
+    Cache key: portfolio_prices_<YYYYMMDD>_<sorted-tickers-hash>
+    TTL: 25 hours (covers full trading day + buffer)
+    """
+    import hashlib
+
+    today     = datetime.today().strftime("%Y-%m-%d")
+    tk_key    = hashlib.md5(",".join(sorted(tickers)).encode()).hexdigest()[:10]
+    cache_key = f"portfolio_prices_{today}_{tk_key}"
+
+    cached = cache_get(cache_key)
+    if cached is not None:
+        log("   ⚡ Using cached price data from Supabase (instant)")
+        try:
+            close_df   = pd.DataFrame(cached["close"]).set_index("Date")
+            close_df.index = pd.to_datetime(close_df.index)
+            close_df   = close_df.apply(pd.to_numeric, errors="coerce")
+            returns_df = close_df.pct_change().dropna()
+            # Rebuild minimal price_dict from close_df
+            price_dict = {}
+            for t in close_df.columns:
+                s = close_df[t].dropna().reset_index()
+                s.columns = ["Date", "Close"]
+                s["Ticker"] = t
+                price_dict[t] = s
+            failed = cached.get("failed", [])
+            log(f"   ✅ {len(price_dict)} tickers loaded from cache")
+            return price_dict, close_df, returns_df, failed
+        except Exception as e:
+            log(f"   ⚠ Cache parse failed ({e}), fetching fresh...")
+
+    # Cache miss — fetch from Polygon as normal
+    price_dict, close_df, returns_df, failed = fetch_portfolio_prices(
+        tickers, period_years=period_years, api_key=api_key, log=log
+    )
+
+    # Store in Supabase for next caller
+    try:
+        payload = {
+            "close":  close_df.reset_index().assign(
+                          Date=close_df.reset_index()["Date"].astype(str)
+                      ).to_dict(orient="records"),
+            "failed": failed,
+        }
+        if cache_set(cache_key, payload, ttl_hours=25):
+            log("   ✅ Price data cached in Supabase for future users")
+    except Exception as e:
+        log(f"   ⚠ Could not cache to Supabase: {e}")
+
+    return price_dict, close_df, returns_df, failed
+
+
+def get_sharpe_rankings(api_key: str = "") -> dict:
+    """
+    Returns today's pre-computed Sharpe rankings from Supabase.
+    Format: {ticker: {ticker, sector, sharpe, ann_return, ann_vol}}
+    Returns {} if not yet computed (precompute.py hasn't run today).
+    """
+    today     = datetime.today().strftime("%Y-%m-%d")
+    cache_key = f"sharpe_rankings_{today}"
+    rankings  = cache_get(cache_key)
+    return rankings or {}

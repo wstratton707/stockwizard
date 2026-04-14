@@ -146,3 +146,77 @@ def is_connected() -> bool:
         return r.status_code == 200
     except Exception:
         return False
+
+
+# ── Portfolio persistence ──────────────────────────────────────────────────────
+_PORT_TABLE = "saved_portfolios"
+
+
+def save_portfolio(user_email: str, name: str, weights: dict,
+                   preferences: dict = None, metrics: dict = None) -> bool:
+    """
+    Save a portfolio to Supabase under the user's email.
+    Returns True on success.
+    """
+    if not _available():
+        return False
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/{_PORT_TABLE}",
+            headers={**_headers(), "Prefer": "return=minimal"},
+            json={
+                "user_email":  user_email.strip().lower(),
+                "name":        name.strip(),
+                "weights":     weights,
+                "preferences": preferences or {},
+                "metrics":     metrics or {},
+            },
+            timeout=_TIMEOUT,
+        )
+        return r.status_code in (200, 201, 204)
+    except Exception as e:
+        logger.warning(f"save_portfolio: {e}")
+        return False
+
+
+def load_portfolios(user_email: str) -> list:
+    """
+    Load all saved portfolios for a user email.
+    Returns list of portfolio dicts ordered newest first.
+    """
+    if not _available():
+        return []
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/{_PORT_TABLE}",
+            headers=_headers(),
+            params={
+                "user_email": f"eq.{user_email.strip().lower()}",
+                "select":     "*",
+                "order":      "created_at.desc",
+                "limit":      "20",
+            },
+            timeout=_TIMEOUT,
+        )
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        logger.warning(f"load_portfolios: {e}")
+    return []
+
+
+def delete_portfolio(portfolio_id: str) -> bool:
+    """Delete a saved portfolio by its UUID."""
+    if not _available():
+        return False
+    try:
+        r = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/{_PORT_TABLE}",
+            headers=_headers(),
+            params={"id": f"eq.{portfolio_id}"},
+            timeout=_TIMEOUT,
+        )
+        return r.status_code in (200, 204)
+    except Exception as e:
+        logger.warning(f"delete_portfolio: {e}")
+        return False
