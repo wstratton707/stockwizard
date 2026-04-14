@@ -35,6 +35,7 @@ from pptx_builder import build_stock_pptx, build_portfolio_pptx, PPTX_AVAILABLE
 from live_data import get_live_price, get_intraday_data, get_top_movers
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
+from stress_test import render_stress_test
 from constants import DEV_MODE_FREE
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -819,7 +820,7 @@ if not DEV_MODE_FREE and SHOW_PRICING and st.session_state["show_payment"] and n
     st.markdown("---")
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["📈  Stock Analysis", "💼  Portfolio Builder", "🏦  Bond Analysis"])
+tab1, tab2, tab3, tab4 = st.tabs(["📈  Stock Analysis", "💼  Portfolio Builder", "🏦  Bond Analysis", "🔥  Stress Test"])
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 1 — STOCK ANALYSIS
@@ -2626,3 +2627,10 @@ with tab3:
 
     elif run_bond and not bond_ticker:
         st.warning("Please enter a bond ETF ticker.")
+
+
+# =============================================================================
+# TAB 4 — STRESS TEST & PORTFOLIO AUTOPSY
+# =============================================================================
+with tab4:
+    render_stress_test(POLYGON_API_KEY, is_pro=st.session_state.get("is_pro", False))
