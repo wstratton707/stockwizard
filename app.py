@@ -574,29 +574,10 @@ st.markdown("""
     <div class="main-header-sub">
         <span class="badge">Stocks</span>
         <span class="badge">ETFs</span>
-        <span class="badge">Crypto</span>
-        <span class="badge">Monte Carlo</span>
         <span class="badge">Portfolio Builder</span>
-        <span class="badge">Excel &amp; PowerPoint Export</span>
+        <span class="badge">Stress Test</span>
+        <span class="badge">Monte Carlo</span>
         <span style="color:#6b7a8d;margin-left:0.5rem">· Powered by Polygon.io</span>
-    </div>
-    <div class="main-header-stats">
-        <div class="main-header-stat">
-            <div class="main-header-stat-val">10+</div>
-            <div class="main-header-stat-lbl">Analysis Sheets</div>
-        </div>
-        <div class="main-header-stat">
-            <div class="main-header-stat-val">1,000</div>
-            <div class="main-header-stat-lbl">Monte Carlo Paths</div>
-        </div>
-        <div class="main-header-stat">
-            <div class="main-header-stat-val">15+</div>
-            <div class="main-header-stat-lbl">Technical Indicators</div>
-        </div>
-        <div class="main-header-stat">
-            <div class="main-header-stat-val">Free</div>
-            <div class="main-header-stat-lbl">To Start</div>
-        </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -830,221 +811,334 @@ with tab1:
     # ── Landing page (no ticker entered) ─────────────────────────────────────
     if not run_btn and not ticker_input:
 
-        # ── Quick-start chips ─────────────────────────────────────────────────
+        # ── Hero ──────────────────────────────────────────────────────────────
         st.markdown("""
-        <div style="margin-bottom:0.5rem;color:#6b7a8d;font-size:0.82rem;font-weight:500">
-            Try a quick example:
-        </div>
-        <div class="quickstart-bar">
-            <span class="quickstart-chip">AAPL</span>
-            <span class="quickstart-chip">TSLA</span>
-            <span class="quickstart-chip">NVDA</span>
-            <span class="quickstart-chip">SPY</span>
-            <span class="quickstart-chip">BTC</span>
-            <span class="quickstart-chip">AMZN</span>
-            <span class="quickstart-chip">MSFT</span>
-        </div>
-        <div style="font-size:0.78rem;color:#6b7a8d;margin-bottom:1.5rem">
-            ↑ Type any ticker in the sidebar and click Run Analysis
-        </div>
-        """, unsafe_allow_html=True)
+        <div style="background:linear-gradient(135deg,#0c1e35 0%,#1e3a5f 100%);
+                    border-radius:12px;padding:3rem 2.5rem 2.5rem;margin-bottom:2rem;
+                    border:1px solid rgba(255,255,255,0.08)">
 
-        # ── Stats bar ─────────────────────────────────────────────────────────
-        st.markdown("""
-        <div class="stats-bar">
-            <div class="stats-bar-item">
-                <div class="stats-bar-val">15+</div>
-                <div class="stats-bar-lbl">Indicators</div>
+            <div style="display:inline-block;background:rgba(29,78,216,0.2);
+                        border:1px solid rgba(29,78,216,0.4);border-radius:20px;
+                        padding:0.3rem 0.9rem;margin-bottom:1.25rem">
+                <span style="color:#60a5fa;font-size:0.75rem;font-weight:600;
+                              letter-spacing:0.5px;text-transform:uppercase">
+                    Institutional Tools · Retail Price
+                </span>
             </div>
-            <div class="stats-bar-item">
-                <div class="stats-bar-val">1,000</div>
-                <div class="stats-bar-lbl">MC Simulations</div>
+
+            <h2 style="color:#ffffff;font-size:2rem;font-weight:700;
+                       line-height:1.2;margin:0 0 1rem;font-family:'DM Sans',sans-serif">
+                Portfolio Analysis That Actually<br>Tells You What to Do
+            </h2>
+
+            <p style="color:#94a3b8;font-size:1rem;max-width:560px;
+                      line-height:1.7;margin:0 0 2rem">
+                Build optimized portfolios from 330+ ranked stocks, backtest 7 years of history,
+                stress test through real crashes, and get a complete Excel report —
+                all for <strong style="color:#60a5fa">$9.99/month</strong>.
+            </p>
+
+            <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:2.5rem">
+                <div style="background:#1d4ed8;color:#fff;padding:0.75rem 1.75rem;
+                            border-radius:6px;font-weight:600;font-size:0.9rem;
+                            cursor:default">
+                    ↑ Enter a ticker in the sidebar to start free
+                </div>
             </div>
-            <div class="stats-bar-item">
-                <div class="stats-bar-val">10</div>
-                <div class="stats-bar-lbl">Export Sheets</div>
-            </div>
-            <div class="stats-bar-item">
-                <div class="stats-bar-val">5yr</div>
-                <div class="stats-bar-lbl">History</div>
-            </div>
-            <div class="stats-bar-item">
-                <div class="stats-bar-val">Live</div>
-                <div class="stats-bar-lbl">Price Data</div>
+
+            <div style="display:flex;gap:3rem;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,0.08);
+                        padding-top:1.5rem">
+                <div>
+                    <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
+                                font-family:'IBM Plex Mono',monospace">330+</div>
+                    <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
+                                letter-spacing:0.5px">Stocks Ranked Daily</div>
+                </div>
+                <div>
+                    <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
+                                font-family:'IBM Plex Mono',monospace">7 Years</div>
+                    <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
+                                letter-spacing:0.5px">Price History</div>
+                </div>
+                <div>
+                    <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
+                                font-family:'IBM Plex Mono',monospace">1,000</div>
+                    <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
+                                letter-spacing:0.5px">Monte Carlo Paths</div>
+                </div>
+                <div>
+                    <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
+                                font-family:'IBM Plex Mono',monospace">5</div>
+                    <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
+                                letter-spacing:0.5px">Crash Scenarios</div>
+                </div>
+                <div>
+                    <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
+                                font-family:'IBM Plex Mono',monospace">Live</div>
+                    <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
+                                letter-spacing:0.5px">Market Data</div>
+                </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
         # ── Market movers ─────────────────────────────────────────────────────
-        st.markdown('<div class="section-header">Market Movers Today</div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
+                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
+                    margin-bottom:1rem">Market Movers Today</div>
+        """, unsafe_allow_html=True)
+
         with st.spinner("Loading market data..."):
             gainers, losers = get_top_movers(POLYGON_API_KEY)
 
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("""
-            <div style="font-size:0.78rem;font-weight:700;color:#059669;letter-spacing:0.5px;
-                        text-transform:uppercase;margin-bottom:0.6rem">
-                ▲ Top Gainers
-            </div>""", unsafe_allow_html=True)
+            st.markdown("""<div style="font-size:0.72rem;font-weight:700;color:#059669;
+                        letter-spacing:0.5px;text-transform:uppercase;margin-bottom:0.6rem">
+                ▲ Top Gainers</div>""", unsafe_allow_html=True)
             if gainers:
                 for g in gainers:
                     st.markdown(f"""
                     <div class="mover-card">
-                        <span style="font-weight:700;color:#0f172a;font-size:0.9rem">{g['Ticker']}</span>
-                        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.85rem;color:#6b7a8d">{g['Price']}</span>
-                        <span style="color:#059669;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:0.9rem">{g['Change']}</span>
-                    </div>
-                    """, unsafe_allow_html=True)
+                        <span style="font-weight:700;color:#0f172a;font-size:0.88rem">{g['Ticker']}</span>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.83rem;color:#6b7a8d">{g['Price']}</span>
+                        <span style="color:#059669;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:0.88rem">{g['Change']}</span>
+                    </div>""", unsafe_allow_html=True)
             else:
-                st.markdown("""<div style="color:#6b7a8d;font-size:0.82rem;padding:0.5rem">
-                    Market data unavailable</div>""", unsafe_allow_html=True)
+                st.caption("Market data unavailable right now.")
 
         with col2:
-            st.markdown("""
-            <div style="font-size:0.78rem;font-weight:700;color:#dc2626;letter-spacing:0.5px;
-                        text-transform:uppercase;margin-bottom:0.6rem">
-                ▼ Top Losers
-            </div>""", unsafe_allow_html=True)
+            st.markdown("""<div style="font-size:0.72rem;font-weight:700;color:#dc2626;
+                        letter-spacing:0.5px;text-transform:uppercase;margin-bottom:0.6rem">
+                ▼ Top Losers</div>""", unsafe_allow_html=True)
             if losers:
                 for l in losers:
                     st.markdown(f"""
                     <div class="mover-card">
-                        <span style="font-weight:700;color:#0f172a;font-size:0.9rem">{l['Ticker']}</span>
-                        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.85rem;color:#6b7a8d">{l['Price']}</span>
-                        <span style="color:#dc2626;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:0.9rem">{l['Change']}</span>
-                    </div>
-                    """, unsafe_allow_html=True)
+                        <span style="font-weight:700;color:#0f172a;font-size:0.88rem">{l['Ticker']}</span>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.83rem;color:#6b7a8d">{l['Price']}</span>
+                        <span style="color:#dc2626;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:0.88rem">{l['Change']}</span>
+                    </div>""", unsafe_allow_html=True)
             else:
-                st.markdown("""<div style="color:#6b7a8d;font-size:0.82rem;padding:0.5rem">
-                    Market data unavailable</div>""", unsafe_allow_html=True)
+                st.caption("Market data unavailable right now.")
+
+        # ── Problem section ───────────────────────────────────────────────────
+        st.markdown("""
+        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
+                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
+                    margin-bottom:1rem;margin-top:2rem">Why StockWizard</div>
+        """, unsafe_allow_html=True)
+
+        p1, p2, p3 = st.columns(3)
+        for col, icon, problem, solution in [
+            (p1, "📉", "Your brokerage shows you a chart.",
+             "It doesn't tell you if your portfolio would survive a crash. We run your holdings through 2008, COVID, and 2022 with real historical prices."),
+            (p2, "🔍", "Stock screeners give you data.",
+             "They don't build your portfolio. We rank 330+ stocks daily by Sharpe ratio and momentum, then optimize weights for your risk tolerance."),
+            (p3, "💸", "Financial advisors charge thousands.",
+             "You shouldn't need one for quantitative analysis. Everything a quant analyst would run — Monte Carlo, efficient frontier, GARCH — for $9.99/month."),
+        ]:
+            with col:
+                st.markdown(f"""
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+                            padding:1.25rem;height:100%">
+                    <div style="font-size:1.5rem;margin-bottom:0.75rem">{icon}</div>
+                    <div style="font-weight:600;color:#0f172a;font-size:0.88rem;
+                                margin-bottom:0.5rem">{problem}</div>
+                    <div style="color:#64748b;font-size:0.82rem;line-height:1.6">{solution}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
         # ── Feature cards ─────────────────────────────────────────────────────
-        st.markdown('<div class="section-header">What You Get</div>', unsafe_allow_html=True)
-        c1, c2, c3 = st.columns(3)
-        with c1:
+        st.markdown("""
+        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
+                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
+                    margin-bottom:1rem;margin-top:2rem">What's Included</div>
+        """, unsafe_allow_html=True)
+
+        fc1, fc2 = st.columns(2)
+        fc3, fc4 = st.columns(2)
+
+        for col, icon, title, tier, items in [
+            (fc1, "📈", "Stock Analysis", "Free",
+             ["Bollinger Bands, RSI, GARCH volatility", "Monte Carlo simulation (1,000 paths)",
+              "Peer comparison vs sector", "Intraday candlestick chart", "Excel + PowerPoint export"]),
+            (fc2, "💼", "Portfolio Builder", "Pro",
+             ["330+ stocks ranked by multi-factor score", "7-year backtest with quarterly rebalancing",
+              "Mean-variance optimization", "Portfolio Monte Carlo with milestone projections",
+              "Diversification score + correlation heatmap"]),
+            (fc3, "🔥", "Stress Test", "Pro",
+             ["5 real historical crashes: 2008, COVID, 2022, dot-com, 2018", "Real Polygon price data for each scenario",
+              "Portfolio return vs S&P 500 per crash", "Dollar impact calculator",
+              "Correlation culprit detection"]),
+            (fc4, "🏦", "Bond & Portfolio Autopsy", "Pro",
+             ["Bond ETF analysis across 6 categories", "Upload your holdings CSV — see what broke",
+              "P&L attribution per position", "Rolling volatility + drawdown charts",
+              "Benchmark comparison"]),
+        ]:
+            with col:
+                tier_color = "#1d4ed8" if tier == "Pro" else "#059669"
+                tier_bg    = "rgba(29,78,216,0.08)" if tier == "Pro" else "rgba(5,150,105,0.08)"
+                items_html = "".join(f"<li style='margin-bottom:0.3rem'>{i}</li>" for i in items)
+                st.markdown(f"""
+                <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;
+                            padding:1.25rem;margin-bottom:1rem;
+                            border-top:3px solid {tier_color}">
+                    <div style="display:flex;align-items:center;justify-content:space-between;
+                                margin-bottom:0.75rem">
+                        <div style="font-size:1.3rem">{icon}
+                            <span style="font-weight:700;color:#0f172a;font-size:0.95rem;
+                                         margin-left:0.5rem">{title}</span>
+                        </div>
+                        <div style="background:{tier_bg};color:{tier_color};font-size:0.68rem;
+                                    font-weight:700;letter-spacing:0.5px;text-transform:uppercase;
+                                    padding:0.2rem 0.6rem;border-radius:20px">{tier}</div>
+                    </div>
+                    <ul style="color:#64748b;font-size:0.82rem;line-height:1.6;
+                               padding-left:1.1rem;margin:0">
+                        {items_html}
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # ── How it works ──────────────────────────────────────────────────────
+        st.markdown("""
+        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
+                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
+                    margin-bottom:1.5rem;margin-top:2rem">How It Works</div>
+        """, unsafe_allow_html=True)
+
+        h1, h2, h3 = st.columns(3)
+        for col, num, title, desc in [
+            (h1, "1", "Enter Your Preferences",
+             "Set your risk tolerance, starting capital, sectors to include, and investment horizon. Takes 2 minutes."),
+            (h2, "2", "We Rank & Optimize",
+             "StockWizard scores 330+ stocks daily using Sharpe ratio and momentum, selects the best per sector, then runs mean-variance optimization."),
+            (h3, "3", "Get Your Full Report",
+             "7-year backtest, Monte Carlo forecast with milestone probabilities, stress test results, and a downloadable Excel + PowerPoint report."),
+        ]:
+            with col:
+                st.markdown(f"""
+                <div style="text-align:center;padding:1.25rem 0.75rem;
+                            background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px">
+                    <div style="width:40px;height:40px;background:#1d4ed8;border-radius:50%;
+                                display:flex;align-items:center;justify-content:center;
+                                margin:0 auto 0.85rem;font-size:1rem;font-weight:700;
+                                color:#ffffff">{num}</div>
+                    <div style="font-weight:700;color:#0f172a;font-size:0.9rem;
+                                margin-bottom:0.4rem">{title}</div>
+                    <div style="color:#64748b;font-size:0.81rem;line-height:1.6">{desc}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # ── Pricing ───────────────────────────────────────────────────────────
+        st.markdown("""
+        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
+                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
+                    margin-bottom:1.5rem;margin-top:2rem">Pricing</div>
+        """, unsafe_allow_html=True)
+
+        pr1, pr2 = st.columns(2)
+        with pr1:
             st.markdown("""
-            <div class="feature-card">
-                <span class="feature-card-icon">📊</span>
-                <div class="feature-card-title">Investor Mode</div>
-                <div class="feature-card-subtitle">Free · Full technical analysis</div>
-                <ul class="feature-card-list">
-                    <li>10-sheet Excel + PowerPoint export</li>
-                    <li>Monte Carlo simulation</li>
-                    <li>RSI, MACD, Bollinger Bands</li>
-                    <li>Support &amp; resistance levels</li>
-                    <li>Correlation matrix</li>
-                    <li>News headlines</li>
-                    <li>Up to 5 year history</li>
+            <div style="border:1px solid #e2e8f0;border-radius:12px;padding:1.75rem;
+                        background:#ffffff">
+                <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.5px;
+                            text-transform:uppercase;color:#64748b;margin-bottom:0.5rem">Free</div>
+                <div style="font-size:2rem;font-weight:700;color:#0f172a;
+                            font-family:'IBM Plex Mono',monospace;margin-bottom:0.25rem">$0</div>
+                <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">No credit card required</div>
+                <ul style="color:#64748b;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0">
+                    <li>Full stock analysis on any ticker</li>
+                    <li>Bollinger Bands, RSI, Monte Carlo</li>
+                    <li>Peer comparison charts</li>
+                    <li>Excel + PowerPoint export</li>
                 </ul>
-            </div>""", unsafe_allow_html=True)
-        with c2:
+            </div>
+            """, unsafe_allow_html=True)
+        with pr2:
             st.markdown("""
-            <div class="feature-card" style="border-color:#1d4ed8;border-top-color:#1d4ed8">
-                <span class="feature-card-icon">⚡</span>
-                <div class="feature-card-title">Day Trader Mode</div>
-                <div class="feature-card-subtitle" style="color:#1d4ed8">Pro · Real-time intraday</div>
-                <ul class="feature-card-list">
-                    <li>Live candlestick charts</li>
-                    <li>Real-time price (30s refresh)</li>
-                    <li>1min / 5min / 15min / 1hr candles</li>
-                    <li>Volume spike detection</li>
-                    <li>Live RSI &amp; MACD overlays</li>
-                    <li>Pre &amp; after-market data</li>
+            <div style="border:2px solid #1d4ed8;border-radius:12px;padding:1.75rem;
+                        background:linear-gradient(135deg,#eff6ff,#ffffff)">
+                <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.5px;
+                            text-transform:uppercase;color:#1d4ed8;margin-bottom:0.5rem">Pro</div>
+                <div style="font-size:2rem;font-weight:700;color:#0f172a;
+                            font-family:'IBM Plex Mono',monospace;margin-bottom:0.25rem">$9.99
+                    <span style="font-size:0.9rem;font-weight:400;color:#64748b">/month</span>
+                </div>
+                <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">Cancel anytime</div>
+                <ul style="color:#0f172a;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0 0 1.25rem">
+                    <li>Everything in Free</li>
+                    <li><strong>Portfolio Builder</strong> — 330+ stocks, 7-year backtest</li>
+                    <li><strong>Stress Test</strong> — 5 historical crash scenarios</li>
+                    <li><strong>Bond Analysis</strong> — 60+ ETFs</li>
+                    <li><strong>Portfolio Autopsy</strong> — CSV upload + P&L attribution</li>
+                    <li>Save &amp; load portfolios</li>
                 </ul>
-            </div>""", unsafe_allow_html=True)
-        with c3:
-            st.markdown("""
-            <div class="feature-card" style="border-color:#1d4ed8;border-top-color:#1d4ed8">
-                <span class="feature-card-icon">💼</span>
-                <div class="feature-card-title">Portfolio Builder</div>
-                <div class="feature-card-subtitle" style="color:#1d4ed8">Pro · Quant-grade optimisation</div>
-                <ul class="feature-card-list">
-                    <li>Mean-variance optimisation</li>
-                    <li>Efficient frontier chart</li>
-                    <li>3-year backtest vs S&amp;P 500</li>
-                    <li>Portfolio Monte Carlo</li>
-                    <li>Milestone projections</li>
-                    <li>Diversification scoring</li>
-                </ul>
-            </div>""", unsafe_allow_html=True)
+            </div>
+            """, unsafe_allow_html=True)
 
         if SHOW_PRICING:
             render_pricing_section()
 
-        # ── How it works ──────────────────────────────────────────────────────
-        st.markdown('<div class="section-header">How It Works</div>', unsafe_allow_html=True)
-        h1, h2, h3, h4 = st.columns(4)
-        for col, num, title, desc in [
-            (h1, "1", "Enter Ticker", "Type any stock, ETF, or crypto symbol in the sidebar"),
-            (h2, "2", "Configure",    "Choose your date range, benchmarks, and analysis modules"),
-            (h3, "3", "Run Analysis", "Click Run — we fetch data and compute 15+ indicators"),
-            (h4, "4", "Export",       "Download a professional Excel or PowerPoint report"),
-        ]:
-            with col:
-                st.markdown(f"""
-                <div style="text-align:center;padding:1.25rem 0.5rem">
-                    <div style="width:44px;height:44px;background:#1d4ed8;
-                                border-radius:3px;display:flex;align-items:center;justify-content:center;
-                                margin:0 auto 0.75rem;font-size:1.1rem;font-weight:700;color:#0f172a;
-                                box-shadow:none">{num}</div>
-                    <div style="font-weight:700;color:#0f172a;font-size:0.9rem;margin-bottom:0.35rem">{title}</div>
-                    <div style="color:#6b7a8d;font-size:0.8rem;line-height:1.5">{desc}</div>
-                </div>
-                """, unsafe_allow_html=True)
+        # ── Team ──────────────────────────────────────────────────────────────
+        st.markdown("""
+        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
+                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
+                    margin-bottom:1.5rem;margin-top:2rem">Built By</div>
+        """, unsafe_allow_html=True)
 
-        # ── Meet the team ─────────────────────────────────────────────────────
-        st.markdown('<div class="section-header">Meet the Team</div>', unsafe_allow_html=True)
-        fc1, fc2 = st.columns(2)
-        with fc1:
+        tc1, tc2 = st.columns(2)
+        with tc1:
             st.markdown("""
             <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
                 <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0434.jpeg"
-                     style="width:72px;height:72px;border-radius:50%;object-fit:cover;
-                            flex-shrink:0;border:3px solid #1d4ed8;margin-top:4px">
+                     style="width:64px;height:64px;border-radius:50%;object-fit:cover;
+                            flex-shrink:0;border:2px solid #1d4ed8">
                 <div>
-                    <div class="founder-quote">
+                    <div style="font-weight:700;color:#0f172a;font-size:0.92rem">Wyatt Stratton</div>
+                    <div style="color:#1d4ed8;font-size:0.78rem;margin-bottom:0.5rem">
+                        Founder · Indiana University Bloomington</div>
+                    <div style="color:#64748b;font-size:0.82rem;line-height:1.6;font-style:italic">
                         "I built StockWizard because I was tired of spending hours pulling financial
-                        data into spreadsheets manually. I wanted a tool that gives any trader —
-                        beginner or pro — a professional report in seconds."
+                        data manually. Any investor deserves a professional report in seconds."
                     </div>
-                    <div class="founder-name">Wyatt Stratton</div>
-                    <div class="founder-role">Founder</div>
-                    <div class="founder-school">Indiana University Bloomington</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
-        with fc2:
+        with tc2:
             st.markdown("""
             <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
                 <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0433.jpeg"
-                     style="width:72px;height:72px;border-radius:50%;object-fit:cover;
-                            flex-shrink:0;border:3px solid #1d4ed8;margin-top:4px">
+                     style="width:64px;height:64px;border-radius:50%;object-fit:cover;
+                            flex-shrink:0;border:2px solid #1d4ed8">
                 <div>
-                    <div class="founder-quote">
-                        "My role was making sure the analysis was rigorous and the experience was seamless.
-                        From Monte Carlo simulation to the overall architecture, every number
-                        StockWizard produces is something a professional quant would stand behind."
+                    <div style="font-weight:700;color:#0f172a;font-size:0.92rem">Nicholas Carriello</div>
+                    <div style="color:#1d4ed8;font-size:0.78rem;margin-bottom:0.5rem">
+                        Co-Founder &amp; Quantitative Lead · Bucknell University</div>
+                    <div style="color:#64748b;font-size:0.82rem;line-height:1.6;font-style:italic">
+                        "Every number StockWizard produces is something a professional quant
+                        would stand behind. Rigorous analysis, clean interface."
                     </div>
-                    <div class="founder-name">Nicholas Carriello</div>
-                    <div class="founder-role">Co-Founder &amp; Quantitative Lead</div>
-                    <div class="founder-school">Bucknell University</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
-        # ── Disclaimer footer ─────────────────────────────────────────────────
+        # ── Footer ────────────────────────────────────────────────────────────
         st.markdown("""
         <div class="page-footer">
             <div style="margin-bottom:0.5rem">
                 <strong>StockWizard</strong> &nbsp;·&nbsp;
-                Professional stock analysis tools &nbsp;·&nbsp;
-                Powered by <a href="https://polygon.io" target="_blank">Polygon.io</a>
+                Institutional-grade portfolio analysis &nbsp;·&nbsp;
+                Powered by <a href="https://polygon.io" target="_blank"
+                style="color:#1d4ed8">Polygon.io</a>
             </div>
             <div>
                 StockWizard provides financial data and analytics for informational purposes only.
-                This is <strong>not investment advice</strong>. Past performance does not guarantee future results.
-                Always consult a licensed financial advisor before making investment decisions.
+                This is <strong>not investment advice</strong>. Past performance does not guarantee
+                future results. Always consult a licensed financial advisor before making
+                investment decisions.
             </div>
         </div>
         """, unsafe_allow_html=True)
