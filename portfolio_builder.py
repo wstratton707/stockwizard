@@ -114,6 +114,18 @@ def render_portfolio_builder(api_key, is_pro=False):
     </div>
     """, unsafe_allow_html=True)
 
+    # ── Widget label colours ────────────────────────────────────────────────────
+    st.markdown("""
+    <style>
+    .main [data-testid="stSlider"] label,
+    .main [data-testid="stSelectbox"] label,
+    .main [data-testid="stNumberInput"] label,
+    .main [data-testid="stCheckbox"] label {
+        color: #38bdf8 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # ── Step indicator ─────────────────────────────────────────────────────────
     steps      = ["① Preferences", "② Universe", "③ Optimise", "④ Backtest", "⑤ Forecast"]
     curr_step  = st.session_state.get("port_step", 0)

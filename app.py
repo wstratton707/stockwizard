@@ -903,7 +903,7 @@ with tab1:
                         <span style="color:#059669;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:0.88rem">{g['Change']}</span>
                     </div>""", unsafe_allow_html=True)
             else:
-                st.caption("Market data unavailable right now.")
+                st.markdown('<span style="color:#38bdf8;font-size:0.85rem">Market data unavailable right now.</span>', unsafe_allow_html=True)
 
         with col2:
             st.markdown("""<div style="font-size:0.72rem;font-weight:700;color:#dc2626;
@@ -918,7 +918,7 @@ with tab1:
                         <span style="color:#dc2626;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:0.88rem">{l['Change']}</span>
                     </div>""", unsafe_allow_html=True)
             else:
-                st.caption("Market data unavailable right now.")
+                st.markdown('<span style="color:#38bdf8;font-size:0.85rem">Market data unavailable right now.</span>', unsafe_allow_html=True)
 
         # ── Problem section ───────────────────────────────────────────────────
         st.markdown("""
