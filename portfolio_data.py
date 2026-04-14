@@ -6,6 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from constants import RISK_FREE_RATE
+from database import cache_get, cache_set
 
 POLYGON_BASE = "https://api.polygon.io"
 _PORT_CACHE  = {}
@@ -123,9 +124,23 @@ BOND_DURATION_MAP = {
 
 def _fetch_ohlcv(ticker, start, end, api_key, log=print):
     cache_key = f"{ticker}_{start}_{end}"
-    cached    = _PORT_CACHE.get(cache_key)
+
+    # 1. In-memory cache (fastest)
+    cached = _PORT_CACHE.get(cache_key)
     if cached and (time.time() - cached["ts"]) < CACHE_TTL:
         return cached["df"]
+
+    # 2. Supabase persistent cache (survives restarts, shared across users)
+    db_hit = cache_get(f"ohlcv_{cache_key}")
+    if db_hit is not None:
+        try:
+            df = pd.DataFrame(db_hit)
+            df["Date"] = pd.to_datetime(df["Date"])
+            _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
+            return df
+        except Exception:
+            pass
+
     try:
         r = requests.get(
             f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
@@ -151,7 +166,14 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
                 df["Ticker"] = ticker
                 df = df[["Date","Ticker","Open","High","Low","Close","Volume"]]
                 df = df.sort_values("Date").reset_index(drop=True)
-                _PORT_CACHE[cache_key] = {"ts":time.time(),"df":df}
+                _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
+                # Write to Supabase — TTL 24h for daily data
+                try:
+                    cache_set(f"ohlcv_{cache_key}",
+                              df.assign(Date=df["Date"].astype(str)).to_dict(orient="records"),
+                              ttl_hours=24)
+                except Exception:
+                    pass
                 return df
             else:
                 log(f"   ⚠ {ticker} HTTP 200 but empty results")
