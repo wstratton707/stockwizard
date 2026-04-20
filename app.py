@@ -541,9 +541,8 @@ html, body, [class*="css"] {
 [data-testid="stSelectbox"] label p,
 [data-testid="stNumberInput"] label p,
 [data-testid="stTextInput"] label p,
-[data-testid="stMarkdownContainer"] p,
 [data-testid="stExpander"] summary p {
-  color: #38bdf8 !important;
+  color: #475569 !important;
 }
 </style>
 """, unsafe_allow_html=True)
