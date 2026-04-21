@@ -3,14 +3,16 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from constants import get_risk_free_rate
 from database import cache_get, cache_set
 
-POLYGON_BASE = "https://api.polygon.io"
-_PORT_CACHE  = {}
-CACHE_TTL    = 3600
+POLYGON_BASE    = "https://api.polygon.io"
+_PORT_CACHE     = {}
+_PORT_CACHE_LOCK = threading.Lock()
+CACHE_TTL       = 3600
 
 SECTOR_UNIVERSE = {
     "Technology": [
@@ -26,7 +28,7 @@ SECTOR_UNIVERSE = {
     "Financials": [
         "JPM","V","MA","BAC","WFC","GS","MS","BLK","AXP","C",
         "SPGI","MCO","ICE","CME","CB","PGR","TRV","AFL","MET","PRU",
-        "USB","PNC","TFC","COF","DFS","SCHW","FIS","FI","PYPL","CBOE",
+        "USB","PNC","TFC","COF","BX","SCHW","FIS","FI","PYPL","CBOE",
     ],
     "Consumer Discretionary": [
         "AMZN","TSLA","HD","MCD","NKE","SBUX","TJX","BKNG","CMG","LOW",
@@ -45,18 +47,18 @@ SECTOR_UNIVERSE = {
     ],
     "Energy": [
         "XOM","CVX","COP","EOG","SLB","MPC","VLO","PSX","OXY","HES",
-        "PXD","DVN","FANG","MRO","APA","HAL","BKR","NOV","RRC","EQT",
+        "CHRD","DVN","FANG","PR","APA","HAL","BKR","NOV","RRC","EQT",
         "CTRA","OVV","SM","MGY","MTDR","HP","DINO","DKL","TRGP","WMB",
     ],
     "Materials": [
         "LIN","APD","ECL","SHW","NEM","FCX","NUE","VMC","MLM","ALB",
         "CF","MOS","IFF","PPG","RPM","EMN","LYB","DD","DOW","CE",
-        "AXTA","PKG","IP","WRK","SEE","SON","GEF","SLVM","TREX","UFPI",
+        "AXTA","PKG","IP","SW","SEE","SON","GEF","SLVM","TREX","UFPI",
     ],
     "Real Estate": [
         "PLD","AMT","EQIX","CCI","PSA","O","DLR","WELL","SPG","VTR",
         "EXR","AVB","EQR","UDR","CPT","MAA","NNN","VICI","MPW","OHI",
-        "PEAK","ARE","BXP","SLG","KIM","REG","FRT","ACC","ELS","SUI",
+        "DOC","ARE","BXP","SLG","KIM","REG","FRT","INVH","ELS","SUI",
     ],
     "Utilities": [
         "NEE","DUK","SO","D","AEP","EXC","XEL","ES","WEC","ED",
@@ -65,8 +67,8 @@ SECTOR_UNIVERSE = {
     ],
     "Communication Services": [
         "GOOGL","META","NFLX","DIS","CMCSA","T","VZ","TMUS","EA","TTWO",
-        "ATVI","FOXA","IPG","OMC","PARA","WBD","LYV","MTCH","ZM","SNAP",
-        "PINS","RBLX","SPOT","ROKU","SIRI","IAC","NLSN","NYT","NWSA","LBRDA",
+        "CHTR","FOXA","IPG","OMC","PARA","WBD","LYV","MTCH","ZM","SNAP",
+        "PINS","RBLX","SPOT","ROKU","SIRI","IAC","TKO","NYT","NWSA","LBRDA",
     ],
 }
 
@@ -151,8 +153,9 @@ def _polygon_fetch_chunk(ticker: str, start: str, end: str, api_key: str,
 def _fetch_ohlcv(ticker, start, end, api_key, log=print):
     cache_key = f"{ticker}_{start}_{end}"
 
-    # 1. In-memory cache (fastest)
-    cached = _PORT_CACHE.get(cache_key)
+    # 1. In-memory cache (fastest) — lock-protected, Streamlit sessions are concurrent
+    with _PORT_CACHE_LOCK:
+        cached = _PORT_CACHE.get(cache_key)
     if cached and (time.time() - cached["ts"]) < CACHE_TTL:
         return cached["df"]
 
@@ -162,7 +165,8 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
         try:
             df = pd.DataFrame(db_hit)
             df["Date"] = pd.to_datetime(df["Date"])
-            _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
+            with _PORT_CACHE_LOCK:
+                _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
             return df
         except Exception:
             pass
@@ -197,7 +201,8 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
     df = df[["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]]
     df = df.drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
 
-    _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
+    with _PORT_CACHE_LOCK:
+        _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
     try:
         cache_set(f"ohlcv_{cache_key}",
                   df.assign(Date=df["Date"].astype(str)).to_dict(orient="records"),
@@ -221,7 +226,9 @@ def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
         df = _fetch_ohlcv(ticker, start_s, end_s, api_key, log=lambda m: msgs.append(m))
         return ticker, df, msgs
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    # max_workers=2: parallel fetches are faster, but precompute learned the hard
+    # way that >2 concurrent Polygon requests cascade into 429 storms on free tier.
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(fetch_one, t): t for t in tickers}
         for future in as_completed(futures):
             ticker, df, msgs = future.result()
@@ -255,6 +262,10 @@ def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
         failed.extend(short_tickers)
     close_df   = close_df.ffill().dropna()
     returns_df = close_df.pct_change().dropna()
+
+    # Normalize price_dict shape to match the cached path — callers should rely on
+    # a single {ticker: DataFrame(Date, Ticker, Close)} contract regardless of path.
+    price_dict = _close_df_to_price_dict(close_df)
 
     log(f"   ✅ {len(price_dict)} tickers, {len(returns_df)} trading days")
     return price_dict, close_df, returns_df, failed
@@ -447,7 +458,7 @@ def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print
                                       log=lambda m: msgs.append(m))
                     return ticker, df, msgs
 
-                with ThreadPoolExecutor(max_workers=3) as ex:
+                with ThreadPoolExecutor(max_workers=2) as ex:
                     for ticker, df, msgs in ex.map(_fetch_new, close_df.columns):
                         thread_logs.extend(msgs)
                         if df is not None and len(df) > 0:

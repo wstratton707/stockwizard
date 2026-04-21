@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import time
 
-from constants import RISK_FREE_RATE
+from constants import get_risk_free_rate
 
 POLYGON_BASE  = "https://api.polygon.io"
 _API_CACHE    = {}
@@ -170,8 +170,9 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
     ann_ret  = ret.mean() * 252
     ann_std  = ret.std() * np.sqrt(252)
     downside = ret[ret < 0].std() * np.sqrt(252)
-    df["Sharpe_Ratio"]  = (ann_ret - RISK_FREE_RATE) / ann_std  if ann_std  else np.nan
-    df["Sortino_Ratio"] = (ann_ret - RISK_FREE_RATE) / downside if downside else np.nan
+    rfr      = get_risk_free_rate()
+    df["Sharpe_Ratio"]  = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
+    df["Sortino_Ratio"] = (ann_ret - rfr) / downside if downside else np.nan
 
     return df.sort_values("Date").reset_index(drop=True)
 
@@ -311,8 +312,9 @@ def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log
     ann_ret  = ret.mean() * 252
     ann_std  = ret.std() * np.sqrt(252)
     downside = ret[ret < 0].std() * np.sqrt(252)
-    df["Sharpe_Ratio"]  = (ann_ret - RISK_FREE_RATE) / ann_std  if ann_std  else np.nan
-    df["Sortino_Ratio"] = (ann_ret - RISK_FREE_RATE) / downside if downside else np.nan
+    rfr      = get_risk_free_rate()
+    df["Sharpe_Ratio"]  = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
+    df["Sortino_Ratio"] = (ann_ret - rfr) / downside if downside else np.nan
 
     return df.sort_values("Date").reset_index(drop=True)
 

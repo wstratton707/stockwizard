@@ -153,8 +153,14 @@ def _add_combined_scores(rankings: dict) -> dict:
 
 # ── Main computation ───────────────────────────────────────────────────────────
 
-def compute_rankings() -> dict:
-    """Fetch prices and compute multi-factor scores for the full universe."""
+def compute_rankings(sector_filter: list[str] | None = None) -> dict:
+    """Fetch prices and compute multi-factor scores for the full universe.
+
+    sector_filter: if given, only fetch tickers in these sectors. Tickers from
+    other sectors are pulled from today's existing cache (from an earlier
+    workflow run) so the final combined-score normalisation still spans the
+    full universe.
+    """
 
     # Build ticker → sector map from entire universe
     universe: dict[str, str] = {}
@@ -167,16 +173,40 @@ def compute_rankings() -> dict:
                  "TLT": "Government", "IEF": "Government"}.items():
         universe.setdefault(t, s)
 
-    all_tickers = list(universe.keys())
-    print(f"Computing multi-factor rankings for {len(all_tickers)} tickers...")
+    # Resume: pull anything already computed today (partial checkpoint or prior
+    # workflow batch) and skip re-fetching it.
+    raw: dict = {}
+    existing = cache_get(CACHE_KEY) or {}
+    if isinstance(existing, dict):
+        for k, v in existing.items():
+            if k != "_meta" and isinstance(v, dict) and "sharpe" in v:
+                raw[k] = v
+        if raw:
+            print(f"Resuming: {len(raw)} tickers already cached for {TODAY}.\n")
+
+    # Decide which tickers this run is responsible for
+    if sector_filter:
+        allowed = {t for s in sector_filter for t in SECTOR_UNIVERSE.get(s, [])}
+        # Always include the small extras (bond ETFs + index proxies) so a
+        # single-sector test run still produces a valid combined score.
+        allowed |= set(BOND_ETFS.values()) | {"SPY", "QQQ", "GLD", "TLT", "IEF"}
+        run_tickers = [t for t in universe if t in allowed and t not in raw]
+        print(f"Sector filter: {sector_filter} → {len(run_tickers)} tickers to fetch")
+    else:
+        run_tickers = [t for t in universe if t not in raw]
+
+    if not run_tickers:
+        print("Nothing to fetch — everything is already cached.")
+        return _add_combined_scores(raw)
+
+    print(f"Computing multi-factor rankings for {len(run_tickers)} tickers...")
     print(f"Factors: Sharpe (50%) · 6M Momentum (30%) · 3M Momentum (20%)\n")
 
-    raw: dict = {}
     done = 0
     CHECKPOINT_EVERY = 50  # write partial results to Supabase every N tickers
 
     with ThreadPoolExecutor(max_workers=1) as ex:
-        futures = {ex.submit(_fetch_year, t): t for t in all_tickers}
+        futures = {ex.submit(_fetch_year, t): t for t in run_tickers}
         for future in as_completed(futures):
             ticker = futures[future]
             done  += 1
@@ -186,22 +216,22 @@ def compute_rankings() -> dict:
                     factors = _compute_factors(prices)
                     if factors:
                         raw[ticker] = {"ticker": ticker, "sector": universe[ticker], **factors}
-                        print(f"  [{done:>3}/{len(all_tickers)}] ✓ {ticker:<6}  "
+                        print(f"  [{done:>3}/{len(run_tickers)}] ✓ {ticker:<6}  "
                               f"Sharpe={factors['sharpe']:+.2f}  "
                               f"6M={factors['mom_6m']:+.1f}%  "
                               f"3M={factors['mom_3m']:+.1f}%")
                     else:
-                        print(f"  [{done:>3}/{len(all_tickers)}] ⚠ {ticker} — insufficient data")
+                        print(f"  [{done:>3}/{len(run_tickers)}] ⚠ {ticker} — insufficient data")
                 else:
-                    print(f"  [{done:>3}/{len(all_tickers)}] ✗ {ticker} — fetch failed")
+                    print(f"  [{done:>3}/{len(run_tickers)}] ✗ {ticker} — fetch failed")
             except Exception as e:
-                print(f"  [{done:>3}/{len(all_tickers)}] ✗ {ticker} — {e}")
+                print(f"  [{done:>3}/{len(run_tickers)}] ✗ {ticker} — {e}")
 
             # Checkpoint: save partial results so a killed run isn't wasted
             if done % CHECKPOINT_EVERY == 0 and raw:
                 partial = _add_combined_scores(dict(raw))
                 partial["_meta"] = {"computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
-                                    "partial": True, "tickers_done": done, "tickers_total": len(all_tickers)}
+                                    "partial": True, "tickers_done": done, "tickers_total": len(run_tickers)}
                 cache_set(CACHE_KEY, partial, ttl_hours=26)
                 print(f"  💾 Checkpoint saved — {len(partial) - 1} tickers ranked so far")
 
@@ -211,29 +241,51 @@ def compute_rankings() -> dict:
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
+def _parse_sectors_arg() -> list[str] | None:
+    """Parse --sectors=A,B,C from sys.argv. Returns None if not present."""
+    for arg in sys.argv[1:]:
+        if arg.startswith("--sectors="):
+            return [s.strip() for s in arg.split("=", 1)[1].split(",") if s.strip()]
+    return None
+
+
 def main():
     if not POLYGON_API_KEY:
         print("ERROR: POLYGON_API_KEY not set.")
         sys.exit(1)
 
+    sector_filter = _parse_sectors_arg()
+
     print(f"StockWizard Daily Precompute — {TODAY}")
     print("=" * 55)
 
+    # When a sector filter is given, this is one half of a split run — skip the
+    # "already cached today" guard so the second batch always runs.
     existing = cache_get(CACHE_KEY)
-    if existing and "--force" not in sys.argv:
-        print(f"Rankings already cached for {TODAY} ({len(existing)} tickers).")
-        print("Pass --force to recompute.")
-        return
+    if existing and "--force" not in sys.argv and not sector_filter:
+        meta = existing.get("_meta", {}) if isinstance(existing, dict) else {}
+        if not meta.get("partial"):
+            print(f"Rankings already cached for {TODAY} ({len(existing)} tickers).")
+            print("Pass --force to recompute.")
+            return
 
     t0       = time.time()
-    rankings = compute_rankings()
+    rankings = compute_rankings(sector_filter=sector_filter)
 
     if not rankings:
         print("ERROR: No rankings computed — check API key and connectivity.")
         sys.exit(1)
 
-    # Stamp when rankings were computed so the UI can show freshness
-    rankings["_meta"] = {"computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}
+    # Stamp when rankings were computed so the UI can show freshness.
+    # If this was a sector-filtered run that didn't cover the whole universe,
+    # flag it as partial so the next workflow batch knows to merge in.
+    full_universe_size = sum(len(v) for v in SECTOR_UNIVERSE.values()) + len(BOND_ETFS) + 5
+    is_partial = sector_filter is not None and len(rankings) < full_universe_size * 0.9
+    rankings["_meta"] = {
+        "computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        "partial": is_partial,
+        "tickers_done": len(rankings),
+    }
     ok      = cache_set(CACHE_KEY, rankings, ttl_hours=26)
     elapsed = time.time() - t0
 
@@ -241,8 +293,12 @@ def main():
     print(f"Done in {elapsed:.0f}s — {len(rankings)} tickers ranked")
     print(f"Supabase write: {'✓ success' if ok else '✗ failed (check credentials)'}")
 
-    # Pre-warm portfolio price cache so first user run is instant
-    warm_portfolio_cache(rankings)
+    # Pre-warm portfolio price cache so first user run is instant.
+    # Skip on partial batches — top-per-sector picks would be incomplete.
+    if not is_partial:
+        warm_portfolio_cache(rankings)
+    else:
+        print("Skipping portfolio cache warm — partial batch, will run after final batch.")
 
     # Top 15 by combined score
     top = sorted(rankings.values(), key=lambda x: x.get("score", 0), reverse=True)[:15]
@@ -284,7 +340,7 @@ def warm_portfolio_cache(rankings: dict):
 
     try:
         _, close_df, _, failed = fetch_portfolio_prices_cached(
-            candidates, period_years=7, api_key=POLYGON_API_KEY, log=print
+            candidates, period_years=2, api_key=POLYGON_API_KEY, log=print
         )
         print(f"Portfolio cache warmed — {len(close_df.columns)} tickers ready")
         if failed:

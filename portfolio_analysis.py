@@ -171,8 +171,8 @@ def generate_efficient_frontier(returns_df, n_portfolios=8000):
     mu   = returns_df.mean().values * 252
     cov  = returns_df.cov().values  * 252
 
-    np.random.seed(42)
-    W    = np.random.dirichlet(np.ones(n), size=n_portfolios)   # (n_portfolios, n)
+    rng  = np.random.default_rng(42)   # local RNG — no global-state pollution
+    W    = rng.dirichlet(np.ones(n), size=n_portfolios)         # (n_portfolios, n)
     rets = W @ mu                                                # (n_portfolios,)
     vols = np.sqrt(np.einsum("ij,jk,ik->i", W, cov, W))        # (n_portfolios,)
     rfr  = get_risk_free_rate()
@@ -284,7 +284,12 @@ def compute_backtest_metrics(backtest_df, starting_capital):
     excess   = daily_ret - rf_daily
     sharpe   = (excess.mean() * 252) / (excess.std() * np.sqrt(252)) if excess.std() > 0 else 0
     down_ret = excess[excess < 0]
-    sortino  = (excess.mean() * 252) / (down_ret.std() * np.sqrt(252)) if down_ret.std() > 0 else 0
+    # Require at least ~1 month of downside days before computing Sortino —
+    # with a tiny sample, std() is noisy and can blow the ratio up.
+    if len(down_ret) >= 20 and down_ret.std() > 0:
+        sortino = (excess.mean() * 252) / (down_ret.std() * np.sqrt(252))
+    else:
+        sortino = 0
 
     # Drawdown
     peak     = port.cummax()
@@ -393,35 +398,45 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
     n_assets      = len(tickers)
     forecast_days = forecast_years * 252
     monthly_days  = 21
-    np.random.seed(None)
 
-    paths    = np.zeros((forecast_days + 1, n_simulations))
+    # Local RNG — deterministic (seed=42) so the same inputs produce the same
+    # output, and doesn't pollute global numpy random state.
+    rng = np.random.default_rng(42)
+
+    paths    = np.empty((forecast_days + 1, n_simulations))
     paths[0] = starting_capital
 
-    for sim in range(n_simulations):
-        # Draw independent standard normals, shape (forecast_days, n_assets)
-        Z = np.random.standard_normal((forecast_days, n_assets))
-        # Correlate using Cholesky factor, shape (forecast_days, n_assets)
-        Z_corr = Z @ L.T
-        # Ito-corrected log returns per asset, shape (forecast_days, n_assets)
-        log_ret = (mu_vec - 0.5 * sigma_vec ** 2) + sigma_vec * Z_corr
-        # Portfolio daily log return as weighted sum, shape (forecast_days,)
-        port_log_ret      = log_ret @ w_arr
-        daily_factors_sim = np.exp(port_log_ret)
+    # Drift + Ito correction term is constant across sims — precompute it once.
+    drift_vec = mu_vec - 0.5 * sigma_vec ** 2            # shape (n_assets,)
+    contrib_days = np.arange(monthly_days, forecast_days + 1, monthly_days)
 
-        # Efficient path construction using cumulative product.
-        # Each monthly contribution at day t_c grows forward by CP[t]/CP[t_c],
-        # so: path[t] = CP[t] * (capital + monthly * sum_{t_c<=t} 1/CP[t_c])
-        CP    = np.empty(forecast_days + 1)
-        CP[0] = 1.0
-        CP[1:] = np.cumprod(daily_factors_sim)
+    # Batch simulations to cap memory. One batch of B sims holds
+    # B * forecast_days * n_assets floats ≈ 200 * 2520 * 18 * 8 bytes ≈ 72 MB.
+    BATCH = 200
 
-        inv_contrib = np.zeros(forecast_days + 1)
-        for t_c in range(monthly_days, forecast_days + 1, monthly_days):
-            inv_contrib[t_c] = 1.0 / CP[t_c]
-        running_inv = np.cumsum(inv_contrib)
+    for start in range(0, n_simulations, BATCH):
+        b = min(BATCH, n_simulations - start)
+        # Correlated standard normals in one shot: (b, days, n_assets)
+        Z       = rng.standard_normal((b, forecast_days, n_assets))
+        Z_corr  = Z @ L.T
+        log_ret = drift_vec + sigma_vec * Z_corr           # broadcast
+        # Portfolio daily log-return per sim: (b, days)
+        port_log_ret  = log_ret @ w_arr
+        daily_factors = np.exp(port_log_ret)
 
-        paths[:, sim] = CP * (starting_capital + monthly_contribution * running_inv)
+        # Cumulative product along time axis, prepend 1.0 to align with day 0
+        CP        = np.empty((b, forecast_days + 1))
+        CP[:, 0]  = 1.0
+        CP[:, 1:] = np.cumprod(daily_factors, axis=1)
+
+        # Contribution accumulator: at each contrib_day t_c, add 1/CP[:, t_c]
+        inv_contrib = np.zeros((b, forecast_days + 1))
+        inv_contrib[:, contrib_days] = 1.0 / CP[:, contrib_days]
+        running_inv = np.cumsum(inv_contrib, axis=1)
+
+        # Final path values: CP scales starting capital + all past contributions
+        batch_paths = CP * (starting_capital + monthly_contribution * running_inv)
+        paths[:, start:start + b] = batch_paths.T
 
     def _total_invested(yr):
         """Total capital put in by the end of `yr` years (contributions are monthly)."""

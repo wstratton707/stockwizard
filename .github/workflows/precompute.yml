@@ -1,4 +1,8 @@
-name: Daily Precompute Rankings
+name: Daily Precompute Rankings (AM batch)
+
+# AM batch: first 5 sectors (~165 tickers). The PM workflow finishes the rest.
+# Splitting the run lets each batch comfortably fit in GitHub Actions' 6h
+# job limit even when Polygon free-tier rate limits force long backoffs.
 
 on:
   schedule:
@@ -8,7 +12,7 @@ on:
 jobs:
   precompute:
     runs-on: ubuntu-latest
-    timeout-minutes: 90        # Serial fetch of ~338 tickers needs up to 75 min on free tier
+    timeout-minutes: 90
 
     steps:
       - name: Checkout code
@@ -23,13 +27,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run precompute
+      - name: Run precompute (AM batch)
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python precompute.py
+        run: python precompute.py "--sectors=Technology,Health Care,Financials,Consumer Discretionary,Consumer Staples"
 
       - name: Report result
         if: always()
-        run: echo "Precompute finished at $(date -u)"
+        run: echo "AM precompute finished at $(date -u)"

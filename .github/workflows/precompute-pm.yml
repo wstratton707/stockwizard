@@ -1,0 +1,39 @@
+name: Daily Precompute Rankings (PM batch)
+
+# PM batch: remaining 6 sectors (~180 tickers). Reads the AM batch's partial
+# cache, fetches only the missing tickers, then re-normalises combined scores
+# across the full universe and clears the partial flag.
+
+on:
+  schedule:
+    - cron: '30 16 * * 1-5'  # 12:30 PM Eastern (16:30 UTC), weekdays — 2.5h after AM
+  workflow_dispatch:
+
+jobs:
+  precompute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run precompute (PM batch)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python precompute.py "--sectors=Industrials,Energy,Materials,Real Estate,Utilities,Communication Services"
+
+      - name: Report result
+        if: always()
+        run: echo "PM precompute finished at $(date -u)"
