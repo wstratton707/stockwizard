@@ -681,26 +681,25 @@ with tab1:
         _poly_ticker = CRYPTO_TICKERS.get(ticker_input, (f"X:{ticker_input}USD", None))[0] \
                        if is_crypto else ticker_input
 
-        # Asset type badge in UI
-        if is_crypto:
-            st.markdown(f'<span style="background:#1d4ed8;color:#0f172a;font-size:0.7rem;font-weight:700;'
-                        f'padding:3px 10px;border-radius:2px;letter-spacing:0.5px">CRYPTO</span>',
-                        unsafe_allow_html=True)
-        elif is_etf:
-            st.markdown(f'<span style="background:#4a9eff;color:#0f172a;font-size:0.7rem;font-weight:700;'
-                        f'padding:3px 10px;border-radius:2px;letter-spacing:0.5px">ETF</span>',
-                        unsafe_allow_html=True)
-
-        # Live price ticker
+        # Live price ticker — fetched here so Day Trader Mode can use it too.
+        # The full hero panel (with day/52W range bars, etc.) is rendered after
+        # df is loaded inside Investor Mode below.
         live = get_live_price(_poly_ticker, POLYGON_API_KEY)
-        if live:
+
+        # Day Trader Mode skips the full hero — show the slim live card here.
+        if mode == "Day Trader Mode" and live:
+            asset_tag = ""
+            if is_crypto:
+                asset_tag = '<span class="stock-hero-tag crypto" style="margin-left:0.6rem">CRYPTO</span>'
+            elif is_etf:
+                asset_tag = '<span class="stock-hero-tag etf" style="margin-left:0.6rem">ETF</span>'
             sign       = "+" if live["change"] >= 0 else ""
             change_cls = "live-change-pos" if live["change"] >= 0 else "live-change-neg"
             st.markdown(f"""
             <div class="live-ticker">
                 <div>
                     <span style="color:#6b7a8d;font-size:0.8rem;font-weight:600;
-                                 letter-spacing:0.5px;text-transform:uppercase">{ticker_input}</span>
+                                 letter-spacing:0.5px;text-transform:uppercase">{ticker_input}</span>{asset_tag}
                     <div class="live-price">${live['price']:,.2f}</div>
                     <span class="{change_cls}">{sign}{live['change']:,.2f} ({sign}{live['pct']:.2f}%)</span>
                 </div>
@@ -1064,8 +1063,118 @@ with tab1:
                     )
             st.markdown("---")
 
-            st.markdown('<div class="section-header">Key Metrics</div>', unsafe_allow_html=True)
-            # Last metric varies by asset type
+            # ── Stock Hero Panel ──────────────────────────────────────────────
+            # One panel: identity (ticker + name + tags), big price + change,
+            # plus a stat ribbon with day range, 52W range, volume, etc.
+            _company_name = (company_details.get("Name") if not is_crypto
+                             else crypto_details.get("name", ticker_input))
+            _company_name = _company_name or ticker_input
+            _exchange     = company_details.get("Exchange", "") if not is_crypto else "Crypto"
+            _sector_lbl   = sector if sector and sector != "Unknown" else ""
+
+            # Tag chips (sector, exchange, asset-type, live)
+            _tags = []
+            if _sector_lbl:
+                _tags.append(f'<span class="stock-hero-tag">{_sector_lbl}</span>')
+            if _exchange:
+                _tags.append(f'<span class="stock-hero-tag">{_exchange}</span>')
+            if is_crypto:
+                _tags.append('<span class="stock-hero-tag crypto">CRYPTO</span>')
+            elif is_etf:
+                _tags.append('<span class="stock-hero-tag etf">ETF</span>')
+            if live:
+                _tags.append('<span class="stock-hero-tag live">● LIVE</span>')
+
+            # Price + change — prefer live tick, fall back to last close
+            _price_now    = float(live["price"]) if live else float(latest["Close"])
+            _change_abs   = float(live["change"]) if live else (float(latest["Close"]) - float(df["Close"].iloc[-2]) if len(df) > 1 else 0.0)
+            _change_pct   = float(live["pct"])    if live else (_change_abs / float(df["Close"].iloc[-2]) * 100 if len(df) > 1 and df["Close"].iloc[-2] else 0.0)
+            _change_cls   = "pos" if _change_abs >= 0 else "neg"
+            _change_arrow = "▲" if _change_abs >= 0 else "▼"
+            _change_sign  = "+" if _change_abs >= 0 else ""
+            _live_meta    = (f'<div class="stock-hero-meta"><span class="stock-hero-meta-dot"></span>'
+                             f'Live · Updated {live["time"]}</div>') if live else ""
+
+            # Day range fill % (where current price sits between today's low and high)
+            _day_open  = float(latest.get("Open",  _price_now))
+            _day_high  = float(latest.get("High",  _price_now))
+            _day_low   = float(latest.get("Low",   _price_now))
+            _day_span  = max(_day_high - _day_low, 1e-9)
+            _day_pct   = max(0.0, min(100.0, (_price_now - _day_low) / _day_span * 100))
+
+            # 52W range fill %
+            _w52_high  = float(latest["52W_High"]) if pd.notna(latest.get("52W_High")) else _day_high
+            _w52_low   = float(latest["52W_Low"])  if pd.notna(latest.get("52W_Low"))  else _day_low
+            _w52_span  = max(_w52_high - _w52_low, 1e-9)
+            _w52_pct   = max(0.0, min(100.0, (_price_now - _w52_low) / _w52_span * 100))
+
+            # Volume vs 20d average
+            _vol       = float(latest.get("Volume", 0))
+            _vol_avg   = float(latest.get("Vol_MA20", 0)) if pd.notna(latest.get("Vol_MA20")) else 0
+            def _fmt_vol(v):
+                if v >= 1e9: return f"{v/1e9:.2f}B"
+                if v >= 1e6: return f"{v/1e6:.2f}M"
+                if v >= 1e3: return f"{v/1e3:.1f}K"
+                return f"{v:,.0f}"
+            _vol_ratio = (_vol / _vol_avg - 1) * 100 if _vol_avg > 0 else None
+            _vol_sub   = (f'<div class="stock-hero-stat-sub">'
+                          f'<span style="color:{"#059669" if _vol_ratio >= 0 else "#dc2626"}">'
+                          f'{"+" if _vol_ratio >= 0 else ""}{_vol_ratio:.0f}%</span> vs 20-day avg</div>'
+                          ) if _vol_ratio is not None else '<div class="stock-hero-stat-sub">&nbsp;</div>'
+
+            st.markdown(f"""
+            <div class="stock-hero">
+              <div class="stock-hero-top">
+                <div class="stock-hero-id">
+                  <div class="stock-hero-symbol">{ticker_input}</div>
+                  <div class="stock-hero-name">{_company_name}</div>
+                  <div class="stock-hero-tags">{''.join(_tags)}</div>
+                </div>
+                <div class="stock-hero-price-block">
+                  <div class="stock-hero-price">${_price_now:,.2f}</div>
+                  <span class="stock-hero-change {_change_cls}">
+                    <span class="stock-hero-change-arrow">{_change_arrow}</span>
+                    {_change_sign}{_change_abs:,.2f} ({_change_sign}{_change_pct:.2f}%)
+                  </span>
+                  {_live_meta}
+                </div>
+              </div>
+              <div class="stock-hero-ribbon">
+                <div class="stock-hero-stat">
+                  <div class="stock-hero-stat-lbl">Open</div>
+                  <div class="stock-hero-stat-val">${_day_open:,.2f}</div>
+                  <div class="stock-hero-stat-sub">Prev close ${(live['prev'] if live and live.get('prev') else float(df['Close'].iloc[-2]) if len(df) > 1 else _price_now):,.2f}</div>
+                </div>
+                <div class="stock-hero-stat">
+                  <div class="stock-hero-stat-lbl">Day Range</div>
+                  <div class="range-bar">
+                    <div class="range-bar-marker" style="left:{_day_pct:.1f}%"></div>
+                  </div>
+                  <div class="range-bar-labels"><span>${_day_low:,.2f}</span><span>${_day_high:,.2f}</span></div>
+                </div>
+                <div class="stock-hero-stat">
+                  <div class="stock-hero-stat-lbl">52-Week Range</div>
+                  <div class="range-bar">
+                    <div class="range-bar-marker" style="left:{_w52_pct:.1f}%"></div>
+                  </div>
+                  <div class="range-bar-labels"><span>${_w52_low:,.2f}</span><span>${_w52_high:,.2f}</span></div>
+                </div>
+                <div class="stock-hero-stat">
+                  <div class="stock-hero-stat-lbl">Volume</div>
+                  <div class="stock-hero-stat-val">{_fmt_vol(_vol)}</div>
+                  {_vol_sub}
+                </div>
+                <div class="stock-hero-stat">
+                  <div class="stock-hero-stat-lbl">Period Return</div>
+                  <div class="stock-hero-stat-val {'pos' if period_ret > 0 else 'neg' if period_ret < 0 else ''}">{period_ret:+.2f}%</div>
+                  <div class="stock-hero-stat-sub">{period_label}</div>
+                </div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ── Secondary Key Metrics row (4 aligned cards) ───────────────────
+            # Asset-specific 4th metric
             if is_crypto:
                 mc_usd = crypto_details.get("market_cap_usd", 0)
                 if mc_usd > 1e9:
@@ -1087,36 +1196,27 @@ with tab1:
             vol_val = df["Volatility_20d"].iloc[-1]
             _TOOLTIPS = {
                 "Sharpe Ratio":    "Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent. Higher = better return per unit of risk.",
+                "Sortino Ratio":   "Like Sharpe but only penalises downside volatility. Higher is better.",
                 "Ann. Volatility": "Annualized standard deviation of daily returns. Higher = more price swings. S&P 500 averages ~15%.",
-                "Period Return":   "Total price return over the selected date range.",
-                "52W High":        "Highest closing price in the last 52 weeks.",
-                "52W Low":         "Lowest closing price in the last 52 weeks.",
-                "Current Price":   "Most recent closing price from Polygon.io.",
             }
-            _metric_rows = [
-                [
-                    ("Current Price",   f"${latest['Close']:,.2f}",                            "neutral"),
-                    ("Period Return",   f"{period_ret:+.1f}%",                                 pos_neg(period_ret)),
-                    ("52W High",        f"${latest['52W_High']:,.2f}" if pd.notna(latest.get('52W_High')) else "N/A", "neutral"),
-                    ("52W Low",         f"${latest['52W_Low']:,.2f}"  if pd.notna(latest.get('52W_Low'))  else "N/A", "neutral"),
-                ],
-                [
-                    ("Sharpe Ratio",    f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A",        pos_neg(sharpe) if pd.notna(sharpe) else "neutral"),
-                    ("Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A", "neutral"),
-                    (extra_label,       extra_value,                                            "neutral"),
-                ],
+            _row_items = [
+                ("Sharpe Ratio",    f"{sharpe:.2f}"  if pd.notna(sharpe)  else "N/A",
+                                    pos_neg(sharpe)  if pd.notna(sharpe)  else "neutral"),
+                ("Sortino Ratio",   f"{sortino:.2f}" if pd.notna(sortino) else "N/A",
+                                    pos_neg(sortino) if pd.notna(sortino) else "neutral"),
+                ("Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A", "neutral"),
+                (extra_label,       extra_value,                                            "neutral"),
             ]
-            for row_items in _metric_rows:
-                row_cols = st.columns(len(row_items))
-                for col, (label, value, cls) in zip(row_cols, row_items):
-                    tip = _TOOLTIPS.get(label, "")
-                    tip_html = f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{tip}</span></span>' if tip else ""
-                    with col:
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">{label}{tip_html}</div>
-                            <div class="metric-value {cls}">{value}</div>
-                        </div>""", unsafe_allow_html=True)
+            row_cols = st.columns(len(_row_items))
+            for col, (label, value, cls) in zip(row_cols, _row_items):
+                tip = _TOOLTIPS.get(label, "")
+                tip_html = f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{tip}</span></span>' if tip else ""
+                with col:
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="metric-label">{label}{tip_html}</div>
+                        <div class="metric-value {cls}">{value}</div>
+                    </div>""", unsafe_allow_html=True)
 
             # ── ETF Profile Panel ─────────────────────────────────────────────
             if is_etf:
@@ -1231,33 +1331,71 @@ with tab1:
                         {"&nbsp;·&nbsp;<strong>ATH Date:</strong> " + ath_date if ath_date else ""}
                     </div>""", unsafe_allow_html=True)
 
+            # ── Chart customization controls ──────────────────────────────────
+            st.markdown('<div class="section-header">Price Chart</div>', unsafe_allow_html=True)
+            _ctrl1, _ctrl2, _ctrl3, _ctrl4, _ctrl5, _ctrl6, _ctrl7 = st.columns([1.2, 1, 1, 1, 1, 1.1, 1.1])
+            with _ctrl1:
+                _chart_type = st.selectbox("Chart type", ["Area", "Line", "Candlestick"],
+                                            index=0, key="main_chart_type",
+                                            label_visibility="visible")
+            with _ctrl2:
+                _show_ma20  = st.checkbox("MA 20",  value=False, key="main_show_ma20")
+            with _ctrl3:
+                _show_ma50  = st.checkbox("MA 50",  value=True,  key="main_show_ma50")
+            with _ctrl4:
+                _show_ma200 = st.checkbox("MA 200", value=True,  key="main_show_ma200")
+            with _ctrl5:
+                _show_vol   = st.checkbox("Volume", value=False, key="main_show_volume")
+            with _ctrl6:
+                _show_sr    = st.checkbox("Support/Resistance", value=bool(do_sr), key="main_show_sr")
+            with _ctrl7:
+                _show_tag   = st.checkbox("Price marker", value=True, key="main_show_tag")
+
             fig = go.Figure()
 
-            # ── Price — dominant, strong blue ─────────────────────────────────
-            # Invisible base trace at the min price — used for "tonexty" fill
+            # Compact y-axis padding so the chart breathes
             _close_min = float(df["Close"].min())
-            fig.add_trace(go.Scatter(
-                x=df["Date"], y=[_close_min] * len(df),
-                line=dict(color="rgba(0,0,0,0)", width=0),
-                showlegend=False, hoverinfo="skip",
-            ))
-            fig.add_trace(go.Scatter(
-                x=df["Date"], y=df["Close"],
-                name="Price",
-                line=dict(color="#1d4ed8", width=2.5),
-                fill="tonexty",
-                fillcolor="rgba(37,99,235,0.05)",
-                hovertemplate="$%{y:,.2f}<extra>Price</extra>",
-            ))
 
-            # ── Moving averages — thin, visually distinct ─────────────────────
+            # ── Price — line / area / candle depending on selection ───────────
+            if _chart_type == "Candlestick" and {"Open","High","Low","Close"}.issubset(df.columns):
+                fig.add_trace(go.Candlestick(
+                    x=df["Date"], open=df["Open"], high=df["High"],
+                    low=df["Low"], close=df["Close"],
+                    name="Price",
+                    increasing_line_color="#059669", decreasing_line_color="#dc2626",
+                    increasing_fillcolor="#059669", decreasing_fillcolor="#dc2626",
+                ))
+            elif _chart_type == "Line":
+                fig.add_trace(go.Scatter(
+                    x=df["Date"], y=df["Close"],
+                    name="Price",
+                    line=dict(color="#1d4ed8", width=2.5),
+                    hovertemplate="$%{y:,.2f}<extra>Price</extra>",
+                ))
+            else:  # Area (default)
+                # Invisible base trace at min price — used for "tonexty" fill
+                fig.add_trace(go.Scatter(
+                    x=df["Date"], y=[_close_min] * len(df),
+                    line=dict(color="rgba(0,0,0,0)", width=0),
+                    showlegend=False, hoverinfo="skip",
+                ))
+                fig.add_trace(go.Scatter(
+                    x=df["Date"], y=df["Close"],
+                    name="Price",
+                    line=dict(color="#1d4ed8", width=2.5),
+                    fill="tonexty",
+                    fillcolor="rgba(37,99,235,0.05)",
+                    hovertemplate="$%{y:,.2f}<extra>Price</extra>",
+                ))
+
+            # ── Moving averages — gated by checkboxes ─────────────────────────
             _ma_cfg = [
-                (20,  "#f59e0b", 1.0,  "dot",      "MA 20"),
-                (50,  "#8b5cf6", 1.2,  "dash",     "MA 50"),
-                (200, "#f97316", 1.5,  "longdash", "MA 200"),
+                (20,  "#f59e0b", 1.0,  "dot",      "MA 20",  _show_ma20),
+                (50,  "#8b5cf6", 1.2,  "dash",     "MA 50",  _show_ma50),
+                (200, "#f97316", 1.5,  "longdash", "MA 200", _show_ma200),
             ]
-            for ma, color, width, dash, label in _ma_cfg:
-                if f"MA{ma}" in df.columns:
+            for ma, color, width, dash, label, enabled in _ma_cfg:
+                if enabled and f"MA{ma}" in df.columns:
                     fig.add_trace(go.Scatter(
                         x=df["Date"], y=df[f"MA{ma}"],
                         name=label,
@@ -1266,12 +1404,24 @@ with tab1:
                         hovertemplate=f"$%{{y:,.2f}}<extra>MA {ma}</extra>",
                     ))
 
+            # ── Volume bars on secondary axis (optional) ──────────────────────
+            if _show_vol and "Volume" in df.columns:
+                _vol_colors = ["#059669" if c >= o else "#dc2626"
+                               for c, o in zip(df["Close"], df["Open"])] \
+                              if "Open" in df.columns else "#94a3b8"
+                fig.add_trace(go.Bar(
+                    x=df["Date"], y=df["Volume"],
+                    name="Volume", marker_color=_vol_colors,
+                    opacity=0.35, yaxis="y2",
+                    hovertemplate="%{y:,.0f}<extra>Volume</extra>",
+                ))
+
             # ── S/R lines — top 2 only, very subtle ──────────────────────────
             _y_min = df["Close"].min()
             _y_max = df["Close"].max()
             _price_range = _y_max - _y_min
 
-            if do_sr and resistance:
+            if _show_sr and resistance:
                 # Only show resistance levels above current price, top 2
                 _res_above = sorted([r for r in resistance if r > _y_min], reverse=True)[:2]
                 for _i, r in enumerate(_res_above):
@@ -1288,7 +1438,7 @@ with tab1:
                         borderpad=3,
                     )
 
-            if do_sr and support:
+            if _show_sr and support:
                 # Only show support levels below current price, bottom 2
                 _sup_below = sorted([s for s in support if s < _y_max])[:2]
                 for _i, s in enumerate(_sup_below):
@@ -1306,19 +1456,20 @@ with tab1:
                     )
 
             # ── Current price tag ─────────────────────────────────────────────
-            _last = df["Close"].iloc[-1]
-            fig.add_shape(type="line", x0=0, x1=1, xref="paper",
-                          y0=_last, y1=_last,
-                          line=dict(color="#94a3b8", width=1, dash="dot"),
-                          opacity=0.7, layer="above")
-            fig.add_annotation(
-                x=1.01, xref="paper", y=_last, yref="y",
-                text=f"<b>${_last:,.2f}</b>",
-                showarrow=False, xanchor="left",
-                font=dict(color="white", size=11, family="DM Sans"),
-                bgcolor="#2563eb",
-                borderpad=4,
-            )
+            if _show_tag:
+                _last = df["Close"].iloc[-1]
+                fig.add_shape(type="line", x0=0, x1=1, xref="paper",
+                              y0=_last, y1=_last,
+                              line=dict(color="#94a3b8", width=1, dash="dot"),
+                              opacity=0.7, layer="above")
+                fig.add_annotation(
+                    x=1.01, xref="paper", y=_last, yref="y",
+                    text=f"<b>${_last:,.2f}</b>",
+                    showarrow=False, xanchor="left",
+                    font=dict(color="white", size=11, family="DM Sans"),
+                    bgcolor="#2563eb",
+                    borderpad=4,
+                )
 
             fig.update_layout(
                 height=490, template=None,
@@ -1376,8 +1527,18 @@ with tab1:
                     rangemode="normal",
                     nticks=7,
                 ),
+                xaxis_rangeslider_visible=False,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            if _show_vol and "Volume" in df.columns:
+                fig.update_layout(yaxis2=dict(
+                    title=None, overlaying="y", side="left",
+                    showgrid=False, showticklabels=False,
+                    range=[0, float(df["Volume"].max() * 5)],
+                ))
+            st.plotly_chart(fig, use_container_width=True, config={
+                "displaylogo": False,
+                "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
+            })
 
             if "RSI14" in df.columns:
                 st.markdown('<div class="section-header">RSI (14)</div>', unsafe_allow_html=True)
