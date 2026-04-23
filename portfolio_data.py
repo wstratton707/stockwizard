@@ -150,7 +150,20 @@ def _polygon_fetch_chunk(ticker: str, start: str, end: str, api_key: str,
     return []
 
 
+def _week_floor(date_str: str) -> str:
+    """Snap a YYYY-MM-DD date to the Monday of its ISO week.
+    Used to bucket cache keys so all runs Mon-Sun share the same cached data."""
+    dt = datetime.strptime(date_str, "%Y-%m-%d")
+    dt = dt - timedelta(days=dt.weekday())
+    return dt.strftime("%Y-%m-%d")
+
+
 def _fetch_ohlcv(ticker, start, end, api_key, log=print):
+    # Snap to Monday-of-week so every run within the same week reuses one cache
+    # entry. Cost: data is up to 6 days stale at week's end. For 1-2y analysis
+    # windows that shift is negligible.
+    start = _week_floor(start)
+    end   = _week_floor(end)
     cache_key = f"{ticker}_{start}_{end}"
 
     # 1. In-memory cache (fastest) — lock-protected, Streamlit sessions are concurrent

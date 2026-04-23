@@ -62,6 +62,18 @@ _CSS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "styles.css
 with open(_CSS_PATH, "r", encoding="utf-8") as _f:
     st.markdown(f"<style>\n{_f.read()}\n</style>", unsafe_allow_html=True)
 
+# ── Plotly defaults ───────────────────────────────────────────────────────────
+# Hide the Plotly modebar (camera/zoom/pan icons) on every chart by default.
+# The toolbar screams "dev dashboard" — pro fintech sites never show it. Done
+# via monkey-patch so existing st.plotly_chart() callers don't need updating.
+_HIDE_TOOLBAR_CONFIG = {"displayModeBar": False, "displaylogo": False}
+_orig_plotly_chart = st.plotly_chart
+def _plotly_chart_no_toolbar(*args, **kwargs):
+    user_config = kwargs.get("config") or {}
+    kwargs["config"] = {**_HIDE_TOOLBAR_CONFIG, **user_config}
+    return _orig_plotly_chart(*args, **kwargs)
+st.plotly_chart = _plotly_chart_no_toolbar
+
 
 # ── Session state ─────────────────────────────────────────────────────────────
 # DEV_MODE_FREE: is_pro starts True so every feature gate in the app unlocks.
@@ -1077,6 +1089,12 @@ with tab1:
             _company_name = _company_name or ticker_input
             _exchange     = company_details.get("Exchange", "") if not is_crypto else "Crypto"
             _sector_lbl   = sector if sector and sector != "Unknown" else ""
+            # Sector strings from Polygon are SHOUTY ALL-CAPS sometimes — soften
+            # to Title Case and truncate so the tag stays readable.
+            if _sector_lbl and _sector_lbl.isupper():
+                _sector_lbl = _sector_lbl.title().replace("&", "&amp;")
+            if len(_sector_lbl) > 36:
+                _sector_lbl = _sector_lbl[:33] + "…"
 
             # Tag chips (sector, exchange, asset-type, live)
             _tags = []
@@ -1085,11 +1103,11 @@ with tab1:
             if _exchange:
                 _tags.append(f'<span class="stock-hero-tag">{_exchange}</span>')
             if is_crypto:
-                _tags.append('<span class="stock-hero-tag crypto">CRYPTO</span>')
+                _tags.append('<span class="stock-hero-tag crypto">Crypto</span>')
             elif is_etf:
                 _tags.append('<span class="stock-hero-tag etf">ETF</span>')
             if live:
-                _tags.append('<span class="stock-hero-tag live">● LIVE</span>')
+                _tags.append('<span class="stock-hero-tag live">● Live</span>')
 
             # Price + change — prefer live tick, fall back to last close
             _price_now    = float(live["price"]) if live else float(latest["Close"])
@@ -1099,7 +1117,7 @@ with tab1:
             _change_arrow = "▲" if _change_abs >= 0 else "▼"
             _change_sign  = "+" if _change_abs >= 0 else ""
             _live_meta    = (f'<div class="stock-hero-meta"><span class="stock-hero-meta-dot"></span>'
-                             f'Live · Updated {live["time"]}</div>') if live else ""
+                             f'Updated {live["time"]}</div>') if live else ""
 
             # Day range fill % (where current price sits between today's low and high)
             _day_open  = float(latest.get("Open",  _price_now))
@@ -1123,61 +1141,65 @@ with tab1:
                 if v >= 1e3: return f"{v/1e3:.1f}K"
                 return f"{v:,.0f}"
             _vol_ratio = (_vol / _vol_avg - 1) * 100 if _vol_avg > 0 else None
-            _vol_sub   = (f'<div class="stock-hero-stat-sub">'
-                          f'<span style="color:{"#059669" if _vol_ratio >= 0 else "#dc2626"}">'
-                          f'{"+" if _vol_ratio >= 0 else ""}{_vol_ratio:.0f}%</span> vs 20-day avg</div>'
-                          ) if _vol_ratio is not None else '<div class="stock-hero-stat-sub">&nbsp;</div>'
+            # Below-average volume isn't bad; use neutral muted color, only highlight
+            # green when volume is meaningfully above average (>+10%).
+            if _vol_ratio is None:
+                _vol_sub = '<div class="stock-hero-stat-sub">&nbsp;</div>'
+            else:
+                _vol_color = "#059669" if _vol_ratio > 10 else "#94a3b8"
+                _vol_sign  = "+" if _vol_ratio >= 0 else ""
+                _vol_sub   = (f'<div class="stock-hero-stat-sub">'
+                              f'<span style="color:{_vol_color}">{_vol_sign}{_vol_ratio:.0f}%</span>'
+                              f' vs 20-day avg</div>')
 
-            st.markdown(f"""
-            <div class="stock-hero">
-              <div class="stock-hero-top">
-                <div class="stock-hero-id">
-                  <div class="stock-hero-symbol">{ticker_input}</div>
-                  <div class="stock-hero-name">{_company_name}</div>
-                  <div class="stock-hero-tags">{''.join(_tags)}</div>
-                </div>
-                <div class="stock-hero-price-block">
-                  <div class="stock-hero-price">${_price_now:,.2f}</div>
-                  <span class="stock-hero-change {_change_cls}">
-                    <span class="stock-hero-change-arrow">{_change_arrow}</span>
-                    {_change_sign}{_change_abs:,.2f} ({_change_sign}{_change_pct:.2f}%)
-                  </span>
-                  {_live_meta}
-                </div>
-              </div>
-              <div class="stock-hero-ribbon">
-                <div class="stock-hero-stat">
-                  <div class="stock-hero-stat-lbl">Open</div>
-                  <div class="stock-hero-stat-val">${_day_open:,.2f}</div>
-                  <div class="stock-hero-stat-sub">Prev close ${(live['prev'] if live and live.get('prev') else float(df['Close'].iloc[-2]) if len(df) > 1 else _price_now):,.2f}</div>
-                </div>
-                <div class="stock-hero-stat">
-                  <div class="stock-hero-stat-lbl">Day Range</div>
-                  <div class="range-bar">
-                    <div class="range-bar-marker" style="left:{_day_pct:.1f}%"></div>
-                  </div>
-                  <div class="range-bar-labels"><span>${_day_low:,.2f}</span><span>${_day_high:,.2f}</span></div>
-                </div>
-                <div class="stock-hero-stat">
-                  <div class="stock-hero-stat-lbl">52-Week Range</div>
-                  <div class="range-bar">
-                    <div class="range-bar-marker" style="left:{_w52_pct:.1f}%"></div>
-                  </div>
-                  <div class="range-bar-labels"><span>${_w52_low:,.2f}</span><span>${_w52_high:,.2f}</span></div>
-                </div>
-                <div class="stock-hero-stat">
-                  <div class="stock-hero-stat-lbl">Volume</div>
-                  <div class="stock-hero-stat-val">{_fmt_vol(_vol)}</div>
-                  {_vol_sub}
-                </div>
-                <div class="stock-hero-stat">
-                  <div class="stock-hero-stat-lbl">Period Return</div>
-                  <div class="stock-hero-stat-val {'pos' if period_ret > 0 else 'neg' if period_ret < 0 else ''}">{period_ret:+.2f}%</div>
-                  <div class="stock-hero-stat-sub">{period_label}</div>
-                </div>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
+            _prev_close = (live['prev'] if live and live.get('prev')
+                           else float(df['Close'].iloc[-2]) if len(df) > 1 else _price_now)
+            _period_cls = "pos" if period_ret > 0 else ("neg" if period_ret < 0 else "")
+
+            # NOTE: HTML below is intentionally flush-left. Streamlit's markdown
+            # parser treats 4+ space-indented lines as code blocks, which would
+            # leak literal </div> text into the page. Do not re-indent.
+            st.markdown(f"""<div class="stock-hero">
+<div class="stock-hero-top">
+<div class="stock-hero-id">
+<div class="stock-hero-symbol">{ticker_input}</div>
+<div class="stock-hero-name">{_company_name}</div>
+<div class="stock-hero-tags">{''.join(_tags)}</div>
+</div>
+<div class="stock-hero-price-block">
+<div class="stock-hero-price">${_price_now:,.2f}</div>
+<span class="stock-hero-change {_change_cls}"><span class="stock-hero-change-arrow">{_change_arrow}</span>{_change_sign}{_change_abs:,.2f} ({_change_sign}{_change_pct:.2f}%)</span>
+{_live_meta}
+</div>
+</div>
+<div class="stock-hero-ribbon">
+<div class="stock-hero-stat">
+<div class="stock-hero-stat-lbl">Open</div>
+<div class="stock-hero-stat-val">${_day_open:,.2f}</div>
+<div class="stock-hero-stat-sub">Prev close ${_prev_close:,.2f}</div>
+</div>
+<div class="stock-hero-stat">
+<div class="stock-hero-stat-lbl">Day Range</div>
+<div class="range-bar"><div class="range-bar-marker" style="left:{_day_pct:.1f}%"></div></div>
+<div class="range-bar-labels"><span>${_day_low:,.2f}</span><span>${_day_high:,.2f}</span></div>
+</div>
+<div class="stock-hero-stat">
+<div class="stock-hero-stat-lbl">52-Week Range</div>
+<div class="range-bar"><div class="range-bar-marker" style="left:{_w52_pct:.1f}%"></div></div>
+<div class="range-bar-labels"><span>${_w52_low:,.2f}</span><span>${_w52_high:,.2f}</span></div>
+</div>
+<div class="stock-hero-stat">
+<div class="stock-hero-stat-lbl">Volume</div>
+<div class="stock-hero-stat-val">{_fmt_vol(_vol)}</div>
+{_vol_sub}
+</div>
+<div class="stock-hero-stat">
+<div class="stock-hero-stat-lbl">Period Return</div>
+<div class="stock-hero-stat-val {_period_cls}">{period_ret:+.2f}%</div>
+<div class="stock-hero-stat-sub">{period_label}</div>
+</div>
+</div>
+</div>""", unsafe_allow_html=True)
 
             # ── Secondary Key Metrics row (4 aligned cards) ───────────────────
             # Asset-specific 4th metric
@@ -1338,12 +1360,14 @@ with tab1:
                     </div>""", unsafe_allow_html=True)
 
             # ── Chart customization controls ──────────────────────────────────
-            st.markdown('<div class="section-header">Price Chart</div>', unsafe_allow_html=True)
-            _ctrl1, _ctrl2, _ctrl3, _ctrl4, _ctrl5, _ctrl6, _ctrl7 = st.columns([1.2, 1, 1, 1, 1, 1.1, 1.1])
+            # Wider columns + shorter labels so nothing wraps awkwardly. The
+            # main "Price Chart" heading is removed since the controls speak
+            # for themselves.
+            _ctrl1, _ctrl2, _ctrl3, _ctrl4, _ctrl5, _ctrl6, _ctrl7 = \
+                st.columns([1.6, 0.7, 0.7, 0.8, 0.8, 0.6, 0.9])
             with _ctrl1:
-                _chart_type = st.selectbox("Chart type", ["Area", "Line", "Candlestick"],
-                                            index=0, key="main_chart_type",
-                                            label_visibility="visible")
+                _chart_type = st.selectbox("Type", ["Area", "Line", "Candlestick"],
+                                           index=0, key="main_chart_type")
             with _ctrl2:
                 _show_ma20  = st.checkbox("MA 20",  value=False, key="main_show_ma20")
             with _ctrl3:
@@ -1353,9 +1377,9 @@ with tab1:
             with _ctrl5:
                 _show_vol   = st.checkbox("Volume", value=False, key="main_show_volume")
             with _ctrl6:
-                _show_sr    = st.checkbox("Support/Resistance", value=bool(do_sr), key="main_show_sr")
+                _show_sr    = st.checkbox("S/R",    value=bool(do_sr), key="main_show_sr")
             with _ctrl7:
-                _show_tag   = st.checkbox("Price marker", value=True, key="main_show_tag")
+                _show_tag   = st.checkbox("Marker", value=True, key="main_show_tag")
 
             fig = go.Figure()
 
@@ -1422,42 +1446,50 @@ with tab1:
                     hovertemplate="%{y:,.0f}<extra>Volume</extra>",
                 ))
 
-            # ── S/R lines — top 2 only, very subtle ──────────────────────────
-            _y_min = df["Close"].min()
-            _y_max = df["Close"].max()
-            _price_range = _y_max - _y_min
+            # ── S/R lines — clamped to visible y-range so labels don't float ─
+            _y_min = float(df["Close"].min())
+            _y_max = float(df["Close"].max())
+            _y_pad = (_y_max - _y_min) * 0.05
+            _y_floor = _y_min - _y_pad
+            _y_ceil  = _y_max + _y_pad
 
             if _show_sr and resistance:
-                # Only show resistance levels above current price, top 2
-                _res_above = sorted([r for r in resistance if r > _y_min], reverse=True)[:2]
+                # Only show resistance levels INSIDE chart range and above current price
+                _res_above = sorted(
+                    [r for r in resistance if _y_min < r < _y_ceil],
+                    reverse=True,
+                )[:2]
                 for _i, r in enumerate(_res_above):
                     fig.add_shape(type="line", x0=0, x1=1, xref="paper",
                                   y0=r, y1=r,
                                   line=dict(color="#ef4444", width=1, dash="dash"),
                                   opacity=0.4, layer="below")
                     fig.add_annotation(
-                        x=1.01, xref="paper", y=r, yref="y",
-                        text=f"R ${r:,.0f}",
+                        x=1.005, xref="paper", y=r, yref="y",
+                        text=f"Resist ${r:,.0f}",
                         showarrow=False, xanchor="left",
-                        font=dict(color="#ef4444", size=12, family="DM Sans", weight="bold"),
+                        font=dict(color="#ef4444", size=10, family="Inter"),
                         bgcolor="rgba(255,255,255,0.9)",
+                        bordercolor="#fecaca", borderwidth=1,
                         borderpad=3,
                     )
 
             if _show_sr and support:
-                # Only show support levels below current price, bottom 2
-                _sup_below = sorted([s for s in support if s < _y_max])[:2]
+                _sup_below = sorted(
+                    [s for s in support if _y_floor < s < _y_max]
+                )[:2]
                 for _i, s in enumerate(_sup_below):
                     fig.add_shape(type="line", x0=0, x1=1, xref="paper",
                                   y0=s, y1=s,
                                   line=dict(color="#16a34a", width=1, dash="dash"),
                                   opacity=0.4, layer="below")
                     fig.add_annotation(
-                        x=1.01, xref="paper", y=s, yref="y",
-                        text=f"S ${s:,.0f}",
+                        x=1.005, xref="paper", y=s, yref="y",
+                        text=f"Support ${s:,.0f}",
                         showarrow=False, xanchor="left",
-                        font=dict(color="#16a34a", size=12, family="DM Sans", weight="bold"),
+                        font=dict(color="#16a34a", size=10, family="Inter"),
                         bgcolor="rgba(255,255,255,0.9)",
+                        bordercolor="#bbf7d0", borderwidth=1,
                         borderpad=3,
                     )
 
@@ -1469,38 +1501,38 @@ with tab1:
                               line=dict(color="#94a3b8", width=1, dash="dot"),
                               opacity=0.7, layer="above")
                 fig.add_annotation(
-                    x=1.01, xref="paper", y=_last, yref="y",
+                    x=1.005, xref="paper", y=_last, yref="y",
                     text=f"<b>${_last:,.2f}</b>",
                     showarrow=False, xanchor="left",
-                    font=dict(color="white", size=11, family="DM Sans"),
+                    font=dict(color="white", size=11, family="Inter"),
                     bgcolor="#2563eb",
                     borderpad=4,
                 )
 
             fig.update_layout(
-                height=490, template=None,
+                height=480, template=None,
                 plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=10, r=110, t=60, b=30),
+                # Tighter margins; right side reserved for axis labels + price tag
+                margin=dict(l=10, r=95, t=70, b=30),
                 hovermode="x unified",
-                font=dict(family="DM Sans, system-ui, sans-serif"),
+                font=dict(family="Inter, system-ui, sans-serif"),
                 hoverlabel=dict(
                     bgcolor="#0f172a", bordercolor="#334155",
-                    font=dict(color="white", size=12, family="DM Sans"),
+                    font=dict(color="white", size=12, family="Inter"),
                     namelength=-1,
                 ),
-                # Legend inside top-left of plot — below rangeselector
+                # Legend: horizontal strip ABOVE the plot area, transparent
                 legend=dict(
-                    orientation="h", yanchor="top", y=0.99, xanchor="left", x=0.01,
-                    font=dict(size=11, family="DM Sans", color="#374151"),
-                    bgcolor="rgba(255,255,255,0.85)",
-                    bordercolor="#e2e8f0", borderwidth=1,
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0,
+                    font=dict(size=11, family="Inter", color="#64748b"),
+                    bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
                     itemsizing="constant",
                 ),
                 xaxis=dict(
                     title=None,
                     type="date",
                     tickformat="%b '%y",
-                    tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                    tickfont=dict(size=11, color="#94a3b8", family="Inter"),
                     gridcolor="#f1f5f9",
                     showline=True, linecolor="#e2e8f0", linewidth=1,
                     zeroline=False,
@@ -1515,23 +1547,22 @@ with tab1:
                             dict(step="all", label="All"),
                         ],
                         bgcolor="#f8fafc", bordercolor="#e2e8f0", borderwidth=1,
-                        font=dict(family="DM Sans", size=11, color="#475569"),
+                        font=dict(family="Inter", size=11, color="#475569"),
                         activecolor="#2563eb",
-                        x=0.0, xanchor="left", y=1.08, yanchor="bottom",
+                        x=0.0, xanchor="left", y=1.02, yanchor="bottom",
                     ),
                 ),
                 yaxis=dict(
                     title=None,
                     side="right",
-                    tickprefix="$",
-                    tickformat=",.0f",
-                    tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                    tickformat="$,.2f",
+                    tickfont=dict(size=11, color="#94a3b8", family="Inter"),
                     gridcolor="#f1f5f9",
                     showline=False,
                     zeroline=False,
                     autorange=True,
                     rangemode="normal",
-                    nticks=7,
+                    nticks=6,
                 ),
                 xaxis_rangeslider_visible=False,
             )
@@ -1557,35 +1588,39 @@ with tab1:
                 fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ef4444", line_width=1, opacity=0.6)
                 fig_rsi.add_hline(y=50, line_dash="dot",  line_color="#94a3b8", line_width=1, opacity=0.5)
                 fig_rsi.add_hline(y=30, line_dash="dash", line_color="#16a34a", line_width=1, opacity=0.6)
-                fig_rsi.add_annotation(x=df["Date"].iloc[-1], y=72, text="Overbought",
-                    showarrow=False, xanchor="right",
-                    font=dict(size=11, color="#ef4444", family="DM Sans"))
-                fig_rsi.add_annotation(x=df["Date"].iloc[-1], y=28, text="Oversold",
-                    showarrow=False, xanchor="right",
-                    font=dict(size=11, color="#16a34a", family="DM Sans"))
+                # Anchor zone labels INSIDE the plot at the left edge so they
+                # don't float in the right margin.
+                fig_rsi.add_annotation(
+                    xref="paper", x=0.005, y=85, text="Overbought",
+                    showarrow=False, xanchor="left",
+                    font=dict(size=10, color="#ef4444", family="Inter"),
+                )
+                fig_rsi.add_annotation(
+                    xref="paper", x=0.005, y=15, text="Oversold",
+                    showarrow=False, xanchor="left",
+                    font=dict(size=10, color="#16a34a", family="Inter"),
+                )
                 fig_rsi.update_layout(
-                    title=dict(text="RSI (14-Day)", font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                    height=220, template=None,
-                    plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=60, r=90, t=50, b=50),
+                    height=200, template=None,
+                    plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(l=10, r=95, t=20, b=30),
                     hovermode="x unified",
-                    font=dict(family="DM Sans, system-ui, sans-serif"),
+                    showlegend=False,
+                    font=dict(family="Inter, system-ui, sans-serif"),
                     hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                    font=dict(color="white", size=12, family="DM Sans")),
+                                    font=dict(color="white", size=12, family="Inter")),
                     xaxis=dict(
                         type="date", tickformat="%b '%y", title=None,
-                        tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                        title_font=dict(size=12, color="#64748b", family="DM Sans"),
-                        gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
+                        tickfont=dict(size=11, color="#94a3b8", family="Inter"),
+                        gridcolor="#f1f5f9", showline=True, linecolor="#e2e8f0",
+                        zeroline=False,
                     ),
                     yaxis=dict(
-                        range=[0, 100],
-                        tickvals=[0, 30, 50, 70, 100],
-                        ticktext=["0", "30", "50", "70", "100"],
-                        title="RSI",
-                        tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                        title_font=dict(size=12, color="#64748b", family="DM Sans"),
-                        gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
+                        range=[0, 100], side="right",
+                        tickvals=[30, 50, 70],
+                        title=None,
+                        tickfont=dict(size=11, color="#94a3b8", family="Inter"),
+                        gridcolor="#f1f5f9", showline=False,
                         zeroline=False,
                     ),
                 )
@@ -1607,31 +1642,29 @@ with tab1:
                 fig_bb.update_layout(
                     height=320, template=None,
                     plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=10, r=60, t=45, b=30),
+                    margin=dict(l=10, r=95, t=40, b=30),
                     hovermode="x unified",
-                    font=dict(family="DM Sans, system-ui, sans-serif"),
+                    font=dict(family="Inter, system-ui, sans-serif"),
                     hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                    font=dict(color="white", size=12, family="DM Sans")),
+                                    font=dict(color="white", size=12, family="Inter")),
+                    # Legend OUTSIDE the plot — top-right strip, transparent
                     legend=dict(
-                        orientation="h", yanchor="top", y=0.99, xanchor="left", x=0.01,
-                        font=dict(size=11, family="DM Sans", color="#374151"),
-                        bgcolor="rgba(255,255,255,0.85)", bordercolor="#e2e8f0", borderwidth=1,
+                        orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0,
+                        font=dict(size=11, family="Inter", color="#64748b"),
+                        bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
                     ),
                     xaxis=dict(
                         type="date", tickformat="%b '%y", title=None,
-                        tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                        tickfont=dict(size=11, color="#94a3b8", family="Inter"),
                         gridcolor="#f1f5f9", showline=True, linecolor="#e2e8f0",
                         zeroline=False,
                     ),
                     yaxis=dict(
-                        tickprefix="$", tickformat=",.2f",
-                        title=None,
-                        side="right",
-                        tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                        tickformat="$,.2f",
+                        title=None, side="right",
+                        tickfont=dict(size=11, color="#94a3b8", family="Inter"),
                         gridcolor="#f1f5f9", showline=False,
-                        zeroline=False,
-                        autorange=True,
-                        rangemode="normal",
+                        zeroline=False, autorange=True, rangemode="normal",
                     ),
                 )
                 st.plotly_chart(fig_bb, use_container_width=True)

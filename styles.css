@@ -202,9 +202,10 @@ html, body, [class*="css"] {
 .stock-hero-tag {
   background: #eff6ff; color: #1d4ed8;
   border: 1px solid #bfdbfe; border-radius: 20px;
-  padding: 2px 11px; font-size: 0.68rem; font-weight: 600;
-  letter-spacing: 0.4px; text-transform: uppercase;
+  padding: 3px 11px; font-size: 0.72rem; font-weight: 500;
+  letter-spacing: 0.1px;
   font-family: 'Inter', sans-serif;
+  white-space: nowrap;
 }
 .stock-hero-tag.crypto  { background: #fef3c7; color: #b45309; border-color: #fcd34d; }
 .stock-hero-tag.etf     { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
@@ -231,15 +232,19 @@ html, body, [class*="css"] {
 .stock-hero-meta-dot { width: 6px; height: 6px; background: #059669; border-radius: 50%;
                        display: inline-block; animation: pulse 2s infinite; }
 
-/* Stat ribbon inside hero */
+/* Stat ribbon inside hero — fixed 5 columns so items always sit side-by-side */
 .stock-hero-ribbon {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
-  gap: 0; border-top: 1px solid #e2e8f0; padding-top: 1.1rem;
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  gap: 0; border-top: 1px solid #e2e8f0; padding-top: 1rem;
+}
+@media (max-width: 900px) {
+  .stock-hero-ribbon { grid-template-columns: repeat(2, 1fr); gap: 1rem 0; }
 }
 .stock-hero-stat {
-  padding: 0 1rem; border-right: 1px solid #e2e8f0;
+  padding: 0 1.1rem; border-right: 1px solid #e2e8f0;
+  min-width: 0;
 }
-.stock-hero-stat:last-child { border-right: none; }
+.stock-hero-stat:last-child  { border-right: none; padding-right: 0; }
 .stock-hero-stat:first-child { padding-left: 0; }
 .stock-hero-stat-lbl {
   font-family: 'Inter', sans-serif; font-size: 0.62rem;
