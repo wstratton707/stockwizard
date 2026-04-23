@@ -1,0 +1,39 @@
+name: Daily Strategy Backtest
+
+# Runs the drawdown-rebound mega-cap strategy backtest after market close
+# and writes results to Supabase. The Strategy tab in the app reads from
+# this cache, so users see fresh numbers without waiting on Polygon.
+
+on:
+  schedule:
+    - cron: '0 22 * * 1-5'   # 6 PM Eastern (22:00 UTC), weekdays
+  workflow_dispatch:
+
+jobs:
+  strategy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60        # ~40 tickers × 5y, mostly cached after first run
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run strategy backtest
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python precompute_strategy.py --force
+
+      - name: Report result
+        if: always()
+        run: echo "Strategy backtest finished at $(date -u)"

@@ -332,7 +332,13 @@ if not DEV_MODE_FREE and SHOW_PRICING and st.session_state["show_payment"] and n
     st.markdown("---")
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs(["📈  Stock Analysis", "💼  Portfolio Builder", "🏦  Bond Analysis", "🔥  Stress Test"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📈  Stock Analysis",
+    "💼  Portfolio Builder",
+    "🏦  Bond Analysis",
+    "🔥  Stress Test",
+    "🎯  Strategy",
+])
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 1 — STOCK ANALYSIS
@@ -2395,3 +2401,197 @@ with tab3:
 # =============================================================================
 with tab4:
     render_stress_test(POLYGON_API_KEY, is_pro=st.session_state.get("is_pro", False))
+
+
+# =============================================================================
+# TAB 5 — STRATEGY (Drawdown-Rebound Mega-Cap)
+# =============================================================================
+with tab5:
+    from strategy import STRATEGY_NAME, STRATEGY_VERSION, STRATEGY_UNIVERSE
+    from database import cache_get
+
+    _STRATEGY_CACHE_KEY = f"strategy_{STRATEGY_VERSION}"
+    _strategy_data = cache_get(_STRATEGY_CACHE_KEY)
+
+    # ── Header / description ─────────────────────────────────────────────────
+    st.markdown(f"""
+    <div class="stock-hero">
+      <div class="stock-hero-top">
+        <div class="stock-hero-id">
+          <div class="stock-hero-symbol">{STRATEGY_NAME}</div>
+          <div class="stock-hero-name">
+            Buy mega-caps trading ≥20% below their all-time high. Sell when they
+            recover to within 3% of that high. Rinse, repeat.
+          </div>
+          <div class="stock-hero-tags">
+            <span class="stock-hero-tag">LONG-ONLY</span>
+            <span class="stock-hero-tag">{len(STRATEGY_UNIVERSE)} MEGA-CAPS</span>
+            <span class="stock-hero-tag">5Y BACKTEST</span>
+            <span class="stock-hero-tag live">● TRACKED LIVE</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not _strategy_data or not _strategy_data.get("metrics"):
+        st.warning(
+            "Strategy results aren't computed yet. Run "
+            "`python precompute_strategy.py` to seed the cache, "
+            "or wait for the nightly job."
+        )
+        st.stop()
+
+    _m       = _strategy_data["metrics"]
+    _trades  = _strategy_data.get("trades", [])
+    _equity  = _strategy_data.get("equity_curve", [])
+    _bench   = _strategy_data.get("benchmark_curve", [])
+    _open    = _strategy_data.get("open_positions", [])
+    _params  = _strategy_data.get("params", {})
+    _cmpd    = _strategy_data.get("computed_at", "?")
+
+    # ── Headline metrics row ─────────────────────────────────────────────────
+    pos_neg = lambda v: "positive" if v > 0 else ("negative" if v < 0 else "neutral")
+    _bench_ret = _m.get("benchmark_total_return_pct")
+    _alpha     = (_m["total_return_pct"] - _bench_ret) if _bench_ret is not None else None
+
+    _hero_cards = [
+        ("Total Return",   f"{_m['total_return_pct']:+.1f}%",  pos_neg(_m['total_return_pct'])),
+        ("CAGR",           f"{_m['cagr_pct']:+.1f}%",          pos_neg(_m['cagr_pct'])),
+        ("Sharpe",         f"{_m['sharpe']:.2f}",              pos_neg(_m['sharpe'])),
+        ("Max Drawdown",   f"{_m['max_drawdown_pct']:.1f}%",   "negative"),
+        ("Round Trips",    f"{_m['n_round_trips']}",           "neutral"),
+        ("Win Rate",       f"{_m['win_rate_pct']:.0f}%",       pos_neg(_m['win_rate_pct'] - 50)),
+    ]
+    _cols = st.columns(len(_hero_cards))
+    for col, (lbl, val, cls) in zip(_cols, _hero_cards):
+        with col:
+            st.markdown(f"""
+            <div class="metric-card">
+              <div class="metric-label">{lbl}</div>
+              <div class="metric-value {cls}">{val}</div>
+            </div>""", unsafe_allow_html=True)
+
+    if _alpha is not None:
+        _alpha_color = "#059669" if _alpha > 0 else "#dc2626"
+        _alpha_sign  = "+" if _alpha > 0 else ""
+        st.markdown(f"""
+        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;
+                    padding:0.85rem 1.1rem;margin-top:1rem;font-size:0.85rem;color:#475569;
+                    display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <strong style="color:#0f172a">vs SPY buy-and-hold</strong> over the same {_m['n_trading_days']:,}-day window
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace;font-weight:600;color:{_alpha_color}">
+            Strategy {_m['total_return_pct']:+.1f}% &nbsp; · &nbsp;
+            SPY {_bench_ret:+.1f}% &nbsp; · &nbsp;
+            Alpha <span style="font-size:1rem">{_alpha_sign}{_alpha:.1f}%</span>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Equity curve chart ───────────────────────────────────────────────────
+    st.markdown('<div class="section-header">Equity Curve</div>', unsafe_allow_html=True)
+    _eq_dates  = [pd.Timestamp(e["date"]) for e in _equity]
+    _eq_values = [e["equity"] for e in _equity]
+    _bm_dates  = [pd.Timestamp(b["date"]) for b in _bench]
+    _bm_values = [b["equity"] for b in _bench]
+
+    fig_eq = go.Figure()
+    if _bm_values:
+        fig_eq.add_trace(go.Scatter(
+            x=_bm_dates, y=_bm_values, name=f"SPY buy-hold",
+            line=dict(color="#94a3b8", width=1.5, dash="dot"),
+            hovertemplate="$%{y:,.0f}<extra>SPY</extra>",
+        ))
+    fig_eq.add_trace(go.Scatter(
+        x=_eq_dates, y=_eq_values, name="Strategy",
+        line=dict(color="#1d4ed8", width=2.5),
+        fill="tozeroy", fillcolor="rgba(37,99,235,0.06)",
+        hovertemplate="$%{y:,.0f}<extra>Strategy</extra>",
+    ))
+    fig_eq.update_layout(
+        height=420, template=None,
+        plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=10, r=60, t=30, b=30),
+        hovermode="x unified",
+        font=dict(family="Inter, system-ui, sans-serif"),
+        hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
+                        font=dict(color="white", size=12, family="Inter")),
+        legend=dict(orientation="h", yanchor="top", y=0.99, xanchor="left", x=0.01,
+                    font=dict(size=11, family="Inter", color="#374151"),
+                    bgcolor="rgba(255,255,255,0.85)", bordercolor="#e2e8f0", borderwidth=1),
+        xaxis=dict(type="date", tickformat="%b '%y", title=None,
+                   tickfont=dict(size=11, color="#94a3b8", family="Inter"),
+                   gridcolor="#f1f5f9", showline=True, linecolor="#e2e8f0", zeroline=False),
+        yaxis=dict(tickprefix="$", tickformat=",.0f", title=None, side="right",
+                   tickfont=dict(size=11, color="#94a3b8", family="Inter"),
+                   gridcolor="#f1f5f9", showline=False, zeroline=False),
+    )
+    st.plotly_chart(fig_eq, use_container_width=True,
+                    config={"displaylogo": False,
+                            "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"]})
+
+    # ── Open positions ───────────────────────────────────────────────────────
+    if _open:
+        st.markdown('<div class="section-header">Currently Open Positions</div>', unsafe_allow_html=True)
+        _open_df = pd.DataFrame(_open)
+        _open_df = _open_df.rename(columns={
+            "ticker": "Ticker", "buy_date": "Bought",
+            "buy_price": "Buy Price", "current_price": "Current",
+            "unrealized_pct": "Unrealized %", "ath_at_buy": "ATH at Buy",
+        })
+        _open_df["Buy Price"]    = _open_df["Buy Price"].map(lambda v: f"${v:,.2f}")
+        _open_df["Current"]      = _open_df["Current"].map(lambda v: f"${v:,.2f}")
+        _open_df["ATH at Buy"]   = _open_df["ATH at Buy"].map(lambda v: f"${v:,.2f}")
+        _open_df["Unrealized %"] = _open_df["Unrealized %"].map(lambda v: f"{v:+.2f}%")
+        st.dataframe(_open_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No positions currently open — strategy is fully in cash.")
+
+    # ── Recent trades ────────────────────────────────────────────────────────
+    if _trades:
+        st.markdown('<div class="section-header">Recent Trades</div>', unsafe_allow_html=True)
+        _recent = _trades[-25:][::-1]
+        _rows = []
+        for t in _recent:
+            if t["side"] == "SELL":
+                _rows.append({
+                    "Date":     t["date"], "Side": "SELL", "Ticker": t["ticker"],
+                    "Price":    f"${t['price']:,.2f}",
+                    "Hold":     f"{t.get('hold_days', 0):.0f}d",
+                    "Result":   f"{t.get('return_pct', 0):+.2f}%",
+                })
+            else:
+                _rows.append({
+                    "Date":     t["date"], "Side": "BUY", "Ticker": t["ticker"],
+                    "Price":    f"${t['price']:,.2f}",
+                    "Hold":     "—",
+                    "Result":   f"{t.get('drawdown', 0):+.1f}% from ATH",
+                })
+        st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+
+    # ── Strategy rules + caveat ──────────────────────────────────────────────
+    st.markdown('<div class="section-header">Strategy Rules</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="summary-box">
+      <strong>Universe:</strong> {len(STRATEGY_UNIVERSE)} mega-cap names that have at some
+      point exceeded ~$200B market cap.<br>
+      <strong>Entry:</strong> close ≤ {(1 - _params.get('entry_pct', 0.20)) * 100:.0f}% of running all-time high
+      (i.e., {_params.get('entry_pct', 0.20) * 100:.0f}% drawdown).<br>
+      <strong>Exit:</strong> close ≥ {(1 - _params.get('exit_pct', 0.03)) * 100:.0f}% of running all-time high
+      (within {_params.get('exit_pct', 0.03) * 100:.0f}% of ATH).<br>
+      <strong>Sizing:</strong> equal-dollar slices, max {_params.get('max_positions', 10)} concurrent
+      positions, ${_params.get('starting_capital', 100_000):,.0f} starting capital, cash earns 0%.<br>
+      <strong>Last computed:</strong> {_cmpd}
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div class="disclaimer" style="margin-top:1rem">
+      ⚠ <strong>Survivorship-bias caveat:</strong> the universe uses today's mega-cap
+      list, which excludes companies that fell out of the top tier. Real-world
+      results would have been worse than this backtest suggests. Past performance
+      does not guarantee future results — this is research, not investment advice.
+    </div>
+    """, unsafe_allow_html=True)
