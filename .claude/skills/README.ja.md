@@ -1,0 +1,526 @@
+# Claude Trading Skills
+
+このリポジトリは、株式投資やトレードに役立つClaudeスキルをまとめたものです。各スキルには、プロンプト設計、参照資料、補助スクリプトが含まれており、システマティックなバックテスト、マーケット分析、テクニカルチャート分析、経済カレンダー監視、米国株リサーチをClaudeに任せることができます。ClaudeのウェブアプリとClaude Codeの両方で活用できます。
+
+📖 **ドキュメントサイト:** <https://tradermonty.github.io/claude-trading-skills/>
+
+English README is available at [`README.md`](README.md).
+
+## リポジトリ構成
+- `<skill-name>/` – 各スキルのソースフォルダ。`SKILL.md`、参照資料、補助スクリプトが含まれます。
+- `skill-packages/` – Claudeウェブアプリの**Skills**タブへそのままアップロードできる`.skill`パッケージ置き場。
+
+## はじめに
+### Claudeウェブアプリで使う場合
+1. 利用したいスキルに対応する`.skill`ファイルを`skill-packages/`からダウンロードします。
+2. ブラウザでClaudeを開き、**Settings → Skills**に進んでZIPをアップロードします（詳しくはAnthropicの[Skillsローンチ記事](https://www.anthropic.com/news/skills)を参照）。
+3. 必要な会話内でスキルを有効化します。
+
+### Claude Code（デスクトップ/CLI）で使う場合
+1. このリポジトリをクローン、もしくはダウンロードします。
+2. 使いたいスキルのフォルダ（例: `backtest-expert`）をClaude Codeの**Skills**ディレクトリにコピーします（Claude Code → **Settings → Skills → Open Skills Folder**。詳細は[Claude Code Skillsドキュメント](https://docs.claude.com/en/docs/claude-code/skills)を参照）。
+3. Claude Codeを再起動、またはリロードすると新しいスキルが認識されます。
+
+> ヒント: ソースフォルダとZIPの内容は同一です。スキルをカスタマイズする場合はソースフォルダを編集し、ウェブアプリ向けに配布するときは再度ZIP化してください。
+
+## スキル一覧
+
+### マーケット分析・リサーチ
+
+- **セクターアナリスト** (`sector-analyst`)
+  - セクターのアップトレンド比率データをCSVから取得（APIキー不要）し、マーケットサイクル理論に基づくセクターローテーションパターンを分析。
+  - シクリカル vs ディフェンシブのリスクレジームスコア算出、オーバーボート/オーバーソールド判定、マーケットサイクルフェーズ推定（Early/Mid/Late CycleまたはRecession）。
+  - チャート画像のオプション提供で業種レベルの補助分析が可能。
+  - セクターローテーション戦略のためのシナリオベース確率評価を生成。
+
+- **ブレッド（市場幅）チャートアナリスト** (`breadth-chart-analyst`)
+  - S&P 500ブレッドインデックスと米国株上昇トレンド銘柄比率チャートを分析し、市場の健全性とポジショニングを評価。
+  - 市場幅指標に基づく中期的戦略と短期的戦術の市場見通しを提供。
+  - 強気相場フェーズ（健全な市場幅、市場幅縮小、分配）と弱気相場シグナルを識別。
+  - 詳細な市場幅解釈フレームワークと歴史的パターン参照を含む。
+
+- **テクニカルアナリスト** (`technical-analyst`)
+  - 株式、指数、暗号通貨、為替ペアの週足チャートを純粋なテクニカル分析で評価。
+  - ファンダメンタルバイアスなしで、トレンド、サポート/レジスタンスレベル、チャートパターン、モメンタム指標を識別。
+  - トレンド変化の具体的なトリガーレベルを含むシナリオベース確率評価を生成。
+  - エリオット波動、ダウ理論、日本のローソク足、テクニカル指標解釈を参照資料として収録。
+
+- **マーケットニュースアナリスト** (`market-news-analyst`)
+  - WebSearch/WebFetchを使った自動収集により、過去10日間の市場動向ニュースイベントを分析。
+  - FOMCの決定、中央銀行の政策、メガキャップ決算、地政学イベント、コモディティ市場要因に焦点。
+  - 定量的スコアリングフレームワーク（価格インパクト×広がり×将来重要性）を使用したインパクトランク付けレポートを生成。
+  - 信頼できるニュースソースガイド、イベントパターン分析、地政学-コモディティ相関を参照資料として収録。
+
+- **米国株分析** (`us-stock-analysis`)
+  - ファンダメンタル、テクニカル、同業比較、投資メモ生成を網羅した包括的な米国株リサーチアシスタント。
+  - 財務指標、バリュエーション比率、成長軌道、競争力ポジショニングを分析。
+  - 強気/弱気ケースとリスク評価を含む構造化された投資メモを生成。
+  - 分析フレームワーク（`fundamental-analysis.md`、`technical-analysis.md`、`financial-metrics.md`、`report-template.md`）を参照ライブラリに収録。
+
+- **マーケット環境分析** (`market-environment-analysis`)
+  - 株式指数、為替、コモディティ、金利、市場センチメントを含むグローバルマクロブリーフィングをガイド。
+  - 指標ベース評価を含む日次/週次マーケットレビュー用の構造化レポートテンプレートを提供。
+  - インジケータ解説（`references/indicators.md`）と分析パターンを含む。
+  - レポート整形とデータ可視化を支援する補助スクリプト`scripts/market_utils.py`を同梱。
+
+- **マーケットブレッド アナライザー** (`market-breadth-analyzer`)
+  - TraderMontyの公開CSVデータを使用し、データ駆動型6コンポーネントスコアリングシステム（0-100）で市場幅の健全性を定量化。
+  - コンポーネント: 全体ブレッド、セクター参加、セクターローテーション、モメンタム、平均回帰リスク、ヒストリカルコンテキスト。
+  - APIキー不要 - GitHubの無料CSVデータを使用。
+
+- **アップトレンドアナライザー** (`uptrend-analyzer`)
+  - Monty's Uptrend Ratio Dashboardを使用して、約2,800の米国株を11セクターにわたり追跡し、市場幅の健全性を診断。
+  - 5コンポーネント複合スコアリング（0-100）: マーケットブレッド、セクター参加、セクターローテーション、モメンタム、ヒストリカルコンテキスト。
+  - 警告オーバーレイシステム: Late CycleとHigh Selectivityフラグがエクスポージャーガイダンスを引き締め、注意アクションを追加。
+  - APIキー不要 - GitHubの無料CSVデータを使用。
+
+- **マクロレジーム検出器** (`macro-regime-detector`)
+  - クロスアセット比率分析を用いて構造的なマクロレジーム転換（1-2年ホライズン）を検出。
+  - 6コンポーネント分析: RSP/SPY集中度、イールドカーブ、クレジット環境、サイズファクター、株式-債券関係、セクターローテーション。
+  - レジーム識別: Concentration、Broadening、Contraction、Inflationary、Transitional。
+  - FMP APIキーが必要。
+
+- **テーマ検出器** (`theme-detector`)
+  - FINVIZの業種・セクターパフォーマンスデータを複数タイムフレームで分析し、上昇・下落両方のトレンドテーマを検出。
+  - 3次元スコアリング: Theme Heat (0-100: モメンタム/ボリューム/アップトレンド/ブレッド)、Lifecycle Maturity (0-100: 持続期間/RSI極端度/価格極端度/バリュエーション/ETF本数)、Confidence (Low/Medium/High)。
+  - Direction-aware分析: ベアテーマもブルテーマと同等の感度でスコアリング（反転指標使用）。
+  - クロスセクターテーマ検出（AI/半導体、クリーンエネルギー、ゴールド、サイバーセキュリティ等）とセクター内垂直集中検出。
+  - ライフサイクルステージ: Emerging, Accelerating, Trending, Mature, Exhausting — テーマごとに代表銘柄とプロキシETFを表示。
+  - Monty's Uptrend Ratio Dashboardを補助ブレッドシグナルとして統合（3点評価: ratio + MA10 + slope）。
+  - コア機能にAPIキー不要（FINVIZパブリック + yfinance）。FMP/FINVIZ Eliteはオプションで銘柄選定を強化。
+
+### 経済・決算カレンダー
+
+- **経済カレンダー取得** (`economic-calendar-fetcher`)
+  - Financial Modeling Prep (FMP) APIを使用して、今後7-90日間の経済イベントを取得。
+  - 中央銀行の決定、雇用統計（NFP）、インフレデータ（CPI/PPI）、GDP発表、その他市場を動かす指標を取得。
+  - インパクト評価（High/Medium/Low）と市場への影響分析を含む時系列マークダウンレポートを生成。
+  - 包括的なエラー処理を備えた柔軟なAPIキー管理（環境変数またはユーザー入力）をサポート。
+
+- **決算カレンダー** (`earnings-calendar`)
+  - FMP APIを使用して、時価総額2B ドル以上の中型株以上の企業に焦点を当てた米国株の今後の決算発表を取得。
+  - 日付とタイミング（市場前、市場後、市場中）別に決算を整理。
+  - 週次決算レビューとポートフォリオ監視のためのクリーンなマークダウンテーブル形式を提供。
+  - CLI、デスクトップ、Web環境をサポートする柔軟なAPIキー管理。
+
+### 戦略・リスク管理
+
+- **シナリオアナライザー** (`scenario-analyzer`)
+  - ニュースヘッドラインを入力として18ヶ月シナリオを分析。1次・2次・3次影響、推奨銘柄、レビューを含む包括的レポートを生成。
+  - デュアルエージェント構成: scenario-analystで主分析、strategy-reviewerでセカンドオピニオンを取得。
+  - APIキー不要 - WebSearchでニュース収集。
+
+- **バックテストエキスパート** (`backtest-expert`)
+  - 戦略仮説の定義、パラメータ堅牢性検証、ウォークフォワード検証を含むプロフェッショナルグレードの戦略検証フレームワーク。
+  - 現実的な前提条件を重視：スリッページモデリング、取引コスト、生存バイアス除去、アウトオブサンプル検証。
+  - 詳細な手法（`references/methodology.md`）と失敗事例集（`references/failed_tests.md`）を参照資料として収録。
+  - アイデア生成から本番デプロイまでの品質ゲート付きシステマティックアプローチをガイド。
+
+- **スタンレー・ドラッケンミラー投資アドバイザー** (`stanley-druckenmiller-investment`)
+  - マクロポジショニング、流動性分析、非対称的リスク/リターン評価のためのドラッケンミラーの投資哲学をエンコード。
+  - 「高い確信度の時は大きく賭ける」アプローチと厳格な損切り規律に焦点。
+  - 投資哲学の詳細、市場分析ワークフロー、歴史的ケーススタディを含むリファレンスパック（日本語・英語）。
+  - マクロテーマの識別、テクニカル確認、ポジションサイジング戦略を重視。
+
+- **米国市場バブル検出器** (`us-market-bubble-detector`)
+  - 定量的8指標「バブルメーター」スコアリングシステムを備えたミンスキー/キンドルバーガーバブルフレームワーク。
+  - バブルステージを識別：転換 → ブーム → 熱狂 → 利益確定 → パニック。
+  - 各ステージの実行可能なプレイブックを提供：利益確定戦略、ヘッジ戦術、現金展開タイミング。
+  - 歴史的ケースファイル（ドットコム2000、住宅2008、COVID 2020）、クイックリファレンスチェックリスト（日英）、対話型スコアラースクリプト`scripts/bubble_scorer.py`を補足。
+
+- **オプション戦略アドバイザー** (`options-strategy-advisor`)
+  - Black-Scholesモデルを使用した理論的価格算出、戦略分析、リスク管理ガイダンスを提供する教育的オプション取引ツール。
+  - 全グリークス（Delta、Gamma、Theta、Vega、Rho）の計算と17以上のオプション戦略をサポート。
+  - FMP APIは任意（株価データ取得用）。理論価格計算のみでもBlack-Scholesで動作。
+
+- **ポートフォリオマネージャー** (`portfolio-manager`)
+  - Alpaca MCP Server連携によるリアルタイム保有データを使った包括的ポートフォリオ分析・管理。
+  - 多次元分析: 資産配分、セクター分散、リスク指標（ベータ、ボラティリティ、ドローダウン）、パフォーマンスレビュー。
+  - HOLD/ADD/TRIM/SELLのポジションレベル推奨とリバランス計画を生成。
+  - Alpaca証券口座（ペーパーまたはライブ）とAlpaca MCP Serverの設定が必要。
+
+- **ポジションサイザー** (`position-sizer`)
+  - Fixed Fractional、ATRベース、Kelly Criterionの3手法でロング株式トレードのリスクベースポジションサイズを計算。
+  - ポートフォリオ制約（最大ポジション%、最大セクター%）を適用し、最も厳しい制約（binding constraint）を特定。
+  - 2つの出力モード: sharesモード（エントリー/ストップ指定）で最終推奨株数、budgetモード（Kelly単独）で推奨リスク予算を返却。
+  - JSON + マークダウンレポートを生成。APIキー不要 — 純粋計算、オフラインで動作。
+
+- **エッジ候補エージェント** (`edge-candidate-agent`)
+  - 日次マーケット観察を再現可能なリサーチチケットに変換し、`trade-strategy-pipeline` Phase I互換の候補スペックをエクスポート。
+  - 構造化リサーチチケットから`strategy.yaml` + `metadata.json`アーティファクトを生成。インターフェース契約（`edge-finder-candidate/v1`）のバリデーション付き。
+  - 2つのエントリーファミリーをサポート: `pivot_breakout`（VCP検出付き）、`gap_up_continuation`（ギャップ検出付き）。
+  - パイプラインスキーマに対する事前検証と`uv run`サブプロセスフォールバックによるクロス環境互換性を提供。
+  - APIキー不要 — ローカルYAMLファイルで動作し、ローカルパイプラインリポジトリに対して検証。
+
+- **トレード仮説アイデエータ** (`trade-hypothesis-ideator`)
+  - 戦略コンテキスト・市場コンテキスト・トレードログ・ジャーナル証拠から、反証可能な仮説カードを1-5件生成。
+  - 2パス構成: Pass 1で`evidence_summary.json`を生成、Pass 2で生仮説を検証してランキングし、JSON + Markdownレポートを出力。
+  - ガードレールで必須フィールド欠落、禁止フレーズ、重複仮説、制約違反を検出。
+  - `pursue`判定の仮説を`edge-finder-candidate/v1`互換の`strategy.yaml` + `metadata.json`へエクスポート可能（`pivot_breakout` / `gap_up_continuation`のみ）。
+  - APIキー不要 — ローカルJSON/YAMLのみで実行可能。
+
+- **戦略ピボットデザイナー** (`strategy-pivot-designer`)
+  - バックテスト反復ループの停滞を検知し、パラメータ調整が局所最適に陥った際に構造的に異なる戦略ピボット案を生成。
+  - 4つの決定論的トリガー: 改善停滞、過学習プロキシ、コスト敗北、テールリスク — `evaluate_backtest.py`出力からマッピング。
+  - 3つのピボット手法: 前提反転、アーキタイプ置換、目的関数リフレーム。8つの正規戦略アーキタイプをカバー。
+  - Jaccard距離によるノベルティスコアリングと決定論的タイブレークで再現可能な提案ランキングを保証。
+  - `strategy_draft`互換YAMLと`pivot_metadata`拡張を出力。エクスポート可能なドラフトにはcandidate-agentチケットYAMLも同梱。
+  - APIキー不要 — backtest-expertとedge-strategy-designerのローカルJSON/YAMLファイルで動作。
+
+- **エッジ戦略レビュアー** (`edge-strategy-reviewer`)
+  - `edge-strategy-designer`が出力する戦略ドラフトの決定論的品質ゲート。
+  - 8基準（C1-C8）で評価: エッジの妥当性、過学習リスク、サンプル充足度、レジーム依存性、イグジット校正、リスク集中度、執行現実性、無効化シグナル品質。
+  - 加重スコアリング（0-100）によるPASS/REVISE/REJECT判定とエクスポート適格性の判定。
+  - 精密閾値検出がカーブフィッティングされた条件をペナルティ化。年間機会推定が制約過多な戦略をフラグ。
+  - REVISE判定にはフィードバックループ用の具体的な修正指示を付与。
+  - APIキー不要 — edge-strategy-designerのローカルYAMLファイルで動作。
+
+- **エッジパイプラインオーケストレータ** (`edge-pipeline-orchestrator`)
+  - エッジ研究パイプライン全体をエンドツーエンドでオーケストレーション: 自動検出、ヒント、コンセプト統合、戦略設計、クリティカルレビュー、エクスポート。
+  - レビュー→修正フィードバックループ（最大2回）: PASS/REJECTはイテレーション間で蓄積、REVISEドラフトは修正後に再レビュー、残りのREVISEはresearch_probeにダウングレード。
+  - エクスポート適格性ゲート: PASS + export_ready_v1 + エクスポート可能エントリーファミリーのドラフトのみ候補エクスポートに進行。
+  - 全upstreamスキルをsubprocess経由で呼び出し（スキル間の直接importなし）。パイプラインマニフェストで実行トレース全体を記録。
+  - resume-from-drafts、review-only、dry-runモードをサポート。
+  - APIキー不要 — エッジスキル間のローカルYAML/JSONファイルをオーケストレーション。
+
+- **エッジシグナルアグリゲータ** (`edge-signal-aggregator`)
+  - edge-candidate-agent、edge-concept-synthesizer、theme-detector、sector-analyst、institutional-flow-tracker、edge-hint-extractor の出力を統合。
+  - 重み付け、重複排除、鮮度調整、矛盾シグナル処理を適用して、確信度順のダッシュボードを生成。
+  - `priority_score`、`support.avg_priority_score`、`themes.all`、`heat/theme_heat` など複数の上流スキーマ差分に対応。
+  - provenance（`contributing_skills`）、矛盾ログ、重複統合ログを含む JSON + Markdown レポートを出力。
+  - APIキー不要 — 上流エッジスキルのローカル JSON/YAML 出力を入力として動作。
+
+- **Trader Memory Core** (`trader-memory-core`)
+  - スクリーニングからポジション決済・振り返りまで、投資仮説のライフサイクルを永続的に追跡するステート層。
+  - スクリーナー → 分析 → ポジションサイジング → ポートフォリオ管理の各出力を1つの thesis オブジェクトに統合。
+  - ライフサイクル管理（IDEA → ENTRY_READY → ACTIVE → CLOSED）、ポジション付与、レビュースケジュール、MAE/MFE分析をサポート。
+  - kanchi-dividend-sop、earnings-trade-analyzer、vcp-screener、pead-screener、canslim-screener、edge-candidate-agent と統合。
+
+- **エクスポージャーコーチ** (`exposure-coach`)
+  - market-breadth-analyzer、uptrend-analyzer、macro-regime-detector、market-top-detector、ftd-detector、theme-detector、sector-analyst、institutional-flow-tracker の出力を統合し、エクスポージャー決定を一元化。
+  - 「今、株式にどれだけ資本を投入すべきか？」という核心的な問いに回答。
+  - エクスポージャー上限（0-100%）、グロース/バリュー傾斜、参加幅評価、行動推奨（NEW_ENTRY_ALLOWED / REDUCE_ONLY / CASH_PRIORITY）を含む1ページのマーケットポスチャーサマリーを生成。
+  - 部分的な入力にも対応 — upstreamファイルが欠落してもconfidenceレベルが低下するだけで実行はブロックされない。
+  - FMP APIキーは任意（institutional-flow-trackerデータ利用時のみ必要）。
+
+- **シグナルポストモーテム** (`signal-postmortem`)
+  - エッジパイプライン、スクリーナー、他スキルが生成したシグナルの結果を記録・分析。
+  - TRUE_POSITIVE、FALSE_POSITIVE、MISSED_OPPORTUNITY、REGIME_MISMATCHの4カテゴリに分類。
+  - edge-signal-aggregator向けウェイト調整フィードバックとスキル改善バックログエントリを生成。
+  - 成熟シグナルのバッチ処理（5日/20日保有期間）と手動結果記録をサポート。
+  - スキル別・銘柄別・期間別の集計統計で定期的なシグナル品質監査に対応。
+  - FMP APIキーは任意（実現リターン取得用。手動価格入力にも対応）。
+
+### マーケットタイミング・底打ち検出
+
+- **マーケットトップ検出器** (`market-top-detector`)
+  - O'NeilのDistribution Days、MinerviniのLeading Stock Deterioration、MontyのDefensive Rotationを使用してマーケットトップの確率を検出。
+  - 分配と天井形成パターンを識別する6コンポーネント戦術的タイミングシステム。
+
+- **下落トレンド期間分析** (`downtrend-duration-analyzer`)
+  - 過去の下落トレンド期間（ピーク→トラフ）を分析し、セクター・時価総額別のインタラクティブHTMLヒストグラムを生成。
+  - ローリングウィンドウによるピーク/トラフ検出、深度・期間フィルター設定可能。
+  - FMP APIキーが必要。
+
+- **FTD検出器** (`ftd-detector`)
+  - William O'Neilの手法を用いて、市場底打ち確認のためのFollow-Through Day (FTD) シグナルを検出。
+  - デュアルインデックス追跡（S&P 500 + NASDAQ）と状態マシンによるラリー試行、FTD適格、FTD後の健全性監視。
+  - Market Top Detectorの補完スキル: Market Top Detector = ディフェンシブ（分配検出）、FTD Detector = オフェンシブ（底打ち確認）。
+  - 修正後の市場再参入のためのエクスポージャーガイダンス付きクオリティスコア（0-100）を生成。
+  - FMP APIキーが必要。
+
+### 決算モメンタムスクリーニング
+
+- **決算トレードアナライザー** (`earnings-trade-analyzer`)
+  - 直近決算銘柄を5要素加重スコアリング: ギャップサイズ (25%)、決算前トレンド (30%)、出来高トレンド (20%)、MA200ポジション (15%)、MA50ポジション (10%)。
+  - A/B/C/Dグレード割当（A: 85+, B: 70-84, C: 55-69, D: <55）、複合スコア0-100。
+  - BMO/AMCタイミング別ギャップ算出 — 決算発表タイミングに応じて異なる基準価格を使用。
+  - オプションのエントリークオリティフィルタで低勝率パターンを除外。
+  - APIコール予算管理（`--max-api-calls`、デフォルト: 200）。
+  - PEADスクリーナー連携用に`schema_version: "1.0"`付きJSON出力。
+  - FMP APIキーが必要（無料ティアで2日間ルックバックに十分）。
+
+- **PEADスクリーナー** (`pead-screener`)
+  - 決算ギャップアップ銘柄のPEAD（Post-Earnings Announcement Drift）パターンを週足分析でスクリーニング。
+  - ステージベース監視: MONITORING → SIGNAL_READY（赤キャンドル検出）→ BREAKOUT（赤キャンドル高値ブレイク）→ EXPIRED（5週超過）。
+  - 4コンポーネントスコアリング: セットアップ品質 (30%)、ブレイクアウト強度 (25%)、流動性 (25%)、リスク/リワード (20%)。
+  - 2つの入力モード: モードA（FMP決算カレンダー、単体）、モードB（earnings-trade-analyzerのJSON出力、パイプライン）。
+  - ISO週（月曜始まり）での週足集約、決算週分割、部分週対応。
+  - 流動性フィルタ: ADV20 >= $25M、平均出来高 >= 100万株、株価 >= $10。
+  - FMP APIキーが必要（無料ティアで14日間ルックバックに十分）。
+
+### 株式スクリーニング・選定
+
+- **VCPスクリーナー** (`vcp-screener`)
+  - S&P 500銘柄からMark MinerviniのVolatility Contraction Pattern (VCP) をスクリーニング。
+  - ブレイクアウトピボットポイント近辺でボラティリティが収縮しているStage 2上昇トレンド銘柄を識別。
+  - 2軸スコアリング: パターン品質とエントリー可能性を分離（State Capsにより延長済み銘柄の追従を防止）。
+  - 多段階フィルタリング: トレンドテンプレート → VCPベース検出 → 収縮分析 → ピボットポイント計算。
+  - FMP APIキーが必要（無料ティアで上位100候補のデフォルトスクリーニングに十分）。
+
+- **CANSLIM株式スクリーナー** (`canslim-screener`) - **Phase 2**
+  - William O'NeilのCANSLIM成長株手法を用いて米国株をスクリーニング。マルチバガー候補の発見に特化。
+  - Phase 2では7コンポーネントのうち6つを実装（80%カバレッジ）：C (四半期決算)、A (年次成長)、N (新高値)、S (需給)、I (機関投資家)、M (市場方向)。
+  - 複合スコアリング（0-100）と重み付け：C 19%、A 25%、N 19%、S 19%、I 13%、M 6%。
+  - ボリュームベースの蓄積/分配分析（Sコンポーネント）とFinvizフォールバック付き機関投資家所有率追跡（Iコンポーネント）。
+  - ベアマーケット保護：Mコンポーネントが全ての買い推奨をゲート（M=0で「現金化」警告）。
+  - FMP API統合。無料ティア（250 calls/日）で40銘柄分析可能。
+  - 将来のPhase 3でL (リーダーシップ/RS Rank) コンポーネントを追加して全7コンポーネント完成予定。
+
+- **バリュー配当スクリーナー** (`value-dividend-screener`)
+  - FMP APIを使用して高品質な配当投資機会をスクリーニング。
+  - 多段階フィルタリング: バリュー特性（P/E≤20、P/B≤2）+ 配当利回り（≥3.5%）+ 成長性（3年配当/売上/EPS上昇トレンド）。
+  - 配当持続性、財務健全性、クオリティスコアの高度な分析。FINVIZエリートは任意だが推奨（実行時間70-80%短縮）。
+
+- **配当成長プルバックスクリーナー** (`dividend-growth-pullback-screener`)
+  - 高品質な配当成長株（年間配当成長12%以上、利回り1.5%以上）で一時的なプルバック中の銘柄を検出。
+  - ファンダメンタルの配当分析とテクニカルタイミング指標（RSI≤40のオーバーソールド）を組み合わせ。
+  - FMP APIキーが必要。FINVIZエリートは任意（RSIプリスクリーニング用）。
+
+- **かんち式配当SOP** (`kanchi-dividend-sop`)
+  - かんち式5ステップを米国株向けの再現可能なワークフローに変換。
+  - スクリーニング、安全性精査、バリュエーション判定、一過性要因除外、押し目買い条件を標準化。
+  - 閾値表、評価基準、1ページ銘柄メモテンプレを含む運用基盤スキル。
+
+- **かんち式配当レビュー監視** (`kanchi-dividend-review-monitor`)
+  - T1-T5トリガーで異常検知を行い、`OK/WARN/REVIEW`に機械判定。
+  - 自動売却は行わず、強制点検キューとレビュー票を生成。
+  - `build_review_queue.py` と境界値テストを含む監視運用スキル。
+
+- **かんち式配当 米国税務・口座配置** (`kanchi-dividend-us-tax-accounting`)
+  - qualified/ordinaryの前提整理、保有期間チェック、口座配置の意思決定を支援。
+  - 年次税務メモテンプレと未確定前提の管理を標準化。
+  - スクリーニング後の実装・保守フェーズに使う税務運用スキル。
+
+- **機関投資家フロートラッカー** (`institutional-flow-tracker`)
+  - 13F SEC提出書類データを使用して機関投資家の所有変動を追跡し、「スマートマネー」の蓄積・分配パターンを識別。
+  - ティアベース品質フレームワーク: スーパーインベスター（Berkshire、Baupost）を3.0-3.5倍、インデックスファンドを0.0-0.5倍で重み付け。
+  - FMP API統合。無料ティアで四半期ポートフォリオレビューに十分。
+
+- **ペアトレードスクリーナー** (`pair-trade-screener`)
+  - 共和分検定を用いたペアトレード機会の統計的裁定ツール。
+  - ヘッジ比率、平均回帰速度（半減期）、zスコアベースのエントリー/エグジットシグナルを算出。
+  - セクターワイドスクリーニングとカスタムペア分析をサポート。FMP APIキーが必要。
+
+- **FinVizスクリーナー** (`finviz-screener`)
+  - 自然言語（日本語/英語）によるスクリーニング指示をFinVizフィルターコードに変換し、Chromeで結果を表示。
+  - ファンダメンタル（P/E、配当、成長性、マージン）、テクニカル（RSI、SMA、パターン）、記述的フィルター（セクター、時価総額、国）等500以上のフィルターコードに対応。
+  - **テーマ×サブテーマのクロス検索:** FinVizの30以上の投資テーマと268のサブテーマを任意のフィルターと組み合わせ可能。「AI × 物流」「データセンター × 電力インフラ」「サイバーセキュリティ × クラウド」のようなセクター横断的なテーマスクリーニングを実現。従来のセクター/業種フィルターでは不可能だったナラティブベースの銘柄発掘ができます。`--themes`と`--subthemes`で複数テーマを1クエリに指定可能（例: `--themes "artificialintelligence,cybersecurity" --filters "cap_midover"`）。
+  - `$FINVIZ_API_KEY`環境変数からFINVIZ Eliteを自動検出。未設定時はパブリックスクリーナーにフォールバック。
+  - 高配当バリュー、小型成長株、売られすぎ大型株、ブレイクアウト候補、AI/テーマ投資等、14のプリセットレシピを収録。
+  - 基本利用にAPIキー不要（パブリックFinVizスクリーナー）。FINVIZ Eliteは任意で拡張機能利用可能。
+
+## ワークフロー例
+
+### 日次マーケット監視
+1. **経済カレンダー取得**を使用して、今日の高インパクトイベント（FOMC、NFP、CPI発表）をチェック
+2. **決算カレンダー**を使用して、今日決算発表する主要企業を特定
+3. **マーケットニュースアナリスト**を使用して、夜間の展開と市場への影響をレビュー
+4. **ブレッドチャートアナリスト**を使用して、全体的な市場の健全性とポジショニングを評価
+
+### 週次戦略レビュー
+1. **セクターアナリスト**でCSVデータを取得しローテーションパターンを識別（オプションでチャート画像を提供可）
+2. **テクニカルアナリスト**を主要指数とポジションに使用して、トレンド確認
+3. **マーケット環境分析**を使用して、包括的なマクロブリーフィングを実施
+4. **米国市場バブル検出器**を使用して、投機的過熱とリスクレベルを評価
+
+### 個別銘柄リサーチ
+1. **米国株分析**を使用して、包括的なファンダメンタルおよびテクニカルレビューを実施
+2. **決算カレンダー**を使用して、今後の決算日をチェック
+3. **マーケットニュースアナリスト**を使用して、最近の企業固有ニュースとセクター展開をレビュー
+4. **バックテストエキスパート**を使用して、ポジションサイジング前にエントリー/エグジット戦略を検証
+
+### 戦略的ポジショニング
+1. **スタンレー・ドラッケンミラー投資アドバイザー**を使用して、マクロテーマを識別
+2. **経済カレンダー取得**を使用して、主要データリリース周辺のエントリータイミングを計る
+3. **ブレッドチャートアナリスト**と**テクニカルアナリスト**を使用して、確認シグナルを取得
+4. **米国市場バブル検出器**を使用して、リスク管理と利益確定ガイダンスを取得
+
+### 決算モメンタムトレード
+1. **決算トレードアナライザー**を使用して、直近決算のリアクション（ギャップ、トレンド、出来高、MA位置）をスコアリング
+2. **PEADスクリーナー**（モードB）でアナライザー出力を入力として、PEADセットアップ（赤キャンドルプルバック→ブレイクアウトシグナル）を検出
+3. **テクニカルアナリスト**を使用して、週足チャートパターンとサポート/レジスタンスレベルを確認
+4. PEADスクリーナーの流動性フィルタでポジションサイジングの実現可能性を確認
+5. SIGNAL_READY銘柄を監視し、明確なストップロス（赤キャンドル安値）と2Rターゲットでブレイクアウトエントリー
+
+### かんち式配当ワークフロー（米国株）
+1. **かんち式配当SOP**で5ステップ選定と買い条件を作成
+2. **かんち式配当レビュー監視**で日次/週次/四半期の異常検知キューを運用
+3. **かんち式配当 米国税務・口座配置**で口座配置と税務前提を固定
+4. `REVIEW`判定は再度**かんち式配当SOP**へ戻して前提再評価
+
+### スキル品質・自動化
+
+- **データ品質チェッカー** (`data-quality-checker`)
+  - マーケット分析ドキュメントやブログ記事の公開前にデータ品質を検証。
+  - 5つのチェックカテゴリ: 価格スケール不整合（ETF vs 先物の桁数ヒント）、商品表記一貫性、日付曜日ミスマッチ（英語+日本語対応）、配分合計エラー（セクション限定）、単位不整合。
+  - アドバイザリーモード — 問題を警告として表示、検出ありでもexit 0。最終判断は人間。
+  - 全角文字（％、〜）、レンジ表記（50-55%）、年なし日付の年推定をサポート。
+  - APIキー不要 — ローカルマークダウンファイルでオフライン動作。
+
+- **スキルデザイナー** (`skill-designer`)
+  - 構造化されたアイデア仕様から新しいスキルを設計するためのClaude CLIプロンプトを生成。
+  - リポジトリ規約（構造ガイド、品質チェックリスト、SKILL.mdテンプレート）をプロンプトに埋め込み。
+  - 既存スキル一覧を含めて重複を防止。スキル自動生成パイプラインのdailyフローで使用。
+  - APIキー不要。
+
+- **デュアルアクシス・スキルレビュアー** (`dual-axis-skill-reviewer`)
+  - デュアルアクシス方式でスキル品質をレビュー: 決定論的オートスコアリング（構造、ワークフロー、実行安全性、成果物、テスト健全性）とオプションのLLMディープレビュー。
+  - 5カテゴリ・オートアクシス（0-100）: メタデータ＆ユースケース (20)、ワークフローカバレッジ (25)、実行安全性＆再現性 (25)、サポート成果物 (10)、テスト健全性 (20)。
+  - `knowledge_only`スキル（スクリプトなし、リファレンスのみ）を検出し、不公平なペナルティを回避するためにスコアリング基準を調整。
+  - オプションのLLMアクシスで定性的レビュー（正確性、リスク、欠落ロジック、保守性）を実施。重み付けブレンドが可能。
+  - `--all`で全スキル一括レビュー、`--skip-tests`でクイックトリアージ、`--project-root`で他プロジェクトのレビューに対応。
+  - APIキー不要。
+
+- **スキルアイデアマイナー** (`skill-idea-miner`)
+  - Claude Codeセッションログからスキルアイデア候補をマイニングし、新規性・実現可能性・トレーディング価値でスコアリングして優先順位付きバックログを管理。
+  - 週次スキル自動生成パイプラインで使用。手動実行も可能。
+  - APIキー不要。
+
+## スキル自己改善ループ
+
+スキル品質を継続的にレビュー・改善する自動パイプライン。毎日の`launchd`ジョブが1つのスキルを選択し、デュアルアクシスレビュアーでスコアリングし、スコアが90/100未満の場合は`claude -p`で改善を適用してPRを作成します。
+
+### 仕組み
+
+1. **ラウンドロビン選択** — レビュアー自身を除く全スキルを順番に巡回。状態は`logs/.skill_improvement_state.json`に永続化。
+2. **オートスコアリング** — `run_dual_axis_review.py`を実行して決定論的スコア（0-100）を取得。
+3. **改善ゲート** — `auto_review.score < 90`の場合、Claude CLIがSKILL.mdとリファレンスを修正。
+4. **品質ゲート** — 改善後に再スコアリング（テスト有効）。スコアが改善されなかった場合はロールバック。
+5. **PR作成** — 変更をフィーチャーブランチにコミットし、人間レビュー用にGitHub PRを作成。
+6. **日次サマリー** — 結果を`reports/skill-improvement-log/YYYY-MM-DD_summary.md`に出力。
+
+### 手動実行
+
+```bash
+# ドライラン: 改善やPR作成なしでスコアリングのみ
+python3 scripts/run_skill_improvement_loop.py --dry-run
+
+# 全スキルをドライランでレビュー
+python3 scripts/run_skill_improvement_loop.py --dry-run --all
+
+# フルラン: スコアリング、必要に応じて改善、PR作成
+python3 scripts/run_skill_improvement_loop.py
+```
+
+### launchd設定 (macOS)
+
+毎日05:00にmacOS `launchd`で自動実行:
+
+```bash
+# エージェントをインストール
+cp launchd/com.trade-analysis.skill-improvement.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.trade-analysis.skill-improvement.plist
+
+# 確認
+launchctl list | grep skill-improvement
+
+# 手動トリガー
+launchctl start com.trade-analysis.skill-improvement
+```
+
+### 主要ファイル
+
+| ファイル | 用途 |
+|---------|------|
+| `scripts/run_skill_improvement_loop.py` | オーケストレーションスクリプト（選択、スコアリング、改善、PR） |
+| `scripts/run_skill_improvement.sh` | launchd用シェルラッパー |
+| `launchd/com.trade-analysis.skill-improvement.plist` | macOS launchdエージェント設定 |
+| `skills/dual-axis-skill-reviewer/` | レビュアースキル（スコアリングエンジン） |
+| `logs/.skill_improvement_state.json` | ラウンドロビン状態と履歴 |
+| `reports/skill-improvement-log/` | 日次サマリーレポート |
+
+## スキル自動生成パイプライン
+
+セッションログからスキルアイデアをマイニング（週次）し、設計・レビュー・PR作成（日次）を自動実行するパイプライン。自己改善ループと連携してスキルカタログを継続的に拡張します。
+
+### 仕組み
+
+1. **週次マイニング** — Claude Codeセッションログをスキャンし、スキル化できる繰り返しパターンを検出。各アイデアを新規性・実現可能性・トレーディング価値でスコアリング。
+2. **バックログスコアリング** — ランク付けされたアイデアを`logs/.skill_generation_backlog.yaml`にステータス追跡付きで保存（`pending`、`in_progress`、`completed`、`design_failed`、`review_failed`、`pr_failed`）。
+3. **日次選択** — 最高スコアの`pending`アイデアを選択。`design_failed`/`pr_failed`は1回リトライ（`review_failed`はコンテンツ品質の問題を示すため最終判定）。
+4. **設計＆レビュー** — スキルデザイナーが完全なスキル（SKILL.md、リファレンス、スクリプト）を構築し、デュアルアクシスレビュアーがスコアリング。スコアが低い場合は`review_failed`。
+5. **PR作成** — 新スキルをフィーチャーブランチにコミットし、人間レビュー用にGitHub PRを作成。
+
+### 手動実行
+
+```bash
+# 週次: セッションログからアイデアをマイニング・スコアリング
+python3 scripts/run_skill_generation_pipeline.py --mode weekly --dry-run
+
+# 日次: バックログの最高スコアアイデアからスキルを設計
+python3 scripts/run_skill_generation_pipeline.py --mode daily --dry-run
+
+# フルラン（ブランチ作成、スキル設計、PR作成）
+python3 scripts/run_skill_generation_pipeline.py --mode daily
+```
+
+### launchd設定 (macOS)
+
+週次と日次の2つの`launchd`エージェントで自動実行:
+
+```bash
+# エージェントをインストール
+cp launchd/com.trade-analysis.skill-generation-weekly.plist ~/Library/LaunchAgents/
+cp launchd/com.trade-analysis.skill-generation-daily.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.trade-analysis.skill-generation-weekly.plist
+launchctl load ~/Library/LaunchAgents/com.trade-analysis.skill-generation-daily.plist
+
+# 確認
+launchctl list | grep skill-generation
+
+# 手動トリガー
+launchctl start com.trade-analysis.skill-generation-weekly
+launchctl start com.trade-analysis.skill-generation-daily
+```
+
+### 主要ファイル
+
+| ファイル | 用途 |
+|---------|------|
+| `scripts/run_skill_generation_pipeline.py` | オーケストレーションスクリプト（マイニング、選択、設計、レビュー、PR） |
+| `scripts/run_skill_generation.sh` | launchd用シェルラッパー |
+| `launchd/com.trade-analysis.skill-generation-weekly.plist` | 週次マイニングスケジュール（土曜06:00） |
+| `launchd/com.trade-analysis.skill-generation-daily.plist` | 日次生成スケジュール（07:00） |
+| `skills/skill-idea-miner/` | マイニング＆スコアリングスキル |
+| `skills/skill-designer/` | スキル設計プロンプトビルダー |
+| `logs/.skill_generation_backlog.yaml` | ステータス追跡付きスコア済みアイデアバックログ |
+| `logs/.skill_generation_state.json` | 実行履歴と状態 |
+| `reports/skill-generation-log/` | 日次生成サマリーレポート |
+
+## カスタマイズと貢献
+- トリガー説明や機能メモを調整する場合は、各フォルダ内の`SKILL.md`を更新してください。ZIP化する際はフロントマター`name`がフォルダ名と一致しているか確認してください。
+- 参照資料の追記や新規スクリプト追加でワークフローを拡張できます。
+- 変更を配布する場合は、最新の内容を反映した`.skill`ファイルを`skill-packages/`に再生成してください。
+
+## API要件
+
+いくつかのスキルはデータアクセスのためにAPIキーが必要です：
+
+- **経済カレンダー取得**、**決算カレンダー**、**CANSLIM株式スクリーナー**、**VCPスクリーナー**、**FTD検出器**、**マクロレジーム検出器**: [Financial Modeling Prep (FMP) API](https://financialmodelingprep.com)キーが必要
+  - 無料ティア: 250リクエスト/日（ほとんどのスキルに十分）
+  - 環境変数を設定: `export FMP_API_KEY=your_key_here`
+  - または、プロンプト時にコマンドライン引数でキーを提供
+- **マーケットブレッドアナライザー**、**アップトレンドアナライザー**、**セクターアナリスト**: APIキー不要（GitHubの無料CSVデータを使用。セクターアナリストはオプションでチャート画像も利用可）
+- **テーマ検出器**: コア機能にAPIキー不要（FINVIZパブリック + yfinance）。FMP APIは銘柄選定強化用（オプション）、FINVIZ Eliteは銘柄リスト取得用（オプション）
+- **FinVizスクリーナー**: APIキー不要（パブリックFinVizスクリーナー）。FINVIZ Eliteは`$FINVIZ_API_KEY`環境変数から自動検出（オプション）
+- **かんち式配当3スキル**（`kanchi-dividend-sop` / `kanchi-dividend-review-monitor` / `kanchi-dividend-us-tax-accounting`）: APIキー不要（上流データは他スキル出力または手動入力を利用）
+- **エッジ候補エージェント** (`edge-candidate-agent`): APIキー不要（ローカルYAML生成、ローカルパイプラインリポジトリに対して検証）
+- **トレード仮説アイデエータ** (`trade-hypothesis-ideator`): APIキー不要（ローカルJSON仮説パイプライン、任意で戦略エクスポート）
+- **エッジ戦略レビュアー** (`edge-strategy-reviewer`): APIキー不要（ローカルYAMLドラフトの決定論的スコアリング）
+- **エッジパイプラインオーケストレータ** (`edge-pipeline-orchestrator`): APIキー不要（ローカルエッジスキルをsubprocess経由でオーケストレーション）
+- **エッジシグナルアグリゲータ** (`edge-signal-aggregator`): APIキー不要（ローカルJSON/YAML出力を統合し重み付けランキングを生成）
+- **Trader Memory Core** (`trader-memory-core`): 🟡 オプション — FMPはポストモーテムのMAE/MFEのみ使用。コア機能はオフラインで動作
+- **エクスポージャーコーチ** (`exposure-coach`): 🟡 オプション — FMPはinstitutional-flow-trackerデータ利用時のみ必要
+- **シグナルポストモーテム** (`signal-postmortem`): 🟡 オプション — FMPは実現リターン取得用。手動価格入力にも対応
+
+## 参考リンク
+- Claude Skillsローンチ概要: https://www.anthropic.com/news/skills
+- Claude Code Skillsガイド: https://docs.claude.com/en/docs/claude-code/skills
+- Financial Modeling Prep API: https://financialmodelingprep.com/developer/docs
+
+質問や改善案があればissueを作成するか、各スキルフォルダにメモを残しておくと、後から利用するユーザーにもわかりやすくなります。
+
+## ライセンス
+
+このリポジトリのすべてのスキルと参照資料は、教育および研究目的で提供されています。
