@@ -13,11 +13,11 @@ from constants import DEV_MODE_FREE
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PRICE_ID   = os.environ.get("STRIPE_PRICE_ID", "")
 
-# Only initialise Stripe with the live key when payments are active.
+# Validate key at startup but do NOT set stripe.api_key globally —
+# pass it per-call so the key never appears in module-level state or error traces.
 if not DEV_MODE_FREE:
     if not STRIPE_SECRET_KEY:
         raise EnvironmentError("STRIPE_SECRET_KEY is not set. Payments cannot be processed.")
-    stripe.api_key = STRIPE_SECRET_KEY
 
 
 def create_checkout_session(success_url, cancel_url, email=None):
@@ -36,7 +36,7 @@ def create_checkout_session(success_url, cancel_url, email=None):
         }
         if email:
             kwargs["customer_email"] = email
-        session = stripe.checkout.Session.create(**kwargs)
+        session = stripe.checkout.Session.create(**kwargs, api_key=STRIPE_SECRET_KEY)
         return session
     except Exception as e:
         st.error(f"Payment error: {e}")
@@ -49,7 +49,7 @@ def verify_session(session_id):
         return False, None
     # ── Original Stripe logic preserved below — do not delete ──
     try:
-        session = stripe.checkout.Session.retrieve(session_id)
+        session = stripe.checkout.Session.retrieve(session_id, api_key=STRIPE_SECRET_KEY)
         if session.payment_status == "paid" and session.status == "complete":
             return True, session.customer_email
         return False, None
@@ -63,11 +63,11 @@ def check_subscription(email):
         return True
     # ── Original Stripe logic preserved below — do not delete ──
     try:
-        customers = stripe.Customer.list(email=email, limit=1)
+        customers = stripe.Customer.list(email=email, limit=1, api_key=STRIPE_SECRET_KEY)
         if not customers.data:
             return False
         customer = customers.data[0]
-        subs = stripe.Subscription.list(customer=customer.id, status="active", limit=1)
+        subs = stripe.Subscription.list(customer=customer.id, status="active", limit=1, api_key=STRIPE_SECRET_KEY)
         return len(subs.data) > 0
     except Exception:
         return False
@@ -91,7 +91,7 @@ def render_pricing_section():
         <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:2rem">
             <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.5px;
                         text-transform:uppercase;color:#64748b;margin-bottom:0.75rem">Free</div>
-            <div style="font-family:'DM Mono',monospace;font-size:2.5rem;font-weight:500;
+            <div style="font-family:'JetBrains Mono',monospace;font-size:2.5rem;font-weight:500;
                         color:#0f172a;margin-bottom:0.25rem">$0</div>
             <div style="font-size:0.85rem;color:#64748b;margin-bottom:1.5rem">Forever free</div>
             <div style="font-size:0.88rem;color:#334155;line-height:2.2">
@@ -122,7 +122,7 @@ def render_pricing_section():
             </div>
             <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.5px;
                         text-transform:uppercase;color:#38bdf8;margin-bottom:0.75rem">Pro</div>
-            <div style="font-family:'DM Mono',monospace;font-size:2.5rem;font-weight:500;
+            <div style="font-family:'JetBrains Mono',monospace;font-size:2.5rem;font-weight:500;
                         color:#fff;margin-bottom:0.25rem">{price_display}</div>
             <div style="font-size:0.85rem;color:#64748b;margin-bottom:1.5rem">
                 {"Billed annually · cancel anytime" if billing else "per month · cancel anytime"}

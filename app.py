@@ -272,7 +272,7 @@ with st.sidebar:
                     'border:1px solid #e2e8f0;'
                     'border-left:3px solid #1d4ed8;'
                     'margin-bottom:0.5rem;'
-                    'font-family:IBM Plex Sans,sans-serif">'
+                    'font-family:Inter,sans-serif">'
                     'Our <span style="color:#1d4ed8 !important;font-weight:600">Custom Forecast</span> '
                     'combines three models — '
                     '<span style="color:#1d4ed8 !important;font-weight:500">GARCH</span> volatility modeling, '
@@ -394,31 +394,31 @@ with tab1:
                         padding-top:1.5rem">
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'IBM Plex Mono',monospace">330+</div>
+                                font-family:'JetBrains Mono',monospace">330+</div>
                     <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Stocks Ranked Daily</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'IBM Plex Mono',monospace">2 Years</div>
+                                font-family:'JetBrains Mono',monospace">2 Years</div>
                     <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Price History</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'IBM Plex Mono',monospace">1,000</div>
+                                font-family:'JetBrains Mono',monospace">1,000</div>
                     <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Monte Carlo Paths</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'IBM Plex Mono',monospace">5</div>
+                                font-family:'JetBrains Mono',monospace">5</div>
                     <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Crash Scenarios</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'IBM Plex Mono',monospace">Live</div>
+                                font-family:'JetBrains Mono',monospace">Live</div>
                     <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Market Data</div>
                 </div>
@@ -446,8 +446,8 @@ with tab1:
                     st.markdown(f"""
                     <div class="mover-card">
                         <span style="font-weight:700;color:#0f172a;font-size:0.88rem">{g['Ticker']}</span>
-                        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.83rem;color:#6b7a8d">{g['Price']}</span>
-                        <span style="color:#059669;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:0.88rem">{g['Change']}</span>
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:0.83rem;color:#6b7a8d">{g['Price']}</span>
+                        <span style="color:#059669;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:0.88rem">{g['Change']}</span>
                     </div>""", unsafe_allow_html=True)
             else:
                 st.markdown('<span style="color:#38bdf8;font-size:0.85rem">Market data unavailable right now.</span>', unsafe_allow_html=True)
@@ -461,8 +461,8 @@ with tab1:
                     st.markdown(f"""
                     <div class="mover-card">
                         <span style="font-weight:700;color:#0f172a;font-size:0.88rem">{l['Ticker']}</span>
-                        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.83rem;color:#6b7a8d">{l['Price']}</span>
-                        <span style="color:#dc2626;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:0.88rem">{l['Change']}</span>
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:0.83rem;color:#6b7a8d">{l['Price']}</span>
+                        <span style="color:#dc2626;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:0.88rem">{l['Change']}</span>
                     </div>""", unsafe_allow_html=True)
             else:
                 st.markdown('<span style="color:#38bdf8;font-size:0.85rem">Market data unavailable right now.</span>', unsafe_allow_html=True)
@@ -591,7 +591,7 @@ with tab1:
                 <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.5px;
                             text-transform:uppercase;color:#64748b;margin-bottom:0.5rem">Free</div>
                 <div style="font-size:2rem;font-weight:700;color:#0f172a;
-                            font-family:'IBM Plex Mono',monospace;margin-bottom:0.25rem">$0</div>
+                            font-family:'JetBrains Mono',monospace;margin-bottom:0.25rem">$0</div>
                 <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">No credit card required</div>
                 <ul style="color:#64748b;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0">
                     <li>Full stock analysis on any ticker</li>
@@ -608,7 +608,7 @@ with tab1:
                 <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.5px;
                             text-transform:uppercase;color:#1d4ed8;margin-bottom:0.5rem">Pro</div>
                 <div style="font-size:2rem;font-weight:700;color:#0f172a;
-                            font-family:'IBM Plex Mono',monospace;margin-bottom:0.25rem">$9.99
+                            font-family:'JetBrains Mono',monospace;margin-bottom:0.25rem">$9.99
                     <span style="font-size:0.9rem;font-weight:400;color:#64748b">/month</span>
                 </div>
                 <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">Cancel anytime</div>
@@ -1945,7 +1945,7 @@ with tab1:
                 _chart_layout = dict(
                     plot_bgcolor="#ffffff",
                     paper_bgcolor="#f8fafc",
-                    font=dict(color="#0f172a", family="IBM Plex Sans"),
+                    font=dict(color="#0f172a", family="Inter"),
                     xaxis=dict(gridcolor="#e2e8f0", showgrid=True, color="#6b7a8d"),
                     yaxis=dict(gridcolor="#e2e8f0", showgrid=True, color="#6b7a8d"),
                     legend=dict(orientation="h", y=1.04, x=0,
@@ -2186,7 +2186,7 @@ with tab3:
     st.markdown("""
     <div style="background:linear-gradient(135deg,#0c1e35,#1e3a5f);border:1px solid #e2e8f0;
                 border-radius:3px;padding:1.5rem 2rem;margin-bottom:1.5rem">
-        <div style="font-family:'IBM Plex Mono',monospace;color:#1d4ed8;font-size:1.1rem;
+        <div style="font-family:'JetBrains Mono',monospace;color:#1d4ed8;font-size:1.1rem;
                     font-weight:500;margin-bottom:4px">🏦 Bond Analysis</div>
         <div style="color:#6b7a8d;font-size:0.85rem">
             Analyse bond ETFs · Price history · Volatility · Drawdown · Yield proxy
@@ -2208,7 +2208,7 @@ with tab3:
                         padding:0.85rem 1rem;margin-bottom:0.75rem">
                 <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.5px;
                             text-transform:uppercase;color:#6b7a8d;margin-bottom:0.35rem">{category}</div>
-                <div style="font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:#0f172a">{ticker_list}</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#0f172a">{ticker_list}</div>
             </div>""", unsafe_allow_html=True)
 
     # ── Analysis form ─────────────────────────────────────────────────────────

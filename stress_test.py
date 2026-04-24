@@ -141,7 +141,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
     st.markdown("""
     <div style="background:linear-gradient(135deg,#0c1e35,#1e3a5f);border:1px solid #e2e8f0;
                 border-radius:3px;padding:1.5rem 2rem;margin-bottom:1.5rem">
-        <div style="font-family:'IBM Plex Mono',monospace;color:#1d4ed8;font-size:1.1rem;
+        <div style="font-family:'JetBrains Mono',monospace;color:#1d4ed8;font-size:1.1rem;
                     font-weight:500;margin-bottom:4px">🔥 Stress Test & Portfolio Autopsy</div>
         <div style="color:#6b7a8d;font-size:0.85rem">
             Run your holdings through historical crashes · Upload a CSV to see what broke your portfolio
@@ -232,7 +232,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                 tc = "#dc2626" if (tr or 0) < 0 else "#16a34a"
                 val_str = f"{tr:+.1f}%" if tr is not None else "N/A"
                 chip_parts.append(
-                    f"<span style='font-family:\"IBM Plex Mono\",monospace;font-size:0.73rem'>"
+                    f"<span style='font-family:\"JetBrains Mono\",monospace;font-size:0.73rem'>"
                     f"<span style='color:#64748b'>{t}</span>&nbsp;"
                     f"<span style='color:{tc};font-weight:500'>{val_str}</span></span>"
                 )
@@ -257,7 +257,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                         <div style="font-size:0.73rem;color:#6b7a8d">{desc}</div>
                     </div>
                     <div style="text-align:right;flex-shrink:0;margin-left:1rem">
-                        <div style="font-family:'IBM Plex Mono',monospace;font-size:1.45rem;
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:1.45rem;
                                     font-weight:600;color:{card_color};line-height:1">{port_ret:+.1f}%</div>
                         <div style="font-size:0.72rem;color:#6b7a8d;margin-top:2px">
                             ${port_dollar:+,.0f}&nbsp;&nbsp;{spy_html}
@@ -460,7 +460,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                     <div style="font-size:0.65rem;font-weight:600;letter-spacing:0.5px;
                                 text-transform:uppercase;color:#64748b;margin-bottom:0.35rem">
                         Portfolio Return ({lookback})</div>
-                    <div style="font-family:'IBM Plex Mono',monospace;font-size:1.35rem;
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:1.35rem;
                                 font-weight:600;color:{ret_color}">{total_port_ret:+.2f}%</div>
                 </div>
                 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
@@ -468,7 +468,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                     <div style="font-size:0.65rem;font-weight:600;letter-spacing:0.5px;
                                 text-transform:uppercase;color:#64748b;margin-bottom:0.35rem">
                         Positions</div>
-                    <div style="font-family:'IBM Plex Mono',monospace;font-size:1.35rem;
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:1.35rem;
                                 font-weight:600;color:#0f172a">{len(avail)}</div>
                 </div>
                 <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;
@@ -476,7 +476,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                     <div style="font-size:0.65rem;font-weight:600;letter-spacing:0.5px;
                                 text-transform:uppercase;color:#64748b;margin-bottom:0.35rem">
                         Hurt Portfolio</div>
-                    <div style="font-family:'IBM Plex Mono',monospace;font-size:1.35rem;
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:1.35rem;
                                 font-weight:600;color:#dc2626">{losers}</div>
                 </div>
                 <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;
@@ -484,7 +484,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                     <div style="font-size:0.65rem;font-weight:600;letter-spacing:0.5px;
                                 text-transform:uppercase;color:#64748b;margin-bottom:0.35rem">
                         Helped Portfolio</div>
-                    <div style="font-family:'IBM Plex Mono',monospace;font-size:1.35rem;
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:1.35rem;
                                 font-weight:600;color:#16a34a">{gainers}</div>
                 </div>
             </div>
@@ -575,7 +575,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
 
                     if culprits:
                         chips = " · ".join(
-                            f"<span style='font-family:\"IBM Plex Mono\",monospace;font-size:0.76rem'>"
+                            f"<span style='font-family:\"JetBrains Mono\",monospace;font-size:0.76rem'>"
                             f"<span style='color:#dc2626'>{p[0]} ↔ {p[1]}</span> "
                             f"<span style='color:#7f1d1d;font-weight:500'>ρ={p[2]}</span></span>"
                             for p in culprits[:6]
