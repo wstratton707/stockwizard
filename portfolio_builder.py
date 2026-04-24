@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 
-from constants import DEV_MODE_FREE
+from constants import DEV_MODE_FREE, get_risk_free_rate
 from disclaimers import render_inline, render_section
 import disclaimers as _disc
 
@@ -15,6 +15,12 @@ from portfolio_data import (
     get_ticker_info, get_sharpe_rankings,
     SECTOR_UNIVERSE, SECTOR_ETFS,
     BOND_UNIVERSE, BOND_ETFS,
+)
+# Cached wrappers for repeat-call hot paths (validation + ticker info during
+# step transitions and rebuilds). Same call shape as their underlying funcs.
+from cached_fetchers import (
+    cached_validate_ticker as _cached_validate_ticker,
+    cached_get_ticker_info as _cached_get_ticker_info,
 )
 from database import save_portfolio, load_portfolios, delete_portfolio
 from portfolio_analysis import (
@@ -220,11 +226,15 @@ def _render_step_1(api_key):
     with col1:
         use_etfs = st.checkbox("Include Sector ETFs (XLK, XLV etc.)", value=True,
                                help="ETFs provide broad sector exposure with lower volatility")
-        dividend_pref = st.radio("Dividend Preference",
-            ["Growth (no focus on dividends)","Balanced","High dividend yield"], index=0)
+        max_per_stock = st.slider(
+            "Max weight per stock (%)", 5, 40, 25, step=5,
+            help="Caps single-position concentration during optimization.",
+        )
     with col2:
-        max_per_stock = st.slider("Max weight per stock (%)", 5, 40, 25, step=5)
-        min_holdings  = st.slider("Minimum number of holdings", 5, 20, 8, step=1)
+        min_holdings  = st.slider(
+            "Minimum number of holdings", 5, 20, 8, step=1,
+            help="Forces the optimizer to keep at least this many positions in the final portfolio.",
+        )
 
     st.markdown("---")
     col1, col2 = st.columns(2)
@@ -241,11 +251,10 @@ def _render_step_1(api_key):
             all_to_validate = list(dict.fromkeys(user_tickers + excl_tickers))
             invalid = []
             if all_to_validate:
-                from data import validate_ticker
                 from concurrent.futures import ThreadPoolExecutor, as_completed
                 with st.spinner(f"Validating {len(all_to_validate)} ticker(s)..."):
                     with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as _exe:
-                        _futs = {_exe.submit(validate_ticker, t, api_key): t
+                        _futs = {_exe.submit(_cached_validate_ticker, t, api_key): t
                                  for t in all_to_validate}
                         for _fut in as_completed(_futs):
                             t = _futs[_fut]
@@ -310,7 +319,9 @@ def _render_step_2(api_key):
 
             if rankings:
                 used_precompute = True
-                meta        = rankings.pop("_meta", {})
+                # Use .get not .pop — .pop mutates the cached session-state dict
+                # so subsequent renders (back/forward navigation) lose _meta.
+                meta        = rankings.get("_meta", {})
                 computed_at = meta.get("computed_at", "unknown")
                 is_partial  = meta.get("partial", False)
                 n_ranked    = len(rankings)
@@ -321,6 +332,8 @@ def _render_step_2(api_key):
                 # Group by sector, respecting user preferences
                 sector_groups: dict = defaultdict(list)
                 for ticker, data in rankings.items():
+                    if ticker == "_meta":   # skip the freshness-metadata entry
+                        continue
                     if ticker in excl_tickers:
                         continue
                     sector = data.get("sector", "Unknown")
@@ -429,7 +442,8 @@ def _render_step_2(api_key):
             portfolios = optimise_portfolio(returns_df,
                                             risk_tolerance=prefs.get("risk_tolerance", 5),
                                             target_return=target_ret,
-                                            sector_map=sector_map)
+                                            sector_map=sector_map,
+                                            max_weight=prefs.get("max_per_stock", 0.30))
             progress.progress(80, text="Generating efficient frontier...")
 
             ef_df = generate_efficient_frontier(returns_df, n_portfolios=_EF_PORTFOLIOS)
@@ -438,7 +452,7 @@ def _render_step_2(api_key):
             from concurrent.futures import ThreadPoolExecutor, as_completed
             ticker_info = {}
             with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as _exe:
-                _futs = {_exe.submit(get_ticker_info, t, api_key): t for t in returns_df.columns}
+                _futs = {_exe.submit(_cached_get_ticker_info, t, api_key): t for t in returns_df.columns}
                 for _fut in as_completed(_futs):
                     _t = _futs[_fut]
                     try:
@@ -538,11 +552,24 @@ def _render_step_2(api_key):
     selected_key     = choice_map[port_choice]
     selected_weights = portfolios[selected_key]
 
-    # Clean weights — remove tiny allocations (<1%) and warn user
-    dropped = [k for k, v in selected_weights.items() if v < _MIN_WEIGHT]
-    selected_weights = {k: v for k, v in selected_weights.items() if v >= _MIN_WEIGHT}
-    total = sum(selected_weights.values())
-    selected_weights = {k: v/total for k, v in selected_weights.items()}
+    # Clean weights — remove tiny allocations, but honour the user's
+    # min_holdings preference: never drop so many positions that we end up
+    # below it. If the strict <1% filter would leave too few holdings, keep
+    # the top N positions even if some are <1%.
+    _min_holdings = int(prefs.get("min_holdings", 8))
+    sorted_w = sorted(selected_weights.items(), key=lambda x: x[1], reverse=True)
+    above_threshold = [(k, v) for k, v in sorted_w if v >= _MIN_WEIGHT]
+
+    if len(above_threshold) >= _min_holdings:
+        kept    = dict(above_threshold)
+        dropped = [k for k, v in sorted_w if v < _MIN_WEIGHT]
+    else:
+        # Keep the top _min_holdings regardless of threshold to satisfy user pref
+        kept    = dict(sorted_w[:_min_holdings])
+        dropped = [k for k, _ in sorted_w[_min_holdings:]]
+
+    total = sum(kept.values())
+    selected_weights = {k: v / total for k, v in kept.items()} if total > 0 else kept
     if dropped:
         st.info(f"{len(dropped)} position(s) with weight <1% were removed by the optimizer "
                 f"and excluded from the portfolio: {', '.join(dropped)}")
@@ -550,6 +577,8 @@ def _render_step_2(api_key):
     # Portfolio metrics
     returns_df = opt["returns_df"]
     ann_ret, ann_vol, sharpe = 0, 0, 0
+    # RFR is in decimal form (e.g. 0.045); convert to % to match ann_ret/ann_vol
+    _rfr_pct = get_risk_free_rate() * 100
     tickers_in = [t for t in selected_weights if t in returns_df.columns]
     if tickers_in:
         w_arr   = np.array([selected_weights[t] for t in tickers_in])
@@ -557,7 +586,10 @@ def _render_step_2(api_key):
         ann_ret = returns_df[tickers_in].mean().values @ w_arr * 252 * 100
         cov     = returns_df[tickers_in].cov().values * 252
         ann_vol = np.sqrt(w_arr @ cov @ w_arr) * 100
-        sharpe  = ann_ret / ann_vol if ann_vol > 0 else 0
+        # True Sharpe: (excess return over RFR) / vol — matches the per-stock
+        # Sharpe shown in the holdings table and the methodology documented
+        # in the expander below.
+        sharpe  = (ann_ret - _rfr_pct) / ann_vol if ann_vol > 0 else 0
 
     _section_header("Portfolio Overview")
     cols = st.columns(4)
@@ -610,7 +642,8 @@ concentration penalty for any single position above 25%.
         _car  = returns_df[_ct2].mean().values @ _cwa * 252 * 100
         _ccov = returns_df[_ct2].cov().values * 252
         _cvol = np.sqrt(_cwa @ _ccov @ _cwa) * 100
-        _csh  = _car / _cvol if _cvol > 0 else 0
+        # True Sharpe (excess return basis) — same formula as Portfolio Overview
+        _csh  = (_car - _rfr_pct) / _cvol if _cvol > 0 else 0
         _ccum = (1 + (returns_df[_ct2] @ _cwa)).cumprod()
         _cdd  = ((_ccum - _ccum.cummax()) / _ccum.cummax()).min() * 100
         _top_t = max(_cw, key=_cw.get)

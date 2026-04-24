@@ -65,19 +65,25 @@ def _portfolio_vol(weights, returns_df):
 
 
 def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
-                       sector_map=None, max_sector_weight=0.40):
+                       sector_map=None, max_sector_weight=0.40, max_weight=0.30):
     """
     Run mean-variance optimisation.
     Returns weights dict for max Sharpe, min vol, and target return portfolios.
 
     sector_map       : {ticker: sector_label} — used to cap sector concentration.
     max_sector_weight: maximum combined weight for any single sector (default 40%).
+    max_weight       : maximum weight per individual position (default 30%).
     """
     n      = len(returns_df.columns)
     cols   = list(returns_df.columns)
-    # Scale min weight down so n * min_w never exceeds 1.0; keep max at 30%
+    # Clamp max_weight so n * max_weight >= 1 (otherwise the budget constraint
+    # is infeasible); also enforce a sane floor of 5%.
+    max_weight = max(0.05, min(max_weight, 1.0))
+    if n * max_weight < 1.0:
+        max_weight = 1.0 / n + 1e-3
+    # Scale min weight down so n * min_w never exceeds 1.0
     min_w  = min(0.02, 0.80 / n)
-    bounds = [(min_w, 0.30)] * n
+    bounds = [(min_w, max_weight)] * n
 
     # Pre-compute constants once — the optimizer calls the objective O(n²) times
     # per run, so recomputing mean/cov inside the objective is massively redundant.

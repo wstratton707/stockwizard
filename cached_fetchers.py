@@ -33,6 +33,7 @@ from data import (
     fetch_etf_details as _fetch_etf_details,
     detect_asset_type as _detect_asset_type,
 )
+from portfolio_data import get_ticker_info as _get_ticker_info
 from analysis import (
     run_monte_carlo as _run_monte_carlo,
     run_custom_forecast as _run_custom_forecast,
@@ -123,6 +124,13 @@ def cached_fetch_crypto_data(ticker, _api_key,
 @st.cache_data(ttl=_TTL_MEDIUM, max_entries=_MAX_ENTRIES, show_spinner=False)
 def cached_fetch_crypto_details(ticker):
     return _fetch_crypto_details(ticker)
+
+
+@st.cache_data(ttl=_TTL_XLONG, max_entries=_MAX_ENTRIES * 2, show_spinner=False)
+def cached_get_ticker_info(ticker, _api_key):
+    """Lightweight company metadata (name/sector/exchange/market_cap) — cached
+    long since this barely changes day-to-day."""
+    return _get_ticker_info(ticker, _api_key)
 
 
 @st.cache_data(ttl=_TTL_FMP, max_entries=_MAX_ENTRIES, show_spinner=False)
