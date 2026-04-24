@@ -20,6 +20,20 @@ from data import (
     fetch_crypto_data, fetch_crypto_details, fetch_etf_details,
     CRYPTO_TICKERS,
 )
+# Cached wrappers — same call shape, returns memoised results for the TTLs
+# defined in cached_fetchers.py. Dramatically speeds up re-runs (toggling a
+# chart checkbox, switching tabs, etc.) because expensive Polygon/FMP calls
+# return instantly from in-process memory.
+from cached_fetchers import (
+    cached_validate_ticker, cached_detect_asset_type,
+    cached_fetch_stock_data, cached_fetch_ohlcv,
+    cached_fetch_company_details, cached_fetch_news,
+    cached_fetch_peer_comparison, cached_fetch_sector_data,
+    cached_fetch_next_earnings, cached_fetch_crypto_data,
+    cached_fetch_crypto_details, cached_fetch_etf_details,
+    cached_run_monte_carlo, cached_run_custom_forecast,
+    cached_detect_support_resistance, cached_build_correlation_matrix,
+)
 try:
     from streamlit_autorefresh import st_autorefresh
     _HAS_AUTOREFRESH = True
@@ -138,7 +152,18 @@ def _tape_html(items):
     doubled = items_html * 2  # seamless loop
     return f'<div class="ticker-tape-wrap"><div class="ticker-tape">{doubled}</div></div>'
 
-_tape_items = get_tape_prices(POLYGON_API_KEY)
+# Streamlit-level cache on top of live_data.py's module dicts so these
+# lightweight but frequently-called fetches don't hit Polygon on every
+# tab switch / widget toggle.
+@st.cache_data(ttl=60, max_entries=1, show_spinner=False)
+def _cached_tape(_api_key):
+    return get_tape_prices(_api_key)
+
+@st.cache_data(ttl=300, max_entries=1, show_spinner=False)
+def _cached_movers(_api_key):
+    return get_top_movers(_api_key)
+
+_tape_items = _cached_tape(POLYGON_API_KEY)
 if not _tape_items:
     # Static fallback if market is closed or API is unavailable
     _tape_items = [
@@ -434,7 +459,7 @@ with tab1:
         """, unsafe_allow_html=True)
 
         with st.spinner("Loading market data..."):
-            gainers, losers = get_top_movers(POLYGON_API_KEY)
+            gainers, losers = _cached_movers(POLYGON_API_KEY)
 
         col1, col2 = st.columns(2)
         with col1:
@@ -680,7 +705,7 @@ with tab1:
             st.stop()
 
         with st.spinner(f"Validating {ticker_input}..."):
-            valid, info = validate_ticker(ticker_input, POLYGON_API_KEY)
+            valid, info = cached_validate_ticker(ticker_input, POLYGON_API_KEY)
 
         if not valid:
             # Reference API may be rate-limited — try fetching price data directly
@@ -692,7 +717,7 @@ with tab1:
             # Otherwise continue — fetch_stock_data will raise if the ticker is truly invalid
 
         # Detect asset type (stock / etf / crypto)
-        asset_type = detect_asset_type(ticker_input, POLYGON_API_KEY)
+        asset_type = cached_detect_asset_type(ticker_input, POLYGON_API_KEY)
         is_crypto  = asset_type == "crypto"
         is_etf     = asset_type == "etf"
         # For Polygon API calls, crypto needs the X: prefix
@@ -933,44 +958,48 @@ with tab1:
             try:
                 progress.progress(10, text="Downloading price data...")
                 if is_crypto:
-                    df = fetch_crypto_data(ticker_input, api_key=POLYGON_API_KEY, log=log,
-                                           start_override=date_start, end_override=date_end,
-                                           bar_size=bar_size)
+                    df = cached_fetch_crypto_data(ticker_input, POLYGON_API_KEY,
+                                                  start_override=date_start,
+                                                  end_override=date_end,
+                                                  bar_size=bar_size)
                 else:
-                    df = fetch_stock_data(ticker_input, benchmark_tickers=benchmarks,
-                                          api_key=POLYGON_API_KEY, log=log,
-                                          start_override=date_start, end_override=date_end,
-                                          bar_size=bar_size)
+                    df = cached_fetch_stock_data(ticker_input, tuple(benchmarks), POLYGON_API_KEY,
+                                                 start_override=date_start,
+                                                 end_override=date_end,
+                                                 bar_size=bar_size)
 
                 progress.progress(25, text="Fetching details...")
                 if is_crypto:
                     company_details = {}
-                    crypto_details  = fetch_crypto_details(ticker_input)
+                    crypto_details  = cached_fetch_crypto_details(ticker_input)
                     sector          = "Cryptocurrency"
                 else:
-                    company_details = fetch_company_details(ticker_input, POLYGON_API_KEY, log=log)
+                    company_details = cached_fetch_company_details(ticker_input, POLYGON_API_KEY)
                     crypto_details  = {}
                     sector          = company_details.get("Sector", "Unknown")
 
-                etf_details = fetch_etf_details(ticker_input, FMP_API_KEY) if is_etf else {}
+                etf_details = cached_fetch_etf_details(ticker_input, FMP_API_KEY) if is_etf else {}
 
                 news_list = []
                 if do_news:
                     progress.progress(35, text="Fetching news...")
-                    news_list = fetch_news(ticker_input, POLYGON_API_KEY, log=log)
+                    news_list = cached_fetch_news(ticker_input, POLYGON_API_KEY)
 
                 peer_df       = None
                 peer_price_dfs = {}   # {ticker: df} with Cumulative_Index + Close
                 if do_peers and peers_list and not is_crypto:
                     progress.progress(45, text="Fetching peer data...")
-                    peer_df = fetch_peer_comparison(ticker_input, peers_list, POLYGON_API_KEY, log=log)
+                    peer_df = cached_fetch_peer_comparison(ticker_input, tuple(peers_list), POLYGON_API_KEY)
                     for _pt in [ticker_input] + peers_list[:4]:
                         try:
-                            _pdf = fetch_ohlcv(_pt, "5y", POLYGON_API_KEY,
-                                               log=lambda m: None,
-                                               start_override=date_start,
-                                               end_override=date_end,
-                                               bar_size=bar_size)
+                            _pdf = cached_fetch_ohlcv(_pt, "5y", POLYGON_API_KEY,
+                                                      start_override=date_start,
+                                                      end_override=date_end,
+                                                      bar_size=bar_size)
+                            # .copy() — cached_fetch_ohlcv returns a memoised df;
+                            # we add Daily_Return + Cumulative_Index columns below,
+                            # which would mutate the cache without this.
+                            _pdf = _pdf.copy()
                             _pdf["Daily_Return"]     = _pdf["Close"].pct_change()
                             _pdf["Cumulative_Index"] = (1 + _pdf["Daily_Return"].fillna(0)).cumprod() * 100
                             peer_price_dfs[_pt] = _pdf
@@ -980,32 +1009,44 @@ with tab1:
                 sector_df = None
                 if do_sector and not is_crypto:
                     progress.progress(50, text="Fetching sector ETF...")
-                    sector_df = fetch_sector_data(ticker_input, POLYGON_API_KEY, sector, log=log,
-                                                  start_override=date_start, end_override=date_end,
-                                                  bar_size=bar_size)
+                    sector_df = cached_fetch_sector_data(ticker_input, POLYGON_API_KEY, sector,
+                                                         start_override=date_start,
+                                                         end_override=date_end,
+                                                         bar_size=bar_size)
+
+                # Proxy key for heavy-computation caches: ticker + last date
+                # (df content changes → last date changes → cache invalidates).
+                _last_date_key = str(df["Date"].iloc[-1]) if "Date" in df.columns and len(df) else ""
 
                 corr_matrix = None
                 if do_corr:
                     progress.progress(60, text="Building correlation matrix...")
-                    corr_matrix = build_correlation_matrix(df, benchmarks if benchmarks else None)
+                    corr_matrix = cached_build_correlation_matrix(
+                        ticker_input, _last_date_key,
+                        tuple(benchmarks) if benchmarks else (), df,
+                    )
 
                 resistance = support = None
                 if do_sr:
                     progress.progress(65, text="Detecting support & resistance...")
-                    resistance, support = detect_support_resistance(df)
+                    resistance, support = cached_detect_support_resistance(
+                        ticker_input, _last_date_key, df,
+                    )
 
                 mc_sim_df = mc_summary = None
                 custom_garch_vols = custom_ml_drift = None
                 if do_mc:
                     if forecast_method == "Custom Forecast":
                         progress.progress(75, text="Running Custom Forecast (GARCH + ML + Monte Carlo)...")
-                        mc_sim_df, custom_garch_vols, custom_ml_drift, mc_summary = run_custom_forecast(
-                            df,
-                            n_simulations=n_sims, forecast_days=n_horizon, log=log)
+                        mc_sim_df, custom_garch_vols, custom_ml_drift, mc_summary = \
+                            cached_run_custom_forecast(
+                                ticker_input, _last_date_key, n_sims, n_horizon, df,
+                            )
                     else:
                         progress.progress(75, text="Running Monte Carlo simulation...")
-                        mc_sim_df, mc_summary = run_monte_carlo(
-                            df, n_simulations=n_sims, forecast_days=n_horizon, log=log)
+                        mc_sim_df, mc_summary = cached_run_monte_carlo(
+                            ticker_input, _last_date_key, n_sims, n_horizon, df,
+                        )
 
                 progress.progress(85, text="Generating summary...")
                 ret      = df["Daily_Return"].dropna()
@@ -1217,7 +1258,7 @@ with tab1:
                 extra_label = "Expense Ratio"
                 extra_value = f"{exp:.2f}%" if exp else "N/A"
             else:
-                earnings_date = fetch_next_earnings(ticker_input, POLYGON_API_KEY)
+                earnings_date = cached_fetch_next_earnings(ticker_input, POLYGON_API_KEY)
                 extra_label = "Last Earnings"
                 extra_value = earnings_date[:10] if earnings_date and earnings_date != "N/A" else "N/A"
 
