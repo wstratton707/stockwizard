@@ -427,39 +427,42 @@ def _close_df_to_price_dict(close_df: pd.DataFrame) -> dict:
 
 def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print):
     """
-    Fetches portfolio price history with a persistent Supabase cache.
+    Fetches portfolio price history with a two-layer cache:
 
-    Strategy — bootstrap once, append daily:
-      - First call: fetches full `period_years` of history from Polygon and
-        stores it under a stable key (no date in key).
-      - Subsequent calls: checks how many trading days are missing since the
-        last cached date, fetches only those days, appends them, and re-saves.
-        Typically 0–5 API calls instead of hundreds.
+      Layer 1 — Bundle cache  (portfolio_prices_hist_<hash-of-tickers>)
+        Fast path for the EXACT same ticker set as a prior call. One Supabase
+        read returns a pre-assembled close_df. Changes in sidebar preferences
+        change the ticker set and miss this layer.
 
-    Cache key: portfolio_prices_hist_<sorted-tickers-hash>
-    TTL: refreshed to 400 days on every daily update.
+      Layer 2 — Per-ticker cache  (ohlcv_<ticker>_<monday>_<monday>)
+        Hit via `_fetch_ohlcv` inside `fetch_portfolio_prices`. Survives
+        sidebar preference changes because it's keyed per ticker, not per
+        set. Warmed nightly by precompute.py's `warm_portfolio_cache`.
+
+      Layer 3 — Polygon fetch
+        Cold-path for any ticker that misses both layers above.
     """
     import hashlib
 
     tk_key   = hashlib.md5(",".join(sorted(tickers)).encode()).hexdigest()[:10]
     hist_key = f"portfolio_prices_hist_{tk_key}"
 
+    # ── Layer 1: bundle cache for exact-same ticker set ────────────────────────
     cached = cache_get(hist_key)
     if cached is not None:
         try:
             close_df = _payload_to_close_df(cached)
             failed   = cached.get("failed", [])
 
-            # ── Check freshness and append any missing trading days ────────────
+            # Check freshness — append any missing trading days
             latest   = close_df.index.max()
             today    = pd.Timestamp.today().normalize()
-            # Allow 1-day lag for market close + data pipeline
             cutoff   = today - pd.Timedelta(days=1)
 
             if latest < cutoff:
                 fetch_start = (latest + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
                 fetch_end   = today.strftime("%Y-%m-%d")
-                log(f"   🔄 Cache is {(cutoff - latest).days} day(s) stale — "
+                log(f"   🔄 Bundle cache is {(cutoff - latest).days} day(s) stale — "
                     f"fetching {fetch_start} → {fetch_end}")
 
                 new_dfs = {}
@@ -484,7 +487,6 @@ def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print
                     new_close = pd.DataFrame(new_dfs)
                     close_df  = pd.concat([close_df, new_close])
                     close_df  = close_df[~close_df.index.duplicated(keep="last")].sort_index()
-                    # Trim to period_years so the dataframe doesn't grow forever
                     cutoff_date = today - pd.Timedelta(days=int(period_years * 365.25))
                     close_df    = close_df[close_df.index >= cutoff_date]
                     log(f"   ✅ Appended {len(new_close)} new row(s) — "
@@ -493,33 +495,37 @@ def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print
                         cache_set(hist_key, _close_df_to_payload(close_df, failed),
                                   ttl_hours=400 * 24)
                     except Exception as e:
-                        log(f"   ⚠ Could not update cache: {e}")
+                        log(f"   ⚠ Could not update bundle cache: {e}")
                 else:
-                    log("   ⚡ No new trading data available yet — using existing cache")
+                    log("   ⚡ No new trading data available yet — using existing bundle")
             else:
-                log(f"   ⚡ Cache is current (latest: {latest.date()}) — skipping fetch")
+                log(f"   ⚡ Bundle cache current (latest: {latest.date()})")
 
             returns_df = close_df.pct_change().dropna()
             price_dict = _close_df_to_price_dict(close_df)
-            log(f"   ✅ {len(price_dict)} tickers loaded from cache")
+            log(f"   ✅ {len(price_dict)} tickers loaded from bundle cache")
             return price_dict, close_df, returns_df, failed
 
         except Exception as e:
-            log(f"   ⚠ Cache parse failed ({e}) — bootstrapping full history...")
+            log(f"   ⚠ Bundle cache parse failed ({e}) — falling back to per-ticker")
 
-    # ── Bootstrap: full history fetch (runs once per ticker set) ──────────────
-    log(f"   📦 No cached history found — fetching {period_years}-year history "
-        f"for {len(tickers)} tickers (one-time bootstrap)...")
+    # ── Layers 2+3: per-ticker cache via _fetch_ohlcv, then Polygon for misses ─
+    # fetch_portfolio_prices calls _fetch_ohlcv per ticker, which checks Supabase
+    # per-ticker cache first (warmed nightly by precompute.py). Only tickers
+    # missing from that cache trigger a Polygon fetch.
+    log(f"   🔍 No matching bundle for this ticker set — checking per-ticker caches "
+        f"for {len(tickers)} tickers (warmed tickers return instantly)")
     price_dict, close_df, returns_df, failed = fetch_portfolio_prices(
         tickers, period_years=period_years, api_key=api_key, log=log
     )
 
+    # Save the assembled bundle so next call with identical prefs is instant
     try:
         if cache_set(hist_key, _close_df_to_payload(close_df, failed),
                      ttl_hours=400 * 24):
-            log("   ✅ Full history cached in Supabase — future runs will only fetch new days")
+            log("   ✅ Bundle cached for future runs with the same ticker set")
     except Exception as e:
-        log(f"   ⚠ Could not write bootstrap cache: {e}")
+        log(f"   ⚠ Could not write bundle cache: {e}")
 
     return price_dict, close_df, returns_df, failed
 

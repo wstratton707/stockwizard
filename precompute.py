@@ -320,7 +320,10 @@ def warm_portfolio_cache(rankings: dict):
 
     print("\nUpdating portfolio price cache (bootstrap once, append daily)...")
 
-    # Select top 2 per sector (default: all sectors, risk tolerance 5)
+    # Top 6 per sector covers every sidebar preference combo (risk tolerance 10
+    # asks for 6/sector; lower tolerances ask for fewer). Warming all 6 means
+    # the Portfolio Builder gets per-ticker cache hits regardless of user prefs.
+    # 11 sectors × 6 + SPY + QQQ ≈ 68 tickers.
     sector_groups: dict = defaultdict(list)
     for ticker, data in rankings.items():
         sector = data.get("sector", "Unknown")
@@ -331,12 +334,12 @@ def warm_portfolio_cache(rankings: dict):
     candidates = ["SPY", "QQQ"]
     for sector, ticker_scores in sector_groups.items():
         ranked = sorted(ticker_scores, key=lambda x: x[1], reverse=True)
-        for t, _ in ranked[:2]:
+        for t, _ in ranked[:6]:
             if t not in candidates:
                 candidates.append(t)
 
-    candidates = candidates[:22]
-    print(f"Pre-fetching 2-year prices for {len(candidates)} tickers: {', '.join(candidates)}")
+    print(f"Pre-fetching 2-year prices for {len(candidates)} tickers "
+          f"(top 6 per sector)...")
 
     try:
         _, close_df, _, failed = fetch_portfolio_prices_cached(
