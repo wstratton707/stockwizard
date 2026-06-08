@@ -55,9 +55,12 @@ from disclaimers import render_inline, render_section, render_footer
 import disclaimers as _disc
 
 # ── Page config ───────────────────────────────────────────────────────────────
+# Page icon falls back to the diamond glyph if the logo file isn't present yet.
+_LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo.png")
+_page_icon = _LOGO_PATH if os.path.exists(_LOGO_PATH) else "◈"
 st.set_page_config(
-    page_title="StockWizard",
-    page_icon="◈",
+    page_title="QuantWizard",
+    page_icon=_page_icon,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -109,7 +112,7 @@ if not DEV_MODE_FREE and "session_id" in params:
         st.query_params.clear()
         if email:
             st.query_params["email"] = email
-        st.success("Welcome to StockWizard Pro!")
+        st.success("Welcome to QuantWizard Pro!")
 
 # ── Re-verify Pro status on page refresh via saved email ──────────────────────
 # DEV_MODE_FREE: skip subscription lookup — preserved, not deleted.
@@ -122,11 +125,17 @@ elif not DEV_MODE_FREE and not st.session_state.get("is_pro"):
             st.session_state["user_email"] = saved_email
 
 # ── Header ────────────────────────────────────────────────────────────────────
-st.markdown("""
+_logo_html = (
+    f'<img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/logo.png" '
+    f'alt="QuantWizard" style="width:48px;height:48px;border-radius:10px;flex-shrink:0;'
+    f'box-shadow:0 4px 12px rgba(59,130,246,0.4)">'
+) if os.path.exists(_LOGO_PATH) else '<div class="main-header-logo-icon">W</div>'
+
+st.markdown(f"""
 <div class="main-header">
     <div class="main-header-logo">
-        <div class="main-header-logo-icon">W</div>
-        <h1>Stock<span>Wizard</span></h1>
+        {_logo_html}
+        <h1>Quant<span>Wizard</span></h1>
     </div>
     <div class="main-header-sub">
         <span class="badge">Stocks</span>
@@ -210,7 +219,7 @@ with st.sidebar:
                     border:1px solid rgba(59,130,246,0.3);border-radius:2px;
                     padding:0.7rem 1rem;margin-bottom:1.25rem;text-align:center">
             <span style="color:#1d4ed8;font-weight:700;font-size:0.8rem;letter-spacing:0.5px">
-                ⚡ STOCKWIZARD
+                ⚡ QUANTWIZARD
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -346,7 +355,7 @@ with st.sidebar:
 # DEV_MODE_FREE: modal never shown — Stripe checkout logic preserved, not deleted.
 if not DEV_MODE_FREE and SHOW_PRICING and st.session_state["show_payment"] and not st.session_state["is_pro"]:
     st.markdown("---")
-    st.markdown("### Upgrade to StockWizard Pro")
+    st.markdown("### Upgrade to QuantWizard Pro")
     col1, col2 = st.columns([2, 1])
     with col1:
         email_for_payment = st.text_input("Your email address", placeholder="you@email.com", key="pay_email")
@@ -354,7 +363,7 @@ if not DEV_MODE_FREE and SHOW_PRICING and st.session_state["show_payment"] and n
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
         if st.button("Continue to Payment →", type="primary"):
             if email_for_payment and "@" in email_for_payment:
-                base_url = os.environ.get("BASE_URL", "https://stockwizard-production.up.railway.app")
+                base_url = os.environ.get("BASE_URL", "https://stockwizard-fhpncsuzkzaxy6bs427f9q.streamlit.app")
                 session  = create_checkout_session(base_url, base_url, email=email_for_payment)
                 if session:
                     st.markdown(f"""
@@ -496,7 +505,7 @@ with tab1:
         st.markdown("""
         <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
                     color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
-                    margin-bottom:1rem;margin-top:2rem">Why StockWizard</div>
+                    margin-bottom:1rem;margin-top:2rem">Why QuantWizard</div>
         """, unsafe_allow_html=True)
 
         p1, p2, p3 = st.columns(3)
@@ -583,7 +592,7 @@ with tab1:
             (h1, "1", "Enter Your Preferences",
              "Set your risk tolerance, starting capital, sectors to include, and investment horizon. Takes 2 minutes."),
             (h2, "2", "We Rank & Optimize",
-             "StockWizard scores 330+ stocks daily using Sharpe ratio and momentum, selects the best per sector, then runs mean-variance optimization."),
+             "QuantWizard scores 330+ stocks daily using Sharpe ratio and momentum, selects the best per sector, then runs mean-variance optimization."),
             (h3, "3", "Get Your Full Report",
              "2-year backtest, Monte Carlo forecast with milestone probabilities, stress test results, and a downloadable Excel + PowerPoint report."),
         ]:
@@ -670,7 +679,7 @@ with tab1:
                     <div style="color:#1d4ed8;font-size:0.78rem;margin-bottom:0.5rem">
                         Founder · Indiana University Bloomington</div>
                     <div style="color:#64748b;font-size:0.82rem;line-height:1.6;font-style:italic">
-                        "I built StockWizard because I was tired of spending hours pulling financial
+                        "I built QuantWizard because I was tired of spending hours pulling financial
                         data manually. Any investor deserves a professional report in seconds."
                     </div>
                 </div>
@@ -687,7 +696,7 @@ with tab1:
                     <div style="color:#1d4ed8;font-size:0.78rem;margin-bottom:0.5rem">
                         Co-Founder &amp; Quantitative Lead · Bucknell University</div>
                     <div style="color:#64748b;font-size:0.82rem;line-height:1.6;font-style:italic">
-                        "Every number StockWizard produces is something a professional quant
+                        "Every number QuantWizard produces is something a professional quant
                         would stand behind. Rigorous analysis, clean interface."
                     </div>
                 </div>

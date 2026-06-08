@@ -1,5 +1,5 @@
 # constants.py
-# Central configuration for Stock Wizard.
+# Central configuration for Quant Wizard.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DEVELOPMENT PHASE FLAG

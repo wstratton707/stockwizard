@@ -87,7 +87,7 @@ def _build_cover(wb, preferences, final_weights, backtest_metrics, mc_summary, s
 
     ws.merge_cells("B2:C3")
     c = ws["B2"]
-    c.value     = "◈  StockWizard — Portfolio Analysis Report"
+    c.value     = "◈  QuantWizard — Portfolio Analysis Report"
     c.font      = Font(size=20, bold=True, color=MID_BLUE, name="Arial")
     c.alignment = Alignment(horizontal="left", vertical="center")
     ws.row_dimensions[2].height = 28
@@ -136,13 +136,13 @@ def _build_dashboard(wb, preferences, final_weights, stock_metrics,
     ws.column_dimensions["D"].width = 10
 
     ws.merge_cells("A1:D1")
-    ws["A1"] = "◈ StockWizard — Portfolio Dashboard"
+    ws["A1"] = "◈ QuantWizard — Portfolio Dashboard"
     ws["A1"].font      = Font(size=18, bold=True, color=DARK_BLUE, name="Arial")
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 34
 
     ws.merge_cells("A2:D2")
-    ws["A2"] = f"Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}  |  Powered by StockWizard"
+    ws["A2"] = f"Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}  |  Powered by QuantWizard"
     ws["A2"].font      = Font(italic=True, color="888888", name="Arial", size=9)
     ws["A2"].alignment = Alignment(horizontal="center")
 

@@ -9,7 +9,7 @@ KNOWN LIMITATION — Polygon free tier data cap:
   The reference benchmarks and tolerances are correct; only data access is the bottleneck.
   See claudenotes.md for full context.
 
-Runs known portfolios through StockWizard's backtest engine and compares
+Runs known portfolios through QuantWizard's backtest engine and compares
 results against independently verifiable benchmarks.
 
 Usage:
@@ -216,7 +216,7 @@ def run_validation(verbose: bool = False) -> dict:
         print("ERROR: POLYGON_API_KEY not set.")
         sys.exit(1)
 
-    print(f"\nStockWizard Backtest Accuracy Validation")
+    print(f"\nQuantWizard Backtest Accuracy Validation")
     print(f"{'='*60}")
     print(f"Risk-free rate: {__import__('constants').get_risk_free_rate()*100:.2f}%")
     print(f"Tolerances: return ±{TOL_RETURN}pp  vol ±{TOL_VOL}pp  "
@@ -309,7 +309,7 @@ def run_validation(verbose: bool = False) -> dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="StockWizard backtest validation")
+    parser = argparse.ArgumentParser(description="QuantWizard backtest validation")
     parser.add_argument("--verbose", action="store_true",
                         help="Print additional metrics per test case")
     args = parser.parse_args()

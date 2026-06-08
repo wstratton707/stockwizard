@@ -1,4 +1,4 @@
-# ◈ StockWizard — Streamlit Web App
+# ◈ QuantWizard — Streamlit Web App
 
 Professional stock analysis tool powered by Polygon.io. Generates a full 10-sheet Excel report with Monte Carlo simulation, technical indicators, peer comparison, and more.
 
@@ -22,8 +22,8 @@ Professional stock analysis tool powered by Polygon.io. Generates a full 10-shee
    ```bash
    git init
    git add .
-   git commit -m "Initial StockWizard app"
-   git remote add origin https://github.com/YOUR_USERNAME/stockwizard.git
+   git commit -m "Initial QuantWizard app"
+   git remote add origin https://github.com/YOUR_USERNAME/quantwizard.git
    git push -u origin main
    ```
 
@@ -34,7 +34,7 @@ Professional stock analysis tool powered by Polygon.io. Generates a full 10-shee
    - Click Deploy
 
 3. **You get a free public URL** like:
-   `https://your-username-stockwizard-app-xyz123.streamlit.app`
+   `https://your-username-quantwizard-app-xyz123.streamlit.app`
 
 ---
 

@@ -206,7 +206,7 @@ def _render_step_1(api_key):
 
     _section_header("Add Your Own Stocks (Optional)")
     st.markdown("<div style='font-size:0.85rem;color:#64748b;margin-bottom:0.5rem'>"
-                "StockWizard will suggest a portfolio automatically. "
+                "QuantWizard will suggest a portfolio automatically. "
                 "You can optionally add tickers you specifically want included.</div>",
                 unsafe_allow_html=True)
 
@@ -1530,7 +1530,7 @@ reflects that.
             st.download_button(
                 label="⬇  Download Portfolio Report (.xlsx)",
                 data=st.session_state[_K_EXCEL],
-                file_name=f"StockWizard_Portfolio_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                file_name=f"QuantWizard_Portfolio_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True, type="primary", key="download_portfolio",
             )
@@ -1540,7 +1540,7 @@ reflects that.
             st.download_button(
                 label="⬇  Download Portfolio Report (.pptx)",
                 data=st.session_state[_K_PPTX],
-                file_name=f"StockWizard_Portfolio_{datetime.now().strftime('%Y%m%d')}.pptx",
+                file_name=f"QuantWizard_Portfolio_{datetime.now().strftime('%Y%m%d')}.pptx",
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 use_container_width=True, type="primary", key="download_portfolio_pptx",
             )

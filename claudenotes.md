@@ -1,4 +1,4 @@
-# Claude Notes — StockWizard
+# Claude Notes — QuantWizard
 Internal reference file for Claude. Tracks known issues, architectural decisions,
 conversation history, and onboarding context. Not for users.
 
@@ -10,7 +10,7 @@ Founders: Wyatt Stratton + Nicholas Carriello (IU Bloomington)
 
 ## FOR ANY CLAUDE READING THIS — START HERE
 
-This is StockWizard, a Streamlit-based stock analysis SaaS being built by two
+This is QuantWizard, a Streamlit-based stock analysis SaaS being built by two
 college co-founders. You may be talking to either Wyatt (the one who set up this
 file) or Nicholas. Before doing anything, read this whole file. It will save you
 from re-discovering things that were already figured out.
@@ -27,7 +27,7 @@ changes that assume long historical data is available — it isn't yet.
 
 ## WHAT THE APP DOES
 
-StockWizard is a 4-tab Streamlit app deployed on Railway. Users get a free tier
+QuantWizard is a 4-tab Streamlit app deployed on Railway. Users get a free tier
 and a Pro tier ($9.99/month — currently DISABLED while we validate data accuracy).
 
 **Tab 1 — Stock Analysis (Free)**

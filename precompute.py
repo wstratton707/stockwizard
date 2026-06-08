@@ -1,7 +1,7 @@
 """
 precompute.py — Daily S&P 500 multi-factor ranking precomputation
 
-Fetches 1-year price history for every ticker in the StockWizard universe
+Fetches 1-year price history for every ticker in the QuantWizard universe
 (~330 stocks + bond ETFs), computes a multi-factor score combining:
   - Sharpe ratio        (risk-adjusted return)
   - 6-month momentum   (trend strength)
@@ -256,7 +256,7 @@ def main():
 
     sector_filter = _parse_sectors_arg()
 
-    print(f"StockWizard Daily Precompute — {TODAY}")
+    print(f"QuantWizard Daily Precompute — {TODAY}")
     print("=" * 55)
 
     # When a sector filter is given, this is one half of a split run — skip the

@@ -62,12 +62,12 @@ DIVIDENDS = (
 
 # ── Full legal footer (landing page, bottom of reports) ──────────────────────
 FULL_FOOTER = (
-    "StockWizard is a financial data and analytics platform. It is not a registered "
+    "QuantWizard is a financial data and analytics platform. It is not a registered "
     "investment adviser, broker-dealer, or financial planner. All analysis, rankings, "
     "portfolio weights, forecasts, and stress test results are generated algorithmically "
     "for informational and educational purposes only. Nothing on this platform "
     "constitutes investment advice, a solicitation, or an offer to buy or sell any "
-    "security. StockWizard does not have knowledge of your individual financial "
+    "security. QuantWizard does not have knowledge of your individual financial "
     "situation, investment objectives, or risk tolerance. Past performance of any "
     "strategy or security does not guarantee future results. Investing involves risk, "
     "including the possible loss of principal. Always consult a licensed financial "

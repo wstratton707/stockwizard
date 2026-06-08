@@ -74,7 +74,7 @@ def main():
         print("ERROR: POLYGON_API_KEY not set.")
         sys.exit(1)
 
-    print(f"StockWizard Strategy Precompute — {STRATEGY_NAME}")
+    print(f"QuantWizard Strategy Precompute — {STRATEGY_NAME}")
     print(f"Cache key: {CACHE_KEY}")
     print("=" * 60)
 
