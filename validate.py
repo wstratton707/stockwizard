@@ -308,9 +308,66 @@ def run_validation(verbose: bool = False) -> dict:
     return results
 
 
+# ── Plan-independent self-consistency check ───────────────────────────────────
+# The historical benchmarks above need ~5yr of history that lower Polygon tiers
+# paywall (HTTP 403). This check instead runs on the most recent ~18 months
+# (always available) and guards the backtest's contribution accounting: a
+# 100%-SPY portfolio must report the SAME return/risk whether or not monthly
+# contributions are added, and ~0 alpha vs the SPY benchmark. It is a regression
+# guard for the bug where contribution inflows were counted as investment
+# returns (a 100%-SPY portfolio reported ~58% return / 2.5 Sharpe instead of ~15%
+# / ~0.6) and the benchmark ignored contributions.
+
+def run_self_consistency_check() -> bool:
+    from portfolio_analysis import backtest_portfolio, compute_backtest_metrics
+
+    print(f"\nBacktest self-consistency check (100% SPY, recent ~18mo)")
+    print(f"{'='*60}")
+    end   = datetime.today()
+    start = end - timedelta(days=550)
+    try:
+        close_df = _fetch_prices(["SPY"], start.strftime("%Y-%m-%d"),
+                                 end.strftime("%Y-%m-%d"))
+    except Exception as e:
+        print(f"  ✗ SKIPPED — could not fetch SPY data: {e}")
+        return True  # don't fail the suite on a data/network problem
+
+    def metrics(contrib):
+        bt = backtest_portfolio(close_df, {"SPY": 1.0}, 10_000, contrib, "quarterly")
+        return compute_backtest_metrics(bt, 10_000)
+
+    m0, mc = metrics(0), metrics(500)
+
+    def _alpha(m):
+        a = m["vs S&P 500"]
+        return abs(a) if isinstance(a, (int, float)) else 99.0
+
+    checks = [
+        ("Ann. Return invariant to contributions", abs(m0["Ann. Return"]    - mc["Ann. Return"]),     0.5),
+        ("Ann. Volatility invariant",              abs(m0["Ann. Volatility"] - mc["Ann. Volatility"]), 0.5),
+        ("Sharpe invariant",                       abs(m0["Sharpe Ratio"]    - mc["Sharpe Ratio"]),    0.05),
+        ("Max Drawdown invariant",                 abs(m0["Max Drawdown"]    - mc["Max Drawdown"]),    1.0),
+        ("alpha vs SPY ~0 (no contributions)",     _alpha(m0),                                          0.5),
+        ("alpha vs SPY ~0 (with contributions)",   _alpha(mc),                                          0.5),
+    ]
+    all_ok = True
+    for label, diff, tol in checks:
+        ok = diff <= tol
+        all_ok = all_ok and ok
+        print(f"  {'✓' if ok else '✗'} {label:42s} diff={diff:.3f}  (tol {tol})")
+
+    print(f"  no-contrib : ann_ret {m0['Ann. Return']}%  sharpe {m0['Sharpe Ratio']}  "
+          f"dd {m0['Max Drawdown']}%  alpha {m0['vs S&P 500']}")
+    print(f"  +$500/mo   : ann_ret {mc['Ann. Return']}%  sharpe {mc['Sharpe Ratio']}  "
+          f"dd {mc['Max Drawdown']}%  alpha {mc['vs S&P 500']}")
+    print(f"  {'✓ PASS' if all_ok else '✗ FAIL'} — contribution accounting consistent")
+    return all_ok
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="QuantWizard backtest validation")
     parser.add_argument("--verbose", action="store_true",
                         help="Print additional metrics per test case")
     args = parser.parse_args()
     run_validation(verbose=args.verbose)
+    run_self_consistency_check()
