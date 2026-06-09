@@ -927,9 +927,11 @@ def _render_step_3():
     )
     st.plotly_chart(fig_bt, use_container_width=True)
 
-    # Drawdown chart
+    # Drawdown chart — use the contribution-free NAV index so monthly cash
+    # inflows can't mask real market drawdowns (falls back to Portfolio for any
+    # older cached backtest that predates the NAV column).
     _section_header("Drawdown from Peak")
-    port     = bt_df["Portfolio"]
+    port     = bt_df["NAV"] if "NAV" in bt_df.columns else bt_df["Portfolio"]
     peak     = port.cummax()
     drawdown = (port - peak) / peak * 100
     fig_dd   = go.Figure()

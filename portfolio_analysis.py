@@ -197,7 +197,15 @@ def backtest_portfolio(close_df, weights, starting_capital, monthly_contribution
                        rebalance_freq="quarterly"):
     """
     Backtest a weighted portfolio against historical prices.
-    Returns daily portfolio values and performance metrics.
+
+    Returns a daily DataFrame with:
+      Portfolio  account value INCLUDING monthly contributions
+      Contrib    cumulative capital contributed (starting + monthly adds)
+      NAV        contribution-free growth index (starts at 1.0) — the basis for
+                 every return/volatility/Sharpe/drawdown metric, so cash inflows
+                 are never counted as investment performance
+      SP500      a SPY position dollar-cost-averaged on the SAME contribution
+                 schedule, so the benchmark is a like-for-like comparison
     """
     tickers  = list(weights.keys())
     avail    = [t for t in tickers if t in close_df.columns]
@@ -216,76 +224,93 @@ def backtest_portfolio(close_df, weights, starting_capital, monthly_contribution
     init_prices = prices.iloc[0]
     shares      = {t: (starting_capital * w_dict[t]) / init_prices[t] for t in avail}
 
+    # SPY benchmark dollar-cost-averaged on the same schedule as the portfolio.
+    has_spy    = "SPY" in close_df.columns
+    spy_prices = close_df["SPY"] if has_spy else None
+    spy_shares = (starting_capital / float(spy_prices.iloc[0])) if has_spy else 0.0
+
     portfolio_values = []
     contributions    = []
+    nav_values       = []
+    sp500_values     = []
+
+    TRANSACTION_COST = 0.001
     total_contrib    = starting_capital
     last_month       = dates[0].month
     last_rebal_q     = (dates[0].month - 1) // 3
+    prev_value       = starting_capital   # prior day's end-of-day account value
+    nav              = 1.0
 
     for i, date in enumerate(dates):
         current_prices = prices.iloc[i]
-        port_val       = sum(shares[t] * current_prices[t] for t in avail)
+        # Market value using the prior day's shares, BEFORE today's contribution.
+        value_pre = sum(shares[t] * current_prices[t] for t in avail)
 
-        # Monthly contribution
+        # Monthly contribution — buys shares but is NOT investment performance.
         if date.month != last_month:
             last_month    = date.month
             total_contrib += monthly_contribution
-            contributions.append(total_contrib)
-            # Add contribution proportionally
             for t in avail:
-                add_val     = monthly_contribution * w_dict[t]
-                shares[t]  += add_val / current_prices[t]
-            port_val = sum(shares[t] * current_prices[t] for t in avail)
-        else:
-            contributions.append(total_contrib)
+                shares[t] += (monthly_contribution * w_dict[t]) / current_prices[t]
+            if has_spy:
+                spy_shares += monthly_contribution / float(spy_prices.iloc[i])
 
-        # Rebalance quarterly (0.10% transaction cost per rebalance event)
-        TRANSACTION_COST = 0.001
+        value_post = sum(shares[t] * current_prices[t] for t in avail)
+
+        # Quarterly rebalance — transaction cost charged only on the value that
+        # actually changes hands (so a no-op / single-asset rebalance is free).
         current_q = (date.month - 1) // 3
+        cost      = 0.0
         if rebalance_freq == "quarterly" and current_q != last_rebal_q and i > 0:
             last_rebal_q = current_q
-            port_val_after_cost = port_val * (1 - TRANSACTION_COST)
+            traded = sum(abs(value_post * w_dict[t] - shares[t] * current_prices[t])
+                         for t in avail)
+            cost   = traded * TRANSACTION_COST
+            value_post -= cost
             for t in avail:
-                shares[t] = (port_val_after_cost * w_dict[t]) / current_prices[t]
+                shares[t] = (value_post * w_dict[t]) / current_prices[t]
 
-        portfolio_values.append(port_val)
+        # Time-weighted daily return: market move minus rebalance cost, with the
+        # contribution inflow excluded. This is what NAV compounds.
+        day_ret = 0.0 if (i == 0 or prev_value <= 0) else (value_pre - cost) / prev_value - 1
+        nav    *= (1 + day_ret)
+
+        portfolio_values.append(value_post)
+        contributions.append(total_contrib)
+        nav_values.append(nav)
+        sp500_values.append(spy_shares * float(spy_prices.iloc[i]) if has_spy else np.nan)
+        prev_value = value_post
 
     result_df              = pd.DataFrame(index=dates)
     result_df["Portfolio"] = portfolio_values
     result_df["Contrib"]   = contributions
-
-    # Add benchmark (SPY) if available
-    if "SPY" in close_df.columns:
-        spy_prices            = close_df["SPY"]
-        spy_init              = spy_prices.iloc[0]
-        spy_shares            = starting_capital / spy_init
-        result_df["SP500"]    = spy_prices * spy_shares
-    else:
-        result_df["SP500"] = np.nan
-
+    result_df["NAV"]       = nav_values
+    result_df["SP500"]     = sp500_values
     return result_df
 
 
 def compute_backtest_metrics(backtest_df, starting_capital):
     """Compute performance metrics from backtest results."""
-    port   = backtest_df["Portfolio"]
-    dates  = backtest_df.index
+    port  = backtest_df["Portfolio"]
+    nav   = backtest_df["NAV"]
 
-    n_years   = (dates[-1] - dates[0]).days / 365.25
-    daily_ret = port.pct_change().dropna()
+    # Every return/risk metric uses the contribution-free NAV growth index, so
+    # monthly cash inflows are never counted as investment returns (which would
+    # otherwise inflate return/volatility/Sharpe and mask drawdowns).
+    daily_ret = nav.pct_change().dropna()
     ann_vol   = daily_ret.std() * np.sqrt(252) * 100
 
     final_val         = port.iloc[-1]
     total_contributed = backtest_df["Contrib"].iloc[-1]
     total_gain        = final_val - total_contributed
 
-    # Fix 1: Total return on total invested capital (not starting capital only)
+    # Total return on total invested capital (not starting capital only)
     total_ret = (total_gain / total_contributed) * 100 if total_contributed > 0 else 0
 
-    # Fix 2: Annualised return from daily returns (handles contributions correctly)
+    # Annualised return from the contribution-free daily returns
     ann_ret = daily_ret.mean() * 252 * 100
 
-    # Fix 3: Sharpe/Sortino with risk-free rate (excess return basis)
+    # Sharpe/Sortino with risk-free rate (excess return basis)
     rf_daily = get_risk_free_rate() / 252
     excess   = daily_ret - rf_daily
     sharpe   = (excess.mean() * 252) / (excess.std() * np.sqrt(252)) if excess.std() > 0 else 0
@@ -297,25 +322,24 @@ def compute_backtest_metrics(backtest_df, starting_capital):
     else:
         sortino = 0
 
-    # Drawdown
-    peak     = port.cummax()
-    drawdown = (port - peak) / peak
-    max_dd   = drawdown.min() * 100
+    # Drawdown on the NAV index, so contribution inflows can't mask drawdowns.
+    peak   = nav.cummax()
+    max_dd = ((nav - peak) / peak).min() * 100
 
-    # Monthly returns
-    monthly = port.resample("ME").last().pct_change().dropna() * 100
-    best_m  = monthly.max()
-    worst_m = monthly.min()
-    pct_pos = (monthly > 0).mean() * 100
+    # Monthly returns from the NAV index
+    monthly = nav.resample("ME").last().pct_change().dropna() * 100
+    best_m  = monthly.max() if len(monthly) else 0.0
+    worst_m = monthly.min() if len(monthly) else 0.0
+    pct_pos = (monthly > 0).mean() * 100 if len(monthly) else 0.0
 
-    # Use SPY column from backtest which already mirrors the contribution schedule
+    # The SPY benchmark is dollar-cost-averaged on the same contribution schedule
+    # as the portfolio, so compare it on the same total-return-on-contributed-
+    # capital basis (a 100%-SPY portfolio then shows ~0 alpha, as it should).
     sp500_ret_matched = np.nan
     if "SP500" in backtest_df.columns and not backtest_df["SP500"].isna().all():
-        sp           = backtest_df["SP500"]
-        sp500_start  = sp.iloc[0]
-        sp500_final  = sp.iloc[-1]
-        if sp500_start > 0:
-            sp500_ret_matched = (sp500_final - sp500_start) / sp500_start * 100
+        sp_final = float(backtest_df["SP500"].iloc[-1])
+        if total_contributed > 0:
+            sp500_ret_matched = (sp_final - total_contributed) / total_contributed * 100
 
     alpha = round(total_ret - sp500_ret_matched, 2) if not np.isnan(sp500_ret_matched) else "N/A"
 
