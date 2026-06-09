@@ -123,7 +123,9 @@ def run_stress_test(tickers: list, weights: dict, api_key: str) -> dict:
             else:
                 scenario_ret[t] = None
 
-        scenario_ret["__portfolio__"] = round(weighted_sum / weight_total, 2) if weight_total > 0 else 0.0
+        # None (not 0.0) signals "no price data for this window" so the UI can
+        # say so honestly instead of implying a 0% / unaffected portfolio.
+        scenario_ret["__portfolio__"] = round(weighted_sum / weight_total, 2) if weight_total > 0 else None
 
         spy_sp, spy_ep = price_data.get("SPY", (None, None))
         scenario_ret["__spy__"] = round((spy_ep - spy_sp) / spy_sp * 100, 2) if (spy_sp and spy_ep and spy_sp > 0) else None
@@ -215,11 +217,33 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                     margin-bottom:1rem;margin-top:1.5rem">Results</div>
         """, unsafe_allow_html=True)
 
+        if all(d.get("__portfolio__") is None for d in results.values()):
+            st.markdown(
+                "<div style='background:#fffbeb;border:1px solid #fde68a;border-radius:8px;"
+                "padding:1rem 1.25rem;font-size:0.84rem;color:#92400e;line-height:1.55;"
+                "margin-bottom:1rem'>⚠ <b>Historical crash data isn’t available on the current "
+                "data plan.</b> These scenarios (2008, 2020, 2022, 2000, 2018) require price "
+                "history beyond the most recent ~2 years. The Portfolio Autopsy below still "
+                "works on recent data.</div>",
+                unsafe_allow_html=True,
+            )
+
         for scenario_name, scenario_data in results.items():
-            port_ret    = scenario_data.get("__portfolio__", 0) or 0
+            port_ret    = scenario_data.get("__portfolio__")
+            desc        = CRASH_SCENARIOS[scenario_name]["description"]
+
+            # No price data for this crash window (e.g. paywalled deep history)
+            if port_ret is None:
+                st.markdown(f"""
+                <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;
+                            padding:0.85rem 1.25rem;margin-bottom:0.7rem">
+                    <div style="font-weight:600;font-size:0.88rem;color:#475569">{scenario_name}</div>
+                    <div style="font-size:0.73rem;color:#94a3b8">{desc}&nbsp;·&nbsp;Historical data unavailable on this plan</div>
+                </div>""", unsafe_allow_html=True)
+                continue
+
             spy_ret     = scenario_data.get("__spy__")
             port_dollar = portfolio_value * port_ret / 100
-            desc        = CRASH_SCENARIOS[scenario_name]["description"]
 
             card_color  = "#dc2626" if port_ret < 0 else "#16a34a"
             bg          = "rgba(220,38,38,0.04)" if port_ret < 0 else "rgba(22,163,74,0.04)"
@@ -270,58 +294,59 @@ def render_stress_test(api_key: str, is_pro: bool = False):
             </div>
             """, unsafe_allow_html=True)
 
-        # ── Portfolio vs S&P bar chart ─────────────────────────────────────────
-        s_names   = list(results.keys())
-        p_rets    = [results[s].get("__portfolio__", 0) or 0 for s in s_names]
-        spy_rets  = [results[s].get("__spy__") or 0 for s in s_names]
+        # ── Portfolio vs S&P bar chart (available scenarios only) ──────────────
+        s_names   = [s for s in results if results[s].get("__portfolio__") is not None]
+        if s_names:
+            p_rets    = [results[s]["__portfolio__"] for s in s_names]
+            spy_rets  = [results[s].get("__spy__") or 0 for s in s_names]
 
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            name="Your Portfolio",
-            x=s_names,
-            y=p_rets,
-            marker_color=["#16a34a" if r >= 0 else "#dc2626" for r in p_rets],
-            text=[f"{r:+.1f}%" for r in p_rets],
-            textposition="outside",
-            textfont=dict(size=10, family="DM Sans"),
-        ))
-        fig.add_trace(go.Bar(
-            name="S&P 500 (SPY)",
-            x=s_names,
-            y=spy_rets,
-            marker_color="rgba(148,163,184,0.55)",
-            text=[f"{r:+.1f}%" for r in spy_rets],
-            textposition="outside",
-            textfont=dict(size=10, family="DM Sans"),
-        ))
-        fig.update_layout(
-            barmode="group",
-            height=380,
-            template=None,
-            plot_bgcolor="#ffffff",
-            paper_bgcolor="rgba(0,0,0,0)",
-            margin=dict(l=10, r=10, t=40, b=90),
-            legend=dict(
-                orientation="h", yanchor="top", y=0.99, xanchor="left", x=0.01,
-                font=dict(size=11, family="DM Sans"),
-                bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
-            ),
-            xaxis=dict(
-                tickangle=-18,
-                tickfont=dict(size=10, family="DM Sans"),
-                gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
-            ),
-            yaxis=dict(
-                ticksuffix="%", tickformat=".0f",
-                zeroline=True, zerolinecolor="#cbd5e1", zerolinewidth=1.5,
-                gridcolor="#e2e8f0", autorange=True, rangemode="normal",
-                tickfont=dict(size=11, family="DM Sans"),
-            ),
-            font=dict(family="DM Sans, system-ui, sans-serif"),
-            hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                            font=dict(color="white", size=12, family="DM Sans")),
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                name="Your Portfolio",
+                x=s_names,
+                y=p_rets,
+                marker_color=["#16a34a" if r >= 0 else "#dc2626" for r in p_rets],
+                text=[f"{r:+.1f}%" for r in p_rets],
+                textposition="outside",
+                textfont=dict(size=10, family="DM Sans"),
+            ))
+            fig.add_trace(go.Bar(
+                name="S&P 500 (SPY)",
+                x=s_names,
+                y=spy_rets,
+                marker_color="rgba(148,163,184,0.55)",
+                text=[f"{r:+.1f}%" for r in spy_rets],
+                textposition="outside",
+                textfont=dict(size=10, family="DM Sans"),
+            ))
+            fig.update_layout(
+                barmode="group",
+                height=380,
+                template=None,
+                plot_bgcolor="#ffffff",
+                paper_bgcolor="rgba(0,0,0,0)",
+                margin=dict(l=10, r=10, t=40, b=90),
+                legend=dict(
+                    orientation="h", yanchor="top", y=0.99, xanchor="left", x=0.01,
+                    font=dict(size=11, family="DM Sans"),
+                    bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
+                ),
+                xaxis=dict(
+                    tickangle=-18,
+                    tickfont=dict(size=10, family="DM Sans"),
+                    gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
+                ),
+                yaxis=dict(
+                    ticksuffix="%", tickformat=".0f",
+                    zeroline=True, zerolinecolor="#cbd5e1", zerolinewidth=1.5,
+                    gridcolor="#e2e8f0", autorange=True, rangemode="normal",
+                    tickfont=dict(size=11, family="DM Sans"),
+                ),
+                font=dict(family="DM Sans, system-ui, sans-serif"),
+                hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
+                                font=dict(color="white", size=12, family="DM Sans")),
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 2 — PORTFOLIO AUTOPSY
