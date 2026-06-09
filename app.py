@@ -50,7 +50,7 @@ from live_data import get_live_price, get_intraday_data, get_top_movers, get_tap
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
 from stress_test import render_stress_test
-from constants import DEV_MODE_FREE
+from constants import DEV_MODE_FREE, get_risk_free_rate
 from disclaimers import render_inline, render_section, render_footer
 import disclaimers as _disc
 
@@ -1062,8 +1062,13 @@ with tab1:
                 ann_ret  = ret.mean() * 252
                 ann_std  = ret.std() * np.sqrt(252)
                 downside = ret[ret < 0].std() * np.sqrt(252)
-                sharpe   = ann_ret / ann_std  if ann_std  else np.nan
-                sortino  = ann_ret / downside if downside else np.nan
+                # Excess-return Sharpe/Sortino: subtract the risk-free rate so
+                # these match the portfolio engine (portfolio_analysis.py) and
+                # the standard definition. Without it the headline ratios were
+                # inflated and inconsistent across the app.
+                rfr      = get_risk_free_rate()
+                sharpe   = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
+                sortino  = (ann_ret - rfr) / downside if downside else np.nan
                 summary_text = generate_summary_paragraph(
                     ticker_input, df, company_details, mc_summary, sharpe, sortino,
                     forecast_method=forecast_method)
@@ -1271,11 +1276,15 @@ with tab1:
                 extra_label = "Last Earnings"
                 extra_value = earnings_date[:10] if earnings_date and earnings_date != "N/A" else "N/A"
 
-            vol_val = df["Volatility_20d"].iloc[-1]
+            # Use the full-period annualised volatility (same series feeding the
+            # Sharpe ratio and the Monte Carlo summary) so return, volatility and
+            # Sharpe all reconcile. Previously this card showed the trailing
+            # 20-day vol, which silently disagreed with the Sharpe denominator.
+            vol_val = ann_std
             _TOOLTIPS = {
-                "Sharpe Ratio":    "Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent. Higher = better return per unit of risk.",
+                "Sharpe Ratio":    "Risk-adjusted return (excess of the risk-free rate). Above 1.0 is good, above 2.0 is excellent. Higher = better return per unit of risk.",
                 "Sortino Ratio":   "Like Sharpe but only penalises downside volatility. Higher is better.",
-                "Ann. Volatility": "Annualized standard deviation of daily returns. Higher = more price swings. S&P 500 averages ~15%.",
+                "Ann. Volatility": "Annualized standard deviation of daily returns over the period. Higher = more price swings. S&P 500 averages ~15%.",
             }
             _row_items = [
                 ("Sharpe Ratio",    f"{sharpe:.2f}"  if pd.notna(sharpe)  else "N/A",
