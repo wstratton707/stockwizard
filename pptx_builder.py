@@ -22,6 +22,14 @@ try:
     PPTX_AVAILABLE = True
 except ImportError:
     PPTX_AVAILABLE = False
+    # Fallbacks so module-level constants below don't raise NameError when
+    # python-pptx isn't installed. The builder functions check PPTX_AVAILABLE
+    # before doing real work, so these stand-ins are never used for output.
+    def RGBColor(*_a, **_k): return None
+    def Inches(v):           return v
+    def Pt(v):               return v
+    def Emu(v):              return v
+    PP_ALIGN = None
 
 
 # ── Brand colours ─────────────────────────────────────────────────────────────

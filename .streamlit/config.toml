@@ -1,0 +1,22 @@
+# QuantWizard Streamlit configuration
+# The theme block aligns Streamlit's built-in widget accents (sliders,
+# checkboxes, radios, progress bars, primary buttons) with the brand palette.
+# Without this, Streamlit defaults primaryColor to its signature coral red
+# (#FF4B4B), which clashed with the blue brand and made download buttons look
+# like error states. Colors mirror the design tokens in styles.css.
+
+[theme]
+base = "light"
+primaryColor = "#1d4ed8"            # brand blue (--accent)
+backgroundColor = "#f1f5f9"         # app canvas (--bg)
+secondaryBackgroundColor = "#ffffff" # cards / code / dataframes (--surface)
+textColor = "#0f172a"               # primary text (--text)
+font = "sans serif"
+
+[client]
+# Hide the developer toolbar (Deploy button, rerun menu) for a production look.
+toolbarMode = "minimal"
+showErrorDetails = true
+
+[browser]
+gatherUsageStats = false

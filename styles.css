@@ -70,7 +70,16 @@ html, body, [class*="css"] {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-#MainMenu {visibility:hidden;} footer {visibility:hidden;} .stDeployButton {display:none;}
+/* Hide Streamlit chrome for a production look. The deploy button moved to
+   [data-testid="stToolbar"] in recent Streamlit, so the old .stDeployButton
+   selector no longer matched — cover every current variant. */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+.stDeployButton,
+.stAppDeployButton { display: none !important; }
+[data-testid="stHeader"] { height: 0 !important; }
 .block-container { padding-top: 1.75rem !important; max-width: 1200px !important; }
 
 /* ── Backgrounds ── */
@@ -123,6 +132,13 @@ html, body, [class*="css"] {
   background: var(--accent-hover) !important;
   box-shadow: 0 6px 18px rgba(29,78,216,0.45) !important;
   transform: translateY(-1px) !important;
+}
+/* Sidebar buttons all have the blue fill, so their labels must be white. The
+   inner <p> would otherwise inherit the sidebar's `* { color: --dim2 }` rule,
+   leaving faint gray-on-blue text on secondary buttons (e.g. Join Waitlist). */
+[data-testid="stSidebar"] .stButton button p,
+[data-testid="stSidebar"] .stButton button [data-testid="stMarkdownContainer"] p {
+  color: #ffffff !important;
 }
 [data-testid="stSidebar"] [data-testid="stTextInput"] input,
 [data-testid="stSidebar"] [data-testid="stNumberInput"] input {
@@ -179,6 +195,16 @@ html, body, [class*="css"] {
   font-weight: 600 !important;
   box-shadow: 0 1px 6px rgba(29,78,216,0.3) !important;
 }
+/* The label sits in an inner <p>, which the global stMarkdownContainer rule
+   below paints dark slate (!important) — that made the SELECTED tab's text
+   nearly invisible on the blue pill. Force it white with matching specificity. */
+.stTabs [aria-selected="true"] p,
+.stTabs [aria-selected="true"] [data-testid="stMarkdownContainer"] p {
+  color: #ffffff !important;
+}
+.stTabs [data-baseweb="tab"] p { transition: color 0.15s; }
+.stTabs [data-baseweb="tab-highlight"] { background: transparent !important; }
+.stTabs [data-baseweb="tab-border"]    { background: transparent !important; }
 .stTabs [data-baseweb="tab-panel"] { padding-top: 1.75rem !important; }
 
 /* ── Main header ── */
@@ -596,6 +622,46 @@ html, body, [class*="css"] {
   box-shadow: 0 4px 14px rgba(0,0,0,0.12) !important;
 }
 
+/* ── Primary & download buttons (main area) ── */
+/* These render with the blue brand fill, so their label must be white. A
+   global markdown color rule was bleeding dark slate (--text3) into the
+   labels — the same root cause as the invisible selected-tab text — leaving
+   dark-on-blue with almost no contrast. Force white and add brand polish.
+   Scoped to kind="primary" so light secondary buttons are untouched. */
+button[kind="primary"],
+button[kind="primary"] *,
+[data-testid="stBaseButton-primary"],
+[data-testid="stBaseButton-primary"] *,
+/* Higher-specificity selectors so these beat the global
+   [data-testid="stMarkdownContainer"] p rule, which otherwise wins the
+   specificity tie (it appears later in the file) and paints labels dark. */
+button[kind="primary"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stBaseButton-primary"] [data-testid="stMarkdownContainer"] p {
+  color: #ffffff !important;
+}
+button[kind="primary"],
+[data-testid="stBaseButton-primary"] {
+  background: var(--accent) !important;
+  border: 1px solid transparent !important;
+  border-radius: var(--r-md) !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.2px !important;
+  box-shadow: var(--shadow-blue) !important;
+  transition: all 0.18s ease !important;
+}
+button[kind="primary"]:hover,
+[data-testid="stBaseButton-primary"]:hover {
+  background: var(--accent-hover) !important;
+  box-shadow: 0 6px 18px rgba(29,78,216,0.42) !important;
+  transform: translateY(-1px) !important;
+}
+button[kind="primary"]:active,
+[data-testid="stBaseButton-primary"]:active {
+  transform: translateY(0) !important;
+  box-shadow: var(--shadow-blue) !important;
+}
+
 /* ── Sidebar group label ── */
 .sidebar-group {
   font-family: var(--font-sans); font-size: 0.63rem; font-weight: 700;
@@ -622,6 +688,26 @@ html, body, [class*="css"] {
   border-radius: var(--r-md) !important;
   box-shadow: var(--shadow-sm) !important;
 }
+
+/* ── Chart cards ── */
+/* Frame every Plotly chart as a clean card. The figures use a transparent
+   paper background, so the white card + subtle border/shadow reads as a
+   polished panel and visually separates each chart from the page. */
+[data-testid="stPlotlyChart"] {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 0.85rem 1rem 0.6rem;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  overflow: hidden;
+}
+[data-testid="stPlotlyChart"]:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--border2);
+}
+[data-testid="stPlotlyChart"] .js-plotly-plot,
+[data-testid="stPlotlyChart"] .plot-container { border-radius: var(--r-md); }
 
 /* ── Input focus rings (main content) ── */
 [data-testid="stTextInput"] input:focus,
