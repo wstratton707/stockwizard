@@ -2062,15 +2062,20 @@ with tab1:
                 # ── 2. Key Metrics Bar Charts ─────────────────────────────────
                 if peer_price_dfs:
                     _mrows = []
+                    _rfr = get_risk_free_rate()
                     for _pt, _pdf in peer_price_dfs.items():
                         if _pdf.empty or "Daily_Return" not in _pdf.columns:
                             continue
                         _ret = _pdf["Daily_Return"].dropna()
                         if len(_ret) < 5:
                             continue
-                        _ann_ret = (1 + _ret.mean()) ** 252 - 1
+                        # Match the headline metric definitions: arithmetic
+                        # annualised return and excess-return Sharpe (minus the
+                        # risk-free rate) so a stock's peer-chart Sharpe equals
+                        # the value shown in its metric card.
+                        _ann_ret = _ret.mean() * 252
                         _ann_vol = _ret.std() * np.sqrt(252)
-                        _sharpe  = (_ann_ret / _ann_vol) if _ann_vol > 0 else 0
+                        _sharpe  = ((_ann_ret - _rfr) / _ann_vol) if _ann_vol > 0 else 0
                         _cum     = _pdf["Cumulative_Index"]
                         _max_dd  = ((_cum - _cum.cummax()) / _cum.cummax()).min()
                         _mrows.append({

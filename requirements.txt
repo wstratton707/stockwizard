@@ -1,16 +1,22 @@
-streamlit>=1.32.0
-pandas>=2.0.0
-numpy>=1.24.0
-openpyxl>=3.1.0
-requests>=2.31.0
-ta>=0.11.0
-matplotlib>=3.7.0
-scipy>=1.11.0
-plotly>=5.18.0
-stripe>=7.0.0
-python-dotenv>=1.0.0
-streamlit-autorefresh>=1.0.1
-python-pptx>=0.6.21
-arch>=6.3.0
-scikit-learn>=1.4.0
-xgboost>=2.0.0
+# Pinned to known-good versions (== exact) for reproducible installs and
+# deploys. Previously these used >= floors, which meant a fresh install pulled
+# the latest majors (e.g. pandas 3.0) that the app hasn't been tested against.
+# Core packages match the environment the app is verified running on; arch /
+# scikit-learn / xgboost (used by the Custom Forecast) are pinned to current
+# wheels. When bumping, install into the .venv and smoke-test the app first.
+streamlit==1.55.0
+pandas==2.3.3
+numpy==2.4.3
+openpyxl==3.1.5
+requests==2.33.0
+ta==0.11.0
+matplotlib==3.10.8
+scipy==1.17.1
+plotly==6.6.0
+stripe==15.0.0
+python-dotenv==1.2.2
+streamlit-autorefresh==1.0.1
+python-pptx==1.0.2
+arch==8.0.0
+scikit-learn==1.9.0
+xgboost==3.2.0
