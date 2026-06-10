@@ -2,6 +2,144 @@ import numpy as np
 import pandas as pd
 
 
+# ── Fundamentals & valuation ──────────────────────────────────────────────────
+
+def _fin_val(df, field, i=0):
+    """Safely pull a numeric line item from a statement DataFrame (newest = row 0)."""
+    try:
+        if df is None or field not in df.columns or i >= len(df):
+            return None
+        v = df.iloc[i][field]
+        return float(v) if v is not None and not pd.isna(v) else None
+    except Exception:
+        return None
+
+
+def _reverse_dcf_growth(market_cap, base_earnings, years=10, discount=0.09,
+                        terminal_growth=0.025):
+    """
+    Reverse DCF: the annual growth rate the market is pricing into `base_earnings`
+    (a 2-stage model, `years` of explicit growth + a terminal value). Returns the
+    implied growth as a decimal, or None if it can't be solved sensibly.
+    Intentionally a *reverse* model — it states what's priced in rather than
+    asserting a single "fair value", which is more honest about the assumptions.
+    """
+    if not market_cap or not base_earnings or base_earnings <= 0 or discount <= terminal_growth:
+        return None
+
+    def pv(g):
+        total, e = 0.0, base_earnings
+        for t in range(1, years + 1):
+            e *= (1 + g)
+            total += e / (1 + discount) ** t
+        terminal = e * (1 + terminal_growth) / (discount - terminal_growth)
+        return total + terminal / (1 + discount) ** years
+
+    lo, hi = -0.50, 0.60
+    if pv(lo) > market_cap or pv(hi) < market_cap:
+        return None
+    for _ in range(60):  # bisection
+        mid = (lo + hi) / 2
+        if pv(mid) < market_cap:
+            lo = mid
+        else:
+            hi = mid
+    return round((lo + hi) / 2, 4)
+
+
+def compute_fundamentals(financials, market_cap=None, price=None):
+    """
+    Turn raw Polygon statements (from data.fetch_financials) + market cap into a
+    structured analytics dict: margins, returns, leverage, growth, valuation
+    multiples, a reverse-DCF implied growth, and 4-period trend arrays.
+
+    Pure function (no network) so it is cheap to test. Returns {"ok": False} when
+    the income statement is missing.
+    """
+    inc = financials.get("income_statement") if financials else None
+    bal = financials.get("balance_sheet") if financials else None
+    cf  = financials.get("cash_flow_statement") if financials else None
+    if inc is None or len(inc) == 0:
+        return {"ok": False}
+
+    mcap = float(market_cap) if isinstance(market_cap, (int, float)) else None
+
+    rev   = _fin_val(inc, "revenues")
+    gp    = _fin_val(inc, "gross_profit")
+    oi    = _fin_val(inc, "operating_income_loss")
+    ni    = _fin_val(inc, "net_income_loss")
+    eps   = _fin_val(inc, "diluted_earnings_per_share")
+    rnd   = _fin_val(inc, "research_and_development")
+    eq    = _fin_val(bal, "equity")
+    asts  = _fin_val(bal, "assets")
+    ca    = _fin_val(bal, "current_assets")
+    cl    = _fin_val(bal, "current_liabilities")
+    ltd   = _fin_val(bal, "long_term_debt")
+    ocf   = _fin_val(cf, "net_cash_flow_from_operating_activities")
+
+    def pct(n, d):   return round(n / d * 100, 1) if (n is not None and d) else None
+    def ratio(n, d): return round(n / d, 2) if (n is not None and d) else None
+
+    margins = {"gross": pct(gp, rev), "operating": pct(oi, rev), "net": pct(ni, rev)}
+    returns = {"roe": pct(ni, eq), "roa": pct(ni, asts)}
+    leverage = {"current_ratio": ratio(ca, cl), "debt_to_equity": ratio(ltd, eq)}
+
+    # Growth — YoY (period 1) and CAGR over the available window
+    def yoy(field):
+        cur, prev = _fin_val(inc, field, 0), _fin_val(inc, field, 1)
+        return round((cur / prev - 1) * 100, 1) if (cur and prev and prev > 0) else None
+
+    def cagr(field):
+        cur = _fin_val(inc, field, 0)
+        n   = len(inc) - 1
+        old = _fin_val(inc, field, n)
+        if cur and old and old > 0 and n >= 1:
+            return round(((cur / old) ** (1 / n) - 1) * 100, 1)
+        return None
+
+    growth = {"revenue_yoy": yoy("revenues"), "net_income_yoy": yoy("net_income_loss"),
+              "eps_yoy": yoy("diluted_earnings_per_share"),
+              "revenue_cagr": cagr("revenues"), "eps_cagr": cagr("diluted_earnings_per_share")}
+
+    valuation = {
+        "pe": ratio(mcap, ni) if (mcap and ni and ni > 0) else None,
+        "ps": ratio(mcap, rev) if (mcap and rev) else None,
+        "pb": ratio(mcap, eq) if (mcap and eq and eq > 0) else None,
+        "earnings_yield": pct(ni, mcap) if (mcap and ni) else None,
+    }
+
+    implied_growth = _reverse_dcf_growth(mcap, ni) if (mcap and ni) else None
+
+    # Trend arrays oldest -> newest for charting
+    order = list(range(len(inc) - 1, -1, -1))
+    trend = {
+        "periods":          [str(inc.iloc[i]["Period"])[:7] for i in order],
+        "revenue":          [_fin_val(inc, "revenues", i) for i in order],
+        "net_income":       [_fin_val(inc, "net_income_loss", i) for i in order],
+        "eps":              [_fin_val(inc, "diluted_earnings_per_share", i) for i in order],
+        "operating_margin": [pct(_fin_val(inc, "operating_income_loss", i),
+                                  _fin_val(inc, "revenues", i)) for i in order],
+    }
+
+    return {
+        "ok": True,
+        "as_of": str(inc.iloc[0]["Period"])[:10] if "Period" in inc.columns else "latest",
+        "market_cap": mcap, "price": price,
+        "income": {"revenue": rev, "gross_profit": gp, "operating_income": oi,
+                   "net_income": ni, "eps_diluted": eps, "rnd": rnd},
+        "balance": {"assets": asts, "liabilities": _fin_val(bal, "liabilities"),
+                    "equity": eq, "current_assets": ca, "current_liabilities": cl,
+                    "long_term_debt": ltd},
+        "cashflow": {"operating": ocf,
+                     "investing": _fin_val(cf, "net_cash_flow_from_investing_activities"),
+                     "financing": _fin_val(cf, "net_cash_flow_from_financing_activities")},
+        "margins": margins, "returns": returns, "leverage": leverage,
+        "growth": growth, "valuation": valuation,
+        "implied_growth": implied_growth,
+        "trend": trend,
+    }
+
+
 def detect_support_resistance(df, window=20, num_levels=5):
     highs = df["High"].values
     lows  = df["Low"].values

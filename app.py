@@ -27,7 +27,7 @@ from data import (
 from cached_fetchers import (
     cached_validate_ticker, cached_detect_asset_type,
     cached_fetch_stock_data, cached_fetch_ohlcv,
-    cached_fetch_company_details, cached_fetch_news,
+    cached_fetch_company_details, cached_fetch_financials, cached_fetch_news,
     cached_fetch_peer_comparison, cached_fetch_sector_data,
     cached_fetch_next_earnings, cached_fetch_crypto_data,
     cached_fetch_crypto_details, cached_fetch_etf_details,
@@ -42,7 +42,8 @@ except ImportError:
 from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP
 from analysis import (
     detect_support_resistance, build_correlation_matrix,
-    run_monte_carlo, run_custom_forecast, generate_summary_paragraph
+    run_monte_carlo, run_custom_forecast, generate_summary_paragraph,
+    compute_fundamentals
 )
 from excel_builder import build_excel
 from pptx_builder import build_stock_pptx, build_portfolio_pptx, PPTX_AVAILABLE
@@ -1304,6 +1305,117 @@ with tab1:
                         <div class="metric-label">{label}{tip_html}</div>
                         <div class="metric-value {cls}">{value}</div>
                     </div>""", unsafe_allow_html=True)
+
+            # ── Fundamentals & Valuation (stocks only) ────────────────────────
+            # SEC-sourced statements via Polygon /vX/reference/financials, turned
+            # into margins/returns/leverage/growth/valuation + a reverse-DCF lens.
+            if not is_crypto:
+                _fin_raw = cached_fetch_financials(ticker_input, POLYGON_API_KEY)
+                fund = compute_fundamentals(
+                    _fin_raw, market_cap=company_details.get("Market Cap"),
+                    price=float(df["Close"].iloc[-1]),
+                )
+                if fund.get("ok"):
+                    def _fv(v, suffix="", na="N/A"):
+                        return f"{v}{suffix}" if v is not None else na
+
+                    st.markdown(
+                        f'<div class="section-header">Fundamentals &amp; Valuation '
+                        f'<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                        f'text-transform:none;font-size:0.7rem">· FY ending {fund["as_of"]}</span></div>',
+                        unsafe_allow_html=True)
+
+                    _v, _m, _r, _l, _g = (fund["valuation"], fund["margins"],
+                                          fund["returns"], fund["leverage"], fund["growth"])
+                    _cards = [
+                        [("P/E", _fv(_v["pe"], "×"), "neutral"),
+                         ("P/S", _fv(_v["ps"], "×"), "neutral"),
+                         ("P/B", _fv(_v["pb"], "×"), "neutral"),
+                         ("Earnings Yield", _fv(_v["earnings_yield"], "%"), "neutral")],
+                        [("Gross Margin", _fv(_m["gross"], "%"), "positive" if _m["gross"] else "neutral"),
+                         ("Operating Margin", _fv(_m["operating"], "%"), "positive" if _m["operating"] else "neutral"),
+                         ("Net Margin", _fv(_m["net"], "%"), "positive" if _m["net"] else "neutral"),
+                         ("ROE", _fv(_r["roe"], "%"), "positive" if _r["roe"] else "neutral")],
+                        [("Revenue Growth (YoY)", _fv(_g["revenue_yoy"], "%"),
+                          "positive" if (_g["revenue_yoy"] or 0) >= 0 else "negative"),
+                         ("EPS Growth (YoY)", _fv(_g["eps_yoy"], "%"),
+                          "positive" if (_g["eps_yoy"] or 0) >= 0 else "negative"),
+                         ("Current Ratio", _fv(_l["current_ratio"]), "neutral"),
+                         ("Debt / Equity", _fv(_l["debt_to_equity"]), "neutral")],
+                    ]
+                    for _rowdef in _cards:
+                        for _col, (_lbl, _val, _cls) in zip(st.columns(4), _rowdef):
+                            with _col:
+                                st.markdown(
+                                    f'<div class="metric-card"><div class="metric-label">{_lbl}</div>'
+                                    f'<div class="metric-value {_cls}">{_val}</div></div>',
+                                    unsafe_allow_html=True)
+                        st.markdown("<div style='height:0.7rem'></div>", unsafe_allow_html=True)
+
+                    # Revenue & net income trend with operating margin
+                    _t = fund["trend"]
+                    if any(x is not None for x in _t["revenue"]):
+                        fig_fund = go.Figure()
+                        fig_fund.add_trace(go.Bar(
+                            x=_t["periods"], y=[(x or 0) / 1e9 for x in _t["revenue"]],
+                            name="Revenue ($B)", marker_color="#1d4ed8", opacity=0.85))
+                        fig_fund.add_trace(go.Bar(
+                            x=_t["periods"], y=[(x or 0) / 1e9 for x in _t["net_income"]],
+                            name="Net Income ($B)", marker_color="#93c5fd", opacity=0.9))
+                        fig_fund.add_trace(go.Scatter(
+                            x=_t["periods"], y=_t["operating_margin"], name="Operating Margin (%)",
+                            yaxis="y2", line=dict(color="#059669", width=2.5), mode="lines+markers"))
+                        fig_fund.update_layout(
+                            barmode="group", height=320, template=None,
+                            plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
+                            margin=dict(l=55, r=60, t=46, b=40),
+                            title=dict(text="Revenue, Net Income & Operating Margin",
+                                       font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                                        font=dict(size=11, family="DM Sans", color="#374151")),
+                            font=dict(family="DM Sans, system-ui, sans-serif"),
+                            hovermode="x unified",
+                            hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
+                                            font=dict(color="white", size=12, family="DM Sans")),
+                            xaxis=dict(tickfont=dict(size=11, color="#64748b", family="DM Sans"),
+                                       gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0"),
+                            yaxis=dict(title="$ Billions", gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
+                                       tickfont=dict(size=11, color="#64748b", family="DM Sans"),
+                                       title_font=dict(size=12, color="#64748b", family="DM Sans")),
+                            yaxis2=dict(title="Op. Margin %", overlaying="y", side="right", showgrid=False,
+                                        tickfont=dict(size=11, color="#059669", family="DM Sans"),
+                                        title_font=dict(size=12, color="#059669", family="DM Sans")),
+                        )
+                        st.plotly_chart(fig_fund, use_container_width=True)
+
+                    # Reverse-DCF valuation lens — states what growth is priced in
+                    _ig, _hist = fund["implied_growth"], _g["eps_cagr"]
+                    if _ig is not None:
+                        _igp = _ig * 100
+                        if _hist is not None and _igp > _hist + 3:
+                            _msg = (f"The market is pricing in <b>{_igp:.1f}%</b> annual earnings growth for 10 years — "
+                                    f"well above the <b>{_hist:.1f}%</b> the company actually delivered. "
+                                    f"The valuation assumes growth accelerates.")
+                            _vc, _vbg, _vbd = "#b45309", "#fffbeb", "#fde68a"
+                        elif _hist is not None and _igp < _hist - 3:
+                            _msg = (f"The market is pricing in <b>{_igp:.1f}%</b> annual earnings growth for 10 years — "
+                                    f"below the <b>{_hist:.1f}%</b> historical rate. Expectations look conservative.")
+                            _vc, _vbg, _vbd = "#047857", "#ecfdf5", "#a7f3d0"
+                        elif _hist is not None:
+                            _msg = (f"The market is pricing in <b>{_igp:.1f}%</b> annual earnings growth for 10 years — "
+                                    f"roughly in line with the <b>{_hist:.1f}%</b> historical rate.")
+                            _vc, _vbg, _vbd = "#1d4ed8", "#eff6ff", "#bfdbfe"
+                        else:
+                            _msg = (f"The market is pricing in <b>{_igp:.1f}%</b> annual earnings growth for 10 years "
+                                    f"(reverse-DCF · 9% discount · 2.5% terminal).")
+                            _vc, _vbg, _vbd = "#1d4ed8", "#eff6ff", "#bfdbfe"
+                        st.markdown(
+                            f'<div style="background:{_vbg};border:1px solid {_vbd};border-left:4px solid {_vc};'
+                            f'border-radius:10px;padding:1rem 1.25rem;margin-top:0.5rem;font-size:0.85rem;'
+                            f'color:#334155;line-height:1.6"><span style="font-weight:700;color:{_vc};'
+                            f'text-transform:uppercase;font-size:0.68rem;letter-spacing:0.5px">'
+                            f"Reverse-DCF · What's Priced In</span><br>{_msg}</div>",
+                            unsafe_allow_html=True)
 
             # ── ETF Profile Panel ─────────────────────────────────────────────
             if is_etf:

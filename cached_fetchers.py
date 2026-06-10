@@ -24,6 +24,7 @@ from data import (
     fetch_stock_data as _fetch_stock_data,
     fetch_ohlcv as _fetch_ohlcv,
     fetch_company_details as _fetch_company_details,
+    fetch_financials as _fetch_financials,
     fetch_news as _fetch_news,
     fetch_peer_comparison as _fetch_peer_comparison,
     fetch_sector_data as _fetch_sector_data,
@@ -85,6 +86,12 @@ def cached_fetch_ohlcv(ticker, period, _api_key,
 @st.cache_data(ttl=_TTL_XLONG, max_entries=_MAX_ENTRIES, show_spinner=False)
 def cached_fetch_company_details(ticker, _api_key):
     return _fetch_company_details(ticker, _api_key, log=lambda m: None)
+
+
+@st.cache_data(ttl=_TTL_XLONG, max_entries=_MAX_ENTRIES, show_spinner=False)
+def cached_fetch_financials(ticker, _api_key):
+    """SEC-sourced financial statements — change only quarterly, so cache 24h."""
+    return _fetch_financials(ticker, _api_key, log=lambda m: None)
 
 
 @st.cache_data(ttl=_TTL_SHORT, max_entries=_MAX_ENTRIES, show_spinner=False)
