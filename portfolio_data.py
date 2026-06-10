@@ -133,6 +133,10 @@ def _polygon_fetch_chunk(ticker: str, start: str, end: str, api_key: str,
     """
     url    = f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}"
     params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": api_key}
+    # Returns: list of bars on success (possibly empty); [] for a 403 tier
+    # boundary (older data not available on this plan — a legitimate, cacheable
+    # "no data here"); None for a transient failure (429 exhausted / error /
+    # exception) so the caller knows the fetch is INCOMPLETE and must not cache it.
     for wait in (0, 12, 24, 36):
         if wait:
             log(f"   ⏳ {ticker} rate limited, retrying in {wait}s...")
@@ -141,13 +145,17 @@ def _polygon_fetch_chunk(ticker: str, start: str, end: str, api_key: str,
             r = requests.get(url, params=params, timeout=20)
             if r.status_code == 200:
                 return r.json().get("results", [])
+            if r.status_code == 403:
+                # Plan doesn't grant this (older) window — treat as empty, not failure.
+                return []
             if r.status_code != 429:
                 log(f"   ⚠ {ticker} HTTP {r.status_code}: {r.text[:120]}")
-                return []
+                return None
         except Exception as e:
             log(f"   ⚠ {ticker} exception: {e}")
-            return []
-    return []
+            return None
+    log(f"   ✗ {ticker} — rate limited after retries (chunk incomplete)")
+    return None
 
 
 def _week_floor(date_str: str) -> str:
@@ -186,6 +194,7 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
 
     # 3. Fetch from Polygon in 6-month chunks (free tier caps ~180 rows per request)
     all_results = []
+    partial     = False   # set if any chunk failed transiently (429/error)
     current = datetime.strptime(start, "%Y-%m-%d")
     end_dt  = datetime.strptime(end,   "%Y-%m-%d")
 
@@ -197,7 +206,10 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
             chunk_end.strftime("%Y-%m-%d"),
             api_key, log=log,
         )
-        all_results.extend(chunk)
+        if chunk is None:
+            partial = True   # transient failure — result is now incomplete
+        else:
+            all_results.extend(chunk)
         current = chunk_end + timedelta(days=1)
         if current <= end_dt:
             time.sleep(0.3)   # gentle pacing between chunks
@@ -214,14 +226,21 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
     df = df[["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]]
     df = df.drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
 
-    with _PORT_CACHE_LOCK:
-        _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
-    try:
-        cache_set(f"ohlcv_{cache_key}",
-                  df.assign(Date=df["Date"].astype(str)).to_dict(orient="records"),
-                  ttl_hours=720)
-    except Exception:
-        pass
+    # Only cache COMPLETE fetches. A partial result (a chunk was rate-limited or
+    # errored) is returned best-effort for THIS request but never cached, so the
+    # next request retries for full history instead of pinning a truncated series
+    # for 30 days — which would silently drop the ticker from portfolios.
+    if not partial:
+        with _PORT_CACHE_LOCK:
+            _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
+        try:
+            cache_set(f"ohlcv_{cache_key}",
+                      df.assign(Date=df["Date"].astype(str)).to_dict(orient="records"),
+                      ttl_hours=720)
+        except Exception:
+            pass
+    else:
+        log(f"   ⚠ {ticker} — incomplete fetch ({len(df)} rows); not cached, will retry next run")
     return df
 
 
