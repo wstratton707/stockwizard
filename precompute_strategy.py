@@ -137,7 +137,13 @@ def main():
         print(f"vs Strategy:    {m['total_return_pct'] - m['benchmark_total_return_pct']:+.2f}% alpha")
 
     ok = cache_set(CACHE_KEY, result, ttl_hours=48)
-    print(f"\nSupabase write: {'✓ success' if ok else '✗ failed'}")
+    print(f"\nSupabase write: {'✓ success' if ok else '✗ FAILED'}")
+    if not ok:
+        # Fail loudly: a silent write failure (e.g. NaN metrics rejected as
+        # non-JSON-compliant) leaves the Strategy tab permanently unseeded.
+        print("ERROR: cache write failed — the Strategy tab will stay unseeded. "
+              "Check for NaN/inf in metrics or Supabase connectivity.")
+        sys.exit(1)
     print(f"Total time: {time.time() - t0:.0f}s")
 
 

@@ -2622,6 +2622,18 @@ with tab5:
     _STRATEGY_CACHE_KEY = f"strategy_{STRATEGY_VERSION}"
     _strategy_data = cache_get(_STRATEGY_CACHE_KEY)
 
+    # Label the backtest span from the actual computed period. History depth is
+    # data-tier dependent (the API truncates to the authorised window), so a
+    # hardcoded "5Y" would overstate the test on a limited plan.
+    _span_tag = "BACKTEST"
+    if _strategy_data and _strategy_data.get("metrics"):
+        try:
+            _d0 = datetime.strptime(_strategy_data["metrics"]["start_date"], "%Y-%m-%d")
+            _d1 = datetime.strptime(_strategy_data["metrics"]["end_date"], "%Y-%m-%d")
+            _span_tag = f"{max(1, round((_d1 - _d0).days / 365.25))}Y BACKTEST"
+        except Exception:
+            pass
+
     # ── Header / description ─────────────────────────────────────────────────
     st.markdown(f"""
     <div class="stock-hero">
@@ -2635,7 +2647,7 @@ with tab5:
           <div class="stock-hero-tags">
             <span class="stock-hero-tag">LONG-ONLY</span>
             <span class="stock-hero-tag">{len(STRATEGY_UNIVERSE)} MEGA-CAPS</span>
-            <span class="stock-hero-tag">5Y BACKTEST</span>
+            <span class="stock-hero-tag">{_span_tag}</span>
             <span class="stock-hero-tag live">● TRACKED LIVE</span>
           </div>
         </div>

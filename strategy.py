@@ -69,7 +69,11 @@ def run_backtest(
         return {"trades": [], "equity_curve": [], "metrics": {},
                 "open_positions": [], "benchmark_curve": []}
 
-    close_df = close_df.sort_index().copy()
+    # Forward-fill so a held position always has a mark-to-market price even when
+    # a ticker has a trailing data gap. A single present-but-NaN close otherwise
+    # poisons the equity curve → NaN total return/CAGR, which silently fails the
+    # JSON cache write and leaves the Strategy tab unseeded.
+    close_df = close_df.sort_index().ffill()
     # Yesterday's running ATH per ticker (shift(1) avoids lookahead on signal day)
     ath_df = close_df.shift(1).cummax()
 
@@ -91,7 +95,6 @@ def run_backtest(
 
     dates    = list(close_df.index)
     n_days   = len(dates)
-    date_pos = {d: i for i, d in enumerate(dates)}   # for trading-day hold count
 
     for i, date in enumerate(dates):
         today_row = close_df.iloc[i]
@@ -107,8 +110,9 @@ def run_backtest(
             pos      = holdings.pop(t)
             proceeds = pos["shares"] * px
             cash    += proceeds
-            buy_idx  = date_pos.get(pd.Timestamp(pos["buy_date"]))
-            hold_td  = (i - buy_idx) if buy_idx is not None else 0
+            # Trading days held = difference in row indices (robust; reconstructing
+            # a Timestamp from the stored date string failed to match the index).
+            hold_td  = i - pos.get("buy_i", i)
             trade_log.append({
                 "ticker":      t,
                 "side":        "SELL",
@@ -148,6 +152,7 @@ def run_backtest(
                     "shares":    shares,
                     "buy_price": float(px),
                     "buy_date":  date.strftime("%Y-%m-%d"),
+                    "buy_i":     i,
                     "buy_ath":   entry["signal_ath"],
                 }
                 trade_log.append({
@@ -283,7 +288,7 @@ def _compute_metrics(eq: pd.Series, starting_capital: float, trade_log: list) ->
     if eq.empty:
         return {}
     total_ret      = float(eq.iloc[-1] / starting_capital - 1) * 100
-    daily_ret      = eq.pct_change().dropna()
+    daily_ret      = eq.pct_change(fill_method=None).dropna()
     n_years        = max((eq.index[-1] - eq.index[0]).days / 365.25, 1e-6)
     cagr           = float((eq.iloc[-1] / starting_capital) ** (1 / n_years) - 1) * 100
     ann_vol        = float(daily_ret.std() * np.sqrt(252)) * 100 if len(daily_ret) > 1 else 0.0
