@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from datetime import datetime
+from constants import get_risk_free_rate
 
 try:
     from pptx import Presentation
@@ -417,8 +418,11 @@ def build_stock_pptx(ticker, df, period_label,
     ann_ret    = ret.mean() * 252
     ann_std    = ret.std() * np.sqrt(252)
     downside   = ret[ret < 0].std() * np.sqrt(252)
-    sharpe     = ann_ret / ann_std  if ann_std  else float("nan")
-    sortino    = ann_ret / downside if downside else float("nan")
+    # Excess-return Sharpe/Sortino (subtract the risk-free rate) so the exported
+    # deck matches the on-screen metric cards and the portfolio engine.
+    rfr        = get_risk_free_rate()
+    sharpe     = (ann_ret - rfr) / ann_std  if ann_std  else float("nan")
+    sortino    = (ann_ret - rfr) / downside if downside else float("nan")
     max_dd     = df["Drawdown_60d"].min() * 100 if "Drawdown_60d" in df.columns else float("nan")
 
     def _fmt_pct(v):
