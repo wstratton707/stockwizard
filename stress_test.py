@@ -22,114 +22,102 @@ CACHE_TTL     = 3600
 # ── Historical crash scenarios ─────────────────────────────────────────────────
 CRASH_SCENARIOS: dict[str, dict] = {
     "2008 Financial Crisis": {
-        "start":       "2008-09-01",
-        "end":         "2009-03-09",
-        "description": "Lehman collapse  ·  S&P 500: −56%",
-        "color":       "#dc2626",
+        "description":  "Lehman collapse  ·  S&P 500: −56%",
+        "market_shock": -56.0,
+        "color":        "#dc2626",
     },
     "COVID Crash (2020)": {
-        "start":       "2020-02-19",
-        "end":         "2020-03-23",
-        "description": "Pandemic lockdown  ·  S&P 500: −34% in 33 days",
-        "color":       "#ea580c",
+        "description":  "Pandemic lockdown  ·  S&P 500: −34% in 33 days",
+        "market_shock": -34.0,
+        "color":        "#ea580c",
     },
     "2022 Rate-Hike Bear": {
-        "start":       "2022-01-03",
-        "end":         "2022-10-12",
-        "description": "Fed rate hikes  ·  S&P 500: −25%, NASDAQ: −35%",
-        "color":       "#d97706",
+        "description":  "Fed rate hikes  ·  S&P 500: −25%, NASDAQ: −35%",
+        "market_shock": -25.0,
+        "color":        "#d97706",
     },
     "Dot-com Bust (2000–2002)": {
-        "start":       "2000-03-10",
-        "end":         "2002-10-09",
-        "description": "Tech bubble burst  ·  S&P 500: −49%, NASDAQ: −78%",
-        "color":       "#7c3aed",
+        "description":  "Tech bubble burst  ·  S&P 500: −49%, NASDAQ: −78%",
+        "market_shock": -49.0,
+        "color":        "#7c3aed",
     },
     "2018 Q4 Selloff": {
-        "start":       "2018-10-01",
-        "end":         "2018-12-24",
-        "description": "Fed tightening fears  ·  S&P 500: −20% in 12 weeks",
-        "color":       "#0369a1",
+        "description":  "Fed tightening fears  ·  S&P 500: −20% in 12 weeks",
+        "market_shock": -20.0,
+        "color":        "#0369a1",
     },
 }
 
 
-# ── Data helpers ───────────────────────────────────────────────────────────────
+# ── Parametric (beta-based) stress engine ──────────────────────────────────────
+# The free Polygon tier can't reach the historical crash windows (2008/2020/…),
+# so instead of replaying prices we ESTIMATE each holding's move as
+# beta × the known S&P decline for that crash. Beta comes from ~2y of recent
+# daily returns (which the free tier does provide), so the stress test works for
+# any portfolio — including stocks that didn't exist in 2008.
 
-def _fetch_range(ticker: str, start: str, end: str, api_key: str) -> tuple:
-    """Returns (ticker, start_close, end_close) — None prices on failure."""
-    cache_key = f"stress_{ticker}_{start}_{end}"
-    hit = _STRESS_CACHE.get(cache_key)
-    if hit and (time.time() - hit["ts"]) < CACHE_TTL:
-        return ticker, hit["sp"], hit["ep"]
-
+def _estimate_betas(tickers: list, api_key: str, log=lambda m: None) -> tuple:
+    """({ticker: beta_vs_SPY}, {ticker: ann_vol_pct}) from ~2y of daily returns.
+    A ticker is simply absent when its data can't be fetched/aligned."""
+    from portfolio_data import fetch_portfolio_prices
+    all_t = list(dict.fromkeys(list(tickers) + ["SPY"]))
     try:
-        r = requests.get(
-            f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
-            params={"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": api_key},
-            timeout=20,
-        )
-        if r.status_code == 429:
-            time.sleep(15)
-            r = requests.get(
-                f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
-                params={"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": api_key},
-                timeout=20,
-            )
-        if r.status_code == 200:
-            data = r.json().get("results", [])
-            if len(data) >= 2:
-                sp = float(data[0]["c"])
-                ep = float(data[-1]["c"])
-                _STRESS_CACHE[cache_key] = {"ts": time.time(), "sp": sp, "ep": ep}
-                return ticker, sp, ep
+        _, _close_df, returns_df, _failed = fetch_portfolio_prices(
+            all_t, period_years=2, api_key=api_key, log=log)
     except Exception:
-        pass
-    return ticker, None, None
+        return {}, {}
+    if returns_df is None or "SPY" not in returns_df.columns:
+        return {}, {}
+    spy     = returns_df["SPY"]
+    var_spy = float(spy.var())
+    betas, vols = {}, {}
+    for t in tickers:
+        if t in returns_df.columns and var_spy > 0:
+            aligned = pd.concat([returns_df[t], spy], axis=1).dropna()
+            if len(aligned) >= 30:
+                betas[t] = float(aligned.iloc[:, 0].cov(aligned.iloc[:, 1]) / var_spy)
+                vols[t]  = float(returns_df[t].std() * (252 ** 0.5) * 100)
+    return betas, vols
 
 
 def run_stress_test(tickers: list, weights: dict, api_key: str) -> dict:
     """
-    Run every crash scenario for a portfolio.
-    Returns {scenario_name: {ticker: pct_return | None, '__portfolio__': float, '__spy__': float | None}}
+    Parametric stress test — estimates each holding's drawdown as
+    beta × (known S&P decline) per crash, floored at −95% (a long can't lose more
+    than ~100%). Works entirely on the free data tier. Returns the shape the
+    renderer expects:
+      {scenario: {ticker: est_ret | None, '__portfolio__', '__spy__', '__beta__'}}
     """
+    betas, _vols = _estimate_betas(tickers, api_key)
+
+    # Portfolio beta — weighted over the holdings we could estimate
+    pf_beta, w_beta = 0.0, 0.0
+    for t in tickers:
+        if t in betas:
+            w = weights.get(t, 1 / len(tickers))
+            pf_beta += betas[t] * w
+            w_beta  += w
+    pf_beta = (pf_beta / w_beta) if w_beta > 0 else None
+
     results: dict = {}
-
     for scenario_name, scenario in CRASH_SCENARIOS.items():
-        all_tickers = list(set(tickers + ["SPY"]))
-        price_data: dict = {}
-
-        with ThreadPoolExecutor(max_workers=6) as ex:
-            futures = {
-                ex.submit(_fetch_range, t, scenario["start"], scenario["end"], api_key): t
-                for t in all_tickers
-            }
-            for future in as_completed(futures):
-                t, sp, ep = future.result()
-                price_data[t] = (sp, ep)
-
+        shock = scenario["market_shock"]
         scenario_ret: dict = {}
-        weighted_sum  = 0.0
-        weight_total  = 0.0
-
+        weighted_sum = weight_total = 0.0
         for t in tickers:
-            sp, ep = price_data.get(t, (None, None))
-            if sp and ep and sp > 0:
-                ret = (ep - sp) / sp * 100
-                scenario_ret[t] = round(ret, 2)
-                w = weights.get(t, 1 / len(tickers))
-                weighted_sum  += ret * w
-                weight_total  += w
-            else:
-                scenario_ret[t] = None
+            b = betas.get(t)
+            if b is None:
+                scenario_ret[t] = None      # no beta → can't estimate this name
+                continue
+            est = max(b * shock, -95.0)      # floor: a long can't lose >~100%
+            scenario_ret[t] = round(est, 2)
+            w = weights.get(t, 1 / len(tickers))
+            weighted_sum += est * w
+            weight_total += w
 
-        # None (not 0.0) signals "no price data for this window" so the UI can
-        # say so honestly instead of implying a 0% / unaffected portfolio.
         scenario_ret["__portfolio__"] = round(weighted_sum / weight_total, 2) if weight_total > 0 else None
-
-        spy_sp, spy_ep = price_data.get("SPY", (None, None))
-        scenario_ret["__spy__"] = round((spy_ep - spy_sp) / spy_sp * 100, 2) if (spy_sp and spy_ep and spy_sp > 0) else None
-
+        scenario_ret["__spy__"]       = shock
+        scenario_ret["__beta__"]      = round(pf_beta, 2) if pf_beta is not None else None
         results[scenario_name] = scenario_ret
 
     return results
@@ -162,8 +150,9 @@ def render_stress_test(api_key: str, is_pro: bool = False):
 
     st.markdown(
         "<div style='font-size:0.83rem;color:#6b7a8d;margin-bottom:1rem'>"
-        "Enter your holdings and see exactly how they would have performed through the five worst crashes "
-        "of the last 25 years.</div>",
+        "Estimate how your holdings would hold up in crashes of similar magnitude. Each position's drawdown "
+        "is modeled as its <b>market beta × the S&P 500's decline</b> in that crash, from ~2 years of recent "
+        "daily returns — so it works for any portfolio, even newer names.</div>",
         unsafe_allow_html=True,
     )
 
@@ -207,7 +196,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
         else:
             weights = {t: 1.0 / len(tickers) for t in tickers}
 
-        with st.spinner("Fetching historical data across all scenarios..."):
+        with st.spinner("Estimating portfolio sensitivity (beta) and stressing each scenario..."):
             results = run_stress_test(tickers, weights, api_key)
 
         # ── Scenario cards ─────────────────────────────────────────────────────
@@ -221,12 +210,22 @@ def render_stress_test(api_key: str, is_pro: bool = False):
             st.markdown(
                 "<div style='background:#fffbeb;border:1px solid #fde68a;border-radius:8px;"
                 "padding:1rem 1.25rem;font-size:0.84rem;color:#92400e;line-height:1.55;"
-                "margin-bottom:1rem'>⚠ <b>Historical crash data isn’t available on the current "
-                "data plan.</b> These scenarios (2008, 2020, 2022, 2000, 2018) require price "
-                "history beyond the most recent ~2 years. The Portfolio Autopsy below still "
-                "works on recent data.</div>",
+                "margin-bottom:1rem'>⚠ <b>Couldn’t estimate sensitivities right now.</b> We need ~2 years of "
+                "recent daily returns for your tickers (and SPY) to compute beta, and the data came back "
+                "empty — most likely a temporary rate limit. Try again in a minute.</div>",
                 unsafe_allow_html=True,
             )
+        else:
+            _pf_beta = next((d.get("__beta__") for d in results.values()
+                             if d.get("__beta__") is not None), None)
+            if _pf_beta is not None:
+                st.markdown(
+                    f"<div style='font-size:0.78rem;color:#64748b;margin-bottom:0.9rem'>"
+                    f"Model estimate · portfolio beta to S&P 500 ≈ <b>{_pf_beta}</b>. Each crash applies that "
+                    f"sensitivity to the index's historical decline; real outcomes vary, and correlations "
+                    f"often rise in a crisis.</div>",
+                    unsafe_allow_html=True,
+                )
 
         for scenario_name, scenario_data in results.items():
             port_ret    = scenario_data.get("__portfolio__")
@@ -238,7 +237,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                 <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;
                             padding:0.85rem 1.25rem;margin-bottom:0.7rem">
                     <div style="font-weight:600;font-size:0.88rem;color:#475569">{scenario_name}</div>
-                    <div style="font-size:0.73rem;color:#94a3b8">{desc}&nbsp;·&nbsp;Historical data unavailable on this plan</div>
+                    <div style="font-size:0.73rem;color:#94a3b8">{desc}&nbsp;·&nbsp;Couldn’t estimate — no recent data</div>
                 </div>""", unsafe_allow_html=True)
                 continue
 

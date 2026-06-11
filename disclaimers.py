@@ -34,12 +34,14 @@ MONTE_CARLO = (
 
 # ── Stress test disclosure ────────────────────────────────────────────────────
 STRESS_TEST = (
-    "Stress test results show how this portfolio's historical holdings would have "
-    "performed during past market crises, using actual Polygon.io price data for "
-    "each period. This is a hypothetical analysis — your actual portfolio composition, "
-    "entry prices, and trading behaviour during a crisis would differ. Holdings not "
-    "publicly traded during a historical scenario are excluded from that scenario's "
-    "calculation. Past crises do not predict future drawdowns."
+    "Stress results are model estimates, not historical replays. Each holding's move "
+    "is approximated as its market beta (estimated from ~2 years of recent daily "
+    "returns vs the S&P 500) multiplied by the index's known decline in each crisis, "
+    "floored at −95% for a long position. This is a first-order sensitivity estimate: "
+    "it assumes betas stay roughly stable, whereas betas and correlations typically "
+    "rise in a real crisis, so true drawdowns can be deeper. Holdings whose recent "
+    "returns can't be fetched are excluded from a scenario. Past crises do not predict "
+    "future drawdowns."
 )
 
 # ── Portfolio optimisation disclosure ────────────────────────────────────────
