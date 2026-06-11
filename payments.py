@@ -101,9 +101,9 @@ def render_pricing_section():
                 ✓ &nbsp;Support & resistance<br>
                 ✓ &nbsp;News headlines<br>
                 ✓ &nbsp;Up to 5 year history<br>
-                ✗ &nbsp;Live intraday charts<br>
+                ✗ &nbsp;Intraday charts<br>
                 ✗ &nbsp;Day trader mode<br>
-                ✗ &nbsp;Real-time price updates
+                ✗ &nbsp;Intraday (15-min delayed) data
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -129,8 +129,8 @@ def render_pricing_section():
             </div>
             <div style="font-size:0.88rem;color:#94a3b8;line-height:2.2">
                 ✓ &nbsp;Everything in Free<br>
-                ✓ &nbsp;<span style="color:#38bdf8">Live intraday candlestick charts</span><br>
-                ✓ &nbsp;<span style="color:#38bdf8">Real-time price (30s refresh)</span><br>
+                ✓ &nbsp;<span style="color:#38bdf8">Intraday candlestick charts (15-min delayed)</span><br>
+                ✓ &nbsp;<span style="color:#38bdf8">Delayed quotes (~15 min)</span><br>
                 ✓ &nbsp;<span style="color:#38bdf8">Day trader mode</span><br>
                 ✓ &nbsp;<span style="color:#38bdf8">1min 5min 15min 1hr candles</span><br>
                 ✓ &nbsp;<span style="color:#38bdf8">Volume spike detection</span><br>

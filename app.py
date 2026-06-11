@@ -317,7 +317,7 @@ with st.sidebar:
                     '(Random Forest / XGBoost) — for smarter, more adaptive price projections. '
                     'GARCH captures volatility clustering, Monte Carlo simulates thousands of '
                     'price paths, and the ML model adds a data-driven drift signal — '
-                    'all powered by real-time market data via Polygon.io.</div>',
+                    'all powered by market data via Polygon.io.</div>',
                     unsafe_allow_html=True,
                 )
             n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
@@ -454,7 +454,7 @@ with tab1:
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'JetBrains Mono',monospace">Live</div>
+                                font-family:'JetBrains Mono',monospace">Daily</div>
                     <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Market Data</div>
                 </div>
@@ -758,10 +758,9 @@ with tab1:
                     <span class="{change_cls}">{sign}{live['change']:,.2f} ({sign}{live['pct']:.2f}%)</span>
                 </div>
                 <div style="text-align:right">
-                    <div><span class="live-dot"></span>
-                         <span style="color:#059669;font-size:0.78rem">Live</span></div>
-                    <div style="color:#6b7a8d;font-size:0.75rem;margin-top:4px">Updated {live['time']}</div>
-                    <div style="color:#6b7a8d;font-size:0.72rem">Refreshes every 30s</div>
+                    <div><span style="color:#94a3b8;font-size:0.78rem">● Delayed quote</span></div>
+                    <div style="color:#6b7a8d;font-size:0.75rem;margin-top:4px">As of {live['time']}</div>
+                    <div style="color:#6b7a8d;font-size:0.72rem">~15-min delayed (free data tier)</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -941,7 +940,7 @@ with tab1:
                     Day Trader Mode is Pro Only
                 </div>
                 <div style="color:#6b7a8d;font-size:0.88rem;margin-bottom:1.25rem">
-                    Get live intraday charts, real-time updates, and full day trading tools for $9.99/month
+                    Get intraday charts (15-min delayed), technical signals, and full day-trading tools for $9.99/month
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -1164,7 +1163,7 @@ with tab1:
             elif is_etf:
                 _tags.append('<span class="stock-hero-tag etf">ETF</span>')
             if live:
-                _tags.append('<span class="stock-hero-tag live">● Live</span>')
+                _tags.append('<span class="stock-hero-tag live">Delayed quote</span>')
 
             # Price + change — prefer live tick, fall back to last close
             _price_now    = float(live["price"]) if live else float(latest["Close"])
@@ -1173,8 +1172,8 @@ with tab1:
             _change_cls   = "pos" if _change_abs >= 0 else "neg"
             _change_arrow = "▲" if _change_abs >= 0 else "▼"
             _change_sign  = "+" if _change_abs >= 0 else ""
-            _live_meta    = (f'<div class="stock-hero-meta"><span class="stock-hero-meta-dot"></span>'
-                             f'Updated {live["time"]}</div>') if live else ""
+            _live_meta    = (f'<div class="stock-hero-meta">~15-min delayed · as of '
+                             f'{live["time"]}</div>') if live else ""
 
             # Day range fill % (where current price sits between today's low and high)
             _day_open  = float(latest.get("Open",  _price_now))
@@ -2718,7 +2717,7 @@ with tab5:
             <span class="stock-hero-tag">LONG-ONLY</span>
             <span class="stock-hero-tag">{len(STRATEGY_UNIVERSE)} MEGA-CAPS</span>
             <span class="stock-hero-tag">{_span_tag}</span>
-            <span class="stock-hero-tag live">● TRACKED LIVE</span>
+            <span class="stock-hero-tag live">DAILY-TRACKED</span>
           </div>
         </div>
       </div>
