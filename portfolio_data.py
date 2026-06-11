@@ -551,11 +551,20 @@ def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print
 
 def get_sharpe_rankings(api_key: str = "") -> dict:
     """
-    Returns today's pre-computed Sharpe rankings from Supabase.
-    Format: {ticker: {ticker, sector, sharpe, ann_return, ann_vol}}
-    Returns {} if not yet computed (precompute.py hasn't run today).
+    Returns the most recent pre-computed Sharpe rankings from Supabase, walking
+    back up to ~5 days.
+
+    The precompute job runs on weekday mornings, so before that day's run (overnight)
+    and all weekend, today's key doesn't exist yet. Falling back to the latest
+    available rankings keeps the Portfolio Builder on the full ranked universe
+    instead of silently degrading to the slow live-candidate path. Rankings move
+    slowly day-to-day, so the most recent set is a fine stand-in.
+    Format: {ticker: {ticker, sector, sharpe, ann_return, ann_vol, ...}}.
+    Returns {} only if nothing recent is cached at all.
     """
-    today     = datetime.today().strftime("%Y-%m-%d")
-    cache_key = f"sharpe_rankings_{today}"
-    rankings  = cache_get(cache_key)
-    return rankings or {}
+    for days_back in range(0, 6):
+        date_str = (datetime.today() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        rankings = cache_get(f"sharpe_rankings_{date_str}")
+        if rankings:
+            return rankings
+    return {}
