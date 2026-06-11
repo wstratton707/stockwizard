@@ -47,6 +47,76 @@ def _reverse_dcf_growth(market_cap, base_earnings, years=10, discount=0.09,
     return round((lo + hi) / 2, 4)
 
 
+def _piotroski_f_score(inc, bal, cf):
+    """
+    Piotroski F-Score (0-9): a 9-point fundamental-quality test comparing the two
+    most recent fiscal years (profitability, leverage/liquidity, efficiency).
+    Returns (score, n_assessable). score is None when too few signals can be
+    evaluated — e.g. banks that don't report current assets / gross profit.
+    """
+    def v(df, field, i): return _fin_val(df, field, i)
+    points = {"n": 0, "ok": 0}
+
+    def signal(cond):
+        if cond is None:           # input unavailable — skip, don't penalise
+            return
+        points["n"] += 1
+        if cond:
+            points["ok"] += 1
+
+    ni0,  ni1  = v(inc, "net_income_loss", 0), v(inc, "net_income_loss", 1)
+    a0,   a1   = v(bal, "assets", 0),          v(bal, "assets", 1)
+    ocf0       = v(cf,  "net_cash_flow_from_operating_activities", 0)
+    ltd0, ltd1 = v(bal, "long_term_debt", 0),  v(bal, "long_term_debt", 1)
+    ca0,  ca1  = v(bal, "current_assets", 0),  v(bal, "current_assets", 1)
+    cl0,  cl1  = v(bal, "current_liabilities", 0), v(bal, "current_liabilities", 1)
+    sh0,  sh1  = v(inc, "diluted_shares", 0),  v(inc, "diluted_shares", 1)
+    gp0,  gp1  = v(inc, "gross_profit", 0),    v(inc, "gross_profit", 1)
+    rv0,  rv1  = v(inc, "revenues", 0),        v(inc, "revenues", 1)
+
+    def safediv(n, d): return (n / d) if (n is not None and d) else None
+    roa0, roa1 = safediv(ni0, a0), safediv(ni1, a1)
+    lev0, lev1 = safediv(ltd0, a0), safediv(ltd1, a1)
+    cr0,  cr1  = safediv(ca0, cl0), safediv(ca1, cl1)
+    gm0,  gm1  = safediv(gp0, rv0), safediv(gp1, rv1)
+    at0,  at1  = safediv(rv0, a0),  safediv(rv1, a1)
+    cmp = lambda x, y: (x > y) if (x is not None and y is not None) else None
+
+    signal(ni0 > 0 if ni0 is not None else None)     # 1  positive net income
+    signal(ocf0 > 0 if ocf0 is not None else None)   # 2  positive operating cash flow
+    signal(cmp(roa0, roa1))                          # 3  rising ROA
+    signal(ocf0 > ni0 if (ocf0 is not None and ni0 is not None) else None)  # 4  accruals (CFO > NI)
+    signal(cmp(lev1, lev0))                          # 5  falling leverage
+    signal(cmp(cr0, cr1))                            # 6  rising current ratio
+    signal(sh0 <= sh1 * 1.01 if (sh0 is not None and sh1 is not None) else None)  # 7  no dilution
+    signal(cmp(gm0, gm1))                            # 8  rising gross margin
+    signal(cmp(at0, at1))                            # 9  rising asset turnover
+
+    if points["n"] < 6:
+        return None, points["n"]
+    return points["ok"], points["n"]
+
+
+def _altman_z(rev, ebit, ca, cl, assets, total_liab, retained, mcap):
+    """
+    Classic Altman Z-Score for non-financial public firms. Returns (z, zone) with
+    zone in {safe (>2.99), grey (1.81-2.99), distress (<1.81)}, or (None, None)
+    when inputs are missing (it isn't meaningful for banks/insurers).
+    """
+    if not assets or not total_liab or mcap is None:
+        return None, None
+    if any(x is None for x in (rev, ebit, ca, cl, retained)):
+        return None, None
+    x1 = (ca - cl) / assets      # working capital / assets
+    x2 = retained / assets       # retained earnings / assets
+    x3 = ebit / assets           # EBIT / assets
+    x4 = mcap / total_liab       # market value of equity / total liabilities
+    x5 = rev / assets            # asset turnover
+    z  = 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + 1.0 * x5
+    zone = "safe" if z > 2.99 else ("grey" if z >= 1.81 else "distress")
+    return round(z, 2), zone
+
+
 def compute_fundamentals(financials, market_cap=None, price=None):
     """
     Turn raw Polygon statements (from data.fetch_financials) + market cap into a
@@ -110,8 +180,42 @@ def compute_fundamentals(financials, market_cap=None, price=None):
 
     implied_growth = _reverse_dcf_growth(mcap, ni) if (mcap and ni) else None
 
+    # ── Free cash flow (the extra EDGAR fields are absent on the Polygon path,
+    #     so every derived metric here degrades gracefully to None) ────────────
+    capex = _fin_val(cf, "capex")
+    fcf   = (ocf - capex) if (ocf is not None and capex is not None) else None
+    fcf_block = {
+        "fcf":        fcf,
+        "fcf_margin": pct(fcf, rev),
+        "fcf_yield":  pct(fcf, mcap) if (fcf is not None and mcap) else None,
+    }
+
+    # ── EV / EBITDA ───────────────────────────────────────────────────────────
+    da         = _fin_val(inc, "depreciation_amortization")
+    cash_bal   = _fin_val(bal, "cash")
+    debt_cur   = _fin_val(bal, "debt_current")
+    total_debt = (sum(v for v in (ltd, debt_cur) if v is not None)
+                  if (ltd is not None or debt_cur is not None) else None)
+    ebitda     = (oi + da) if (oi is not None and da is not None) else None
+    ev         = (mcap + (total_debt or 0) - (cash_bal or 0)) if mcap else None
+    ev_ebitda  = ratio(ev, ebitda) if (ev is not None and ebitda and ebitda > 0) else None
+
+    # ── Quality scores ────────────────────────────────────────────────────────
+    f_score, f_basis = _piotroski_f_score(inc, bal, cf)
+    z_score, z_zone  = _altman_z(rev, oi, ca, cl, asts,
+                                 _fin_val(bal, "liabilities"),
+                                 _fin_val(bal, "retained_earnings"), mcap)
+    quality = {"f_score": f_score, "f_basis": f_basis,
+               "z_score": z_score, "z_zone": z_zone}
+
     # Trend arrays oldest -> newest for charting
     order = list(range(len(inc) - 1, -1, -1))
+
+    def _fcf_at(i):
+        o, c = (_fin_val(cf, "net_cash_flow_from_operating_activities", i),
+                _fin_val(cf, "capex", i))
+        return (o - c) if (o is not None and c is not None) else None
+
     trend = {
         "periods":          [str(inc.iloc[i]["Period"])[:7] for i in order],
         "revenue":          [_fin_val(inc, "revenues", i) for i in order],
@@ -119,6 +223,7 @@ def compute_fundamentals(financials, market_cap=None, price=None):
         "eps":              [_fin_val(inc, "diluted_earnings_per_share", i) for i in order],
         "operating_margin": [pct(_fin_val(inc, "operating_income_loss", i),
                                   _fin_val(inc, "revenues", i)) for i in order],
+        "fcf":              [_fcf_at(i) for i in order],
     }
 
     return {
@@ -135,8 +240,10 @@ def compute_fundamentals(financials, market_cap=None, price=None):
                      "financing": _fin_val(cf, "net_cash_flow_from_financing_activities")},
         "margins": margins, "returns": returns, "leverage": leverage,
         "growth": growth, "valuation": valuation,
+        "fcf": fcf_block, "ev_ebitda": ev_ebitda, "quality": quality,
         "implied_growth": implied_growth,
         "trend": trend,
+        "source": financials.get("source", "Polygon") if isinstance(financials, dict) else "Polygon",
     }
 
 

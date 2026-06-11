@@ -27,7 +27,8 @@ from data import (
 from cached_fetchers import (
     cached_validate_ticker, cached_detect_asset_type,
     cached_fetch_stock_data, cached_fetch_ohlcv,
-    cached_fetch_company_details, cached_fetch_financials, cached_fetch_news,
+    cached_fetch_company_details, cached_fetch_financials,
+    cached_fetch_sec_financials, cached_fetch_news,
     cached_fetch_peer_comparison, cached_fetch_sector_data,
     cached_fetch_next_earnings, cached_fetch_crypto_data,
     cached_fetch_crypto_details, cached_fetch_etf_details,
@@ -1310,7 +1311,12 @@ with tab1:
             # SEC-sourced statements via Polygon /vX/reference/financials, turned
             # into margins/returns/leverage/growth/valuation + a reverse-DCF lens.
             if not is_crypto:
-                _fin_raw = cached_fetch_financials(ticker_input, POLYGON_API_KEY)
+                # SEC EDGAR is the primary source (10+ yrs, free, authoritative);
+                # fall back to Polygon's 4-period financials for filers EDGAR
+                # doesn't cover (some foreign/ADR names).
+                _fin_raw = cached_fetch_sec_financials(ticker_input)
+                if not _fin_raw:
+                    _fin_raw = cached_fetch_financials(ticker_input, POLYGON_API_KEY)
                 fund = compute_fundamentals(
                     _fin_raw, market_cap=company_details.get("Market Cap"),
                     price=float(df["Close"].iloc[-1]),
@@ -1319,10 +1325,13 @@ with tab1:
                     def _fv(v, suffix="", na="N/A"):
                         return f"{v}{suffix}" if v is not None else na
 
+                    _n_yrs = len(_fin_raw["income_statement"]) if isinstance(_fin_raw, dict) and _fin_raw.get("income_statement") is not None else 0
+                    _hist  = f"{_n_yrs}-yr history · " if _n_yrs > 1 else ""
                     st.markdown(
                         f'<div class="section-header">Fundamentals &amp; Valuation '
                         f'<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
-                        f'text-transform:none;font-size:0.7rem">· FY ending {fund["as_of"]}</span></div>',
+                        f'text-transform:none;font-size:0.7rem">· {_hist}FY ending {fund["as_of"]} '
+                        f'· {fund.get("source", "Polygon")}</span></div>',
                         unsafe_allow_html=True)
 
                     _v, _m, _r, _l, _g = (fund["valuation"], fund["margins"],
@@ -1351,6 +1360,40 @@ with tab1:
                                     f'<div class="metric-value {_cls}">{_val}</div></div>',
                                     unsafe_allow_html=True)
                         st.markdown("<div style='height:0.7rem'></div>", unsafe_allow_html=True)
+
+                    # ── Quality scorecard — the EDGAR-powered differentiators ──
+                    _q, _fc = fund["quality"], fund["fcf"]
+                    _fs = _q["f_score"]
+                    _fs_cls = ("positive" if (_fs is not None and _fs >= 7)
+                               else "negative" if (_fs is not None and _fs <= 3) else "neutral")
+                    _z, _zone = _q["z_score"], _q["z_zone"]
+                    _z_cls = {"safe": "positive", "distress": "negative"}.get(_zone, "neutral")
+                    _fy = _fc["fcf_yield"]
+                    _quality_cards = [
+                        ("Piotroski F-Score", f"{_fs} / 9" if _fs is not None else "N/A", _fs_cls),
+                        ("Altman Z-Score",
+                         f"{_z} · {_zone.title()}" if _z is not None else "N/A", _z_cls),
+                        ("FCF Yield", _fv(_fy, "%"),
+                         "positive" if (_fy or 0) > 0 else
+                         ("negative" if (_fy is not None and _fy < 0) else "neutral")),
+                        ("EV / EBITDA", _fv(fund["ev_ebitda"], "×"), "neutral"),
+                    ]
+                    _qtips = {
+                        "Piotroski F-Score": "9-point test of fundamental strength (profitability, leverage, efficiency vs last year). 8-9 strong, 0-2 weak.",
+                        "Altman Z-Score": "Bankruptcy-risk score. Above 2.99 = safe zone, 1.81-2.99 grey, below 1.81 = distress. Not meaningful for banks.",
+                        "FCF Yield": "Free cash flow (operating cash flow − capex) ÷ market cap. Higher = more cash generated per dollar of value.",
+                        "EV / EBITDA": "Enterprise value ÷ EBITDA — a capital-structure-neutral valuation multiple.",
+                    }
+                    for _col, (_lbl, _val, _cls) in zip(st.columns(4), _quality_cards):
+                        _tip = _qtips.get(_lbl, "")
+                        _th  = (f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{_tip}</span></span>'
+                                if _tip else "")
+                        with _col:
+                            st.markdown(
+                                f'<div class="metric-card"><div class="metric-label">{_lbl}{_th}</div>'
+                                f'<div class="metric-value {_cls}">{_val}</div></div>',
+                                unsafe_allow_html=True)
+                    st.markdown("<div style='height:0.7rem'></div>", unsafe_allow_html=True)
 
                     # Revenue & net income trend with operating margin
                     _t = fund["trend"]
@@ -1387,6 +1430,33 @@ with tab1:
                                         title_font=dict(size=12, color="#059669", family="DM Sans")),
                         )
                         st.plotly_chart(fig_fund, use_container_width=True)
+
+                    # Free cash flow trend (EDGAR-powered)
+                    _tf = _t.get("fcf")
+                    if _tf and any(x is not None for x in _tf):
+                        fig_fcf = go.Figure()
+                        fig_fcf.add_trace(go.Bar(
+                            x=_t["periods"], y=[(x or 0) / 1e9 for x in _tf],
+                            marker_color=["#059669" if (x or 0) >= 0 else "#dc2626" for x in _tf],
+                            name="Free Cash Flow ($B)",
+                            hovertemplate="%{x}: $%{y:.1f}B<extra>Free Cash Flow</extra>"))
+                        fig_fcf.update_layout(
+                            height=240, template=None,
+                            plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
+                            margin=dict(l=55, r=20, t=42, b=40), showlegend=False,
+                            title=dict(text="Free Cash Flow",
+                                       font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
+                            font=dict(family="DM Sans, system-ui, sans-serif"), hovermode="x unified",
+                            hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
+                                            font=dict(color="white", size=12, family="DM Sans")),
+                            xaxis=dict(tickfont=dict(size=11, color="#64748b", family="DM Sans"),
+                                       gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0"),
+                            yaxis=dict(title="$ Billions", gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
+                                       zeroline=True, zerolinecolor="#cbd5e1",
+                                       tickfont=dict(size=11, color="#64748b", family="DM Sans"),
+                                       title_font=dict(size=12, color="#64748b", family="DM Sans")),
+                        )
+                        st.plotly_chart(fig_fcf, use_container_width=True)
 
                     # Reverse-DCF valuation lens — states what growth is priced in
                     _ig, _hist = fund["implied_growth"], _g["eps_cagr"]

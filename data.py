@@ -223,6 +223,188 @@ def fetch_financials(ticker, api_key, log=print):
     return results
 
 
+# ── SEC EDGAR fundamentals (free, no key, 10+ years, authoritative) ───────────
+# EDGAR's companyfacts API exposes the full XBRL filed in 10-Ks/20-Fs — deeper
+# and more reliable than Polygon's free 4-period limit, with no rate cap. Used
+# as the PRIMARY fundamentals source; Polygon's fetch_financials stays as a
+# fallback for filers EDGAR doesn't cover.
+SEC_HEADERS  = {"User-Agent": "QuantWizard/1.0 (equity research; support@quantwizard.app)"}
+_SEC_CIK_MAP = None
+
+# XBRL us-gaap tag candidates — first one with data wins (tags vary by filer/era).
+_SEC_TAGS = {
+    "revenues": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
+                 "SalesRevenueNet", "RevenueFromContractWithCustomerIncludingAssessedTax"],
+    "cost_of_revenue": ["CostOfGoodsAndServicesSold", "CostOfRevenue", "CostOfGoodsSold"],
+    "gross_profit": ["GrossProfit"],
+    "operating_income_loss": ["OperatingIncomeLoss"],
+    "net_income_loss": ["NetIncomeLoss", "ProfitLoss"],
+    "research_and_development": ["ResearchAndDevelopmentExpense"],
+    "depreciation_amortization": ["DepreciationDepletionAndAmortization",
+                                  "DepreciationAndAmortization",
+                                  "DepreciationAmortizationAndAccretionNet",
+                                  "DepreciationAmortizationAndOther"],
+    "assets": ["Assets"],
+    "current_assets": ["AssetsCurrent"],
+    "liabilities": ["Liabilities"],
+    "current_liabilities": ["LiabilitiesCurrent"],
+    "equity": ["StockholdersEquity",
+               "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
+    "long_term_debt": ["LongTermDebtNoncurrent", "LongTermDebt"],
+    "debt_current": ["LongTermDebtCurrent", "DebtCurrent"],
+    "cash": ["CashAndCashEquivalentsAtCarryingValue",
+             "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
+    "retained_earnings": ["RetainedEarningsAccumulatedDeficit"],
+    "net_cash_flow_from_operating_activities":
+        ["NetCashProvidedByUsedInOperatingActivities",
+         "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"],
+    "net_cash_flow_from_investing_activities": ["NetCashProvidedByUsedInInvestingActivities"],
+    "net_cash_flow_from_financing_activities": ["NetCashProvidedByUsedInFinancingActivities"],
+    "capex": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
+}
+_SEC_TAGS_EPS    = ["EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted"]
+_SEC_TAGS_SHARES = ["WeightedAverageNumberOfDilutedSharesOutstanding",
+                    "WeightedAverageNumberOfShareOutstandingBasicAndDiluted",
+                    "WeightedAverageNumberOfSharesOutstandingBasic"]
+
+
+def _sec_load_cik_map(log=print):
+    """Lazy-load and cache EDGAR's ticker→CIK map (free, ~10k entries)."""
+    global _SEC_CIK_MAP
+    if _SEC_CIK_MAP is not None:
+        return _SEC_CIK_MAP
+    try:
+        r = requests.get("https://www.sec.gov/files/company_tickers.json",
+                         headers=SEC_HEADERS, timeout=20)
+        if r.status_code == 200:
+            _SEC_CIK_MAP = {row["ticker"].upper(): str(row["cik_str"]).zfill(10)
+                            for row in r.json().values()}
+            return _SEC_CIK_MAP
+    except Exception as e:
+        log(f"   SEC CIK map failed: {e}")
+    _SEC_CIK_MAP = {}
+    return _SEC_CIK_MAP
+
+
+def _sec_fy_series(facts, tags, unit="USD"):
+    """
+    {fiscal_year: (period_end, value)} from annual 10-K/20-F filings only,
+    MERGED across the candidate tags in priority order — so a series stays
+    continuous even when a company switched XBRL tags mid-history (e.g. the
+    2018 revenue-recognition change from SalesRevenueNet → RevenueFromContract).
+    For each fiscal year, the highest-priority tag with data wins.
+    """
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    out = {}
+    for tag in tags:                       # priority order
+        node = gaap.get(tag)
+        if not node:
+            continue
+        series = node.get("units", {}).get(unit)
+        if not series:
+            continue
+        per_tag = {}
+        for e in series:
+            if e.get("fp") != "FY":
+                continue
+            form = e.get("form", "")
+            if not (form.startswith("10-K") or form.startswith("20-F")):
+                continue
+            fy, end, val = e.get("fy"), e.get("end", ""), e.get("val")
+            if fy is None or val is None:
+                continue
+            if fy not in per_tag or end > per_tag[fy][0]:   # latest-ending wins within a tag
+                per_tag[fy] = (end, val)
+        for fy, ev in per_tag.items():
+            out.setdefault(fy, ev)         # earlier (higher-priority) tag keeps the year
+    return out
+
+
+def fetch_sec_financials(ticker, years=10, log=print):
+    """
+    Up to `years` of annual statements from SEC EDGAR's companyfacts API.
+
+    Returns {income_statement, balance_sheet, cash_flow_statement} as newest-first
+    DataFrames whose columns match the Polygon shape (so compute_fundamentals works
+    unchanged) plus extras (capex, retained_earnings, debt_current, cash, diluted_shares,
+    depreciation_amortization) used for FCF / Piotroski F-Score / Altman Z-Score.
+    Returns {} when unavailable (ETF, crypto, or a foreign filer without us-gaap XBRL).
+    """
+    cik = _sec_load_cik_map(log=log).get(ticker.upper())
+    if not cik:
+        return {}
+    try:
+        r = requests.get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json",
+                         headers=SEC_HEADERS, timeout=25)
+        if r.status_code != 200:
+            log(f"   EDGAR companyfacts HTTP {r.status_code} for {ticker}")
+            return {}
+        facts = r.json()
+    except Exception as e:
+        log(f"   EDGAR fetch failed for {ticker}: {e}")
+        return {}
+
+    fmap       = {f: _sec_fy_series(facts, _SEC_TAGS[f]) for f in _SEC_TAGS}
+    eps_map    = _sec_fy_series(facts, _SEC_TAGS_EPS, unit="USD/shares")
+    shares_map = _sec_fy_series(facts, _SEC_TAGS_SHARES, unit="shares")
+
+    fys = sorted(set(fmap["net_income_loss"]) | set(fmap["revenues"]), reverse=True)[:years]
+    if not fys:
+        return {}
+
+    def col(field, fy):
+        m = fmap.get(field, {})
+        return m[fy][1] if fy in m else None
+
+    def end_of(fy):
+        for f in ("net_income_loss", "revenues", "assets"):
+            if fy in fmap.get(f, {}):
+                return fmap[f][fy][0]
+        return str(fy)
+
+    inc_rows, bal_rows, cf_rows = [], [], []
+    for fy in fys:
+        period = end_of(fy)
+        gp = col("gross_profit", fy)
+        if gp is None:
+            rev, cogs = col("revenues", fy), col("cost_of_revenue", fy)
+            gp = (rev - cogs) if (rev is not None and cogs is not None) else None
+        inc_rows.append({
+            "Period": period,
+            "revenues": col("revenues", fy), "cost_of_revenue": col("cost_of_revenue", fy),
+            "gross_profit": gp, "operating_income_loss": col("operating_income_loss", fy),
+            "net_income_loss": col("net_income_loss", fy),
+            "research_and_development": col("research_and_development", fy),
+            "depreciation_amortization": col("depreciation_amortization", fy),
+            "diluted_earnings_per_share": eps_map.get(fy, (None, None))[1],
+            "diluted_shares": shares_map.get(fy, (None, None))[1],
+        })
+        bal_rows.append({
+            "Period": period,
+            "assets": col("assets", fy), "current_assets": col("current_assets", fy),
+            "liabilities": col("liabilities", fy),
+            "current_liabilities": col("current_liabilities", fy),
+            "equity": col("equity", fy), "long_term_debt": col("long_term_debt", fy),
+            "debt_current": col("debt_current", fy), "cash": col("cash", fy),
+            "retained_earnings": col("retained_earnings", fy),
+        })
+        cf_rows.append({
+            "Period": period,
+            "net_cash_flow_from_operating_activities": col("net_cash_flow_from_operating_activities", fy),
+            "net_cash_flow_from_investing_activities": col("net_cash_flow_from_investing_activities", fy),
+            "net_cash_flow_from_financing_activities": col("net_cash_flow_from_financing_activities", fy),
+            "capex": col("capex", fy),
+        })
+
+    log(f"   EDGAR: {len(fys)} fiscal years for {ticker} ({fys[-1]}–{fys[0]})")
+    return {
+        "income_statement":    pd.DataFrame(inc_rows),
+        "balance_sheet":       pd.DataFrame(bal_rows),
+        "cash_flow_statement": pd.DataFrame(cf_rows),
+        "source": "SEC EDGAR",
+    }
+
+
 def fetch_news(ticker, api_key, log=print):
     log(f"Fetching news for {ticker}...")
     data = _get("/v2/reference/news", api_key, params={
