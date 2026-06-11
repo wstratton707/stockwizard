@@ -612,6 +612,58 @@ with tab1:
                 </div>
                 """, unsafe_allow_html=True)
 
+        # ── Methodology & Data ────────────────────────────────────────────────
+        st.markdown("""
+        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
+                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
+                    margin-bottom:1rem;margin-top:2rem">Methodology &amp; Data</div>
+        <div style="color:#64748b;font-size:0.84rem;line-height:1.6;margin-bottom:1.25rem;max-width:680px">
+            We show our work. Every number below is computed with standard, citable formulas —
+            and we're upfront about the data and its limits.
+        </div>
+        """, unsafe_allow_html=True)
+
+        _METHOD = [
+            ("🗂️", "Data &amp; Freshness",
+             "Prices are <b>end-of-day / ~15-min delayed</b> (Polygon.io), with ~2 years of daily history. "
+             "Fundamentals come straight from <b>SEC EDGAR</b> filings (10-K/10-Q), updated each filing — "
+             "no real-time quotes are implied."),
+            ("⚖️", "Risk-Adjusted Returns",
+             "Sharpe and Sortino use <b>excess return over the live 3-month T-bill</b> (FRED), not raw return. "
+             "Volatility is the annualized standard deviation of daily returns (σ·√252)."),
+            ("🧮", "Backtesting",
+             "Portfolio backtests use a <b>time-weighted NAV</b> that separates your contributions from market "
+             "performance, benchmark SPY on the <b>same contribution schedule</b>, and charge realistic "
+             "rebalancing cost on traded value only."),
+            ("🎲", "Monte Carlo",
+             "Correlated multi-asset simulation via <b>Cholesky decomposition</b>. Per-asset drift is blended "
+             "70/30 toward a 7% long-run mean and <b>capped at 12%</b> — deliberately conservative to avoid "
+             "over-optimistic projections."),
+            ("🏛️", "Fundamental Quality",
+             "From EDGAR statements: <b>Piotroski F-Score</b> (9-point profitability/leverage/efficiency test), "
+             "<b>Altman Z-Score</b> (distress risk), free cash flow (operating cash flow − capex), and standard "
+             "valuation multiples."),
+            ("🔥", "Stress Test",
+             "<b>Model estimates, not historical replays.</b> Each holding's drawdown ≈ its market beta × the "
+             "S&P 500's decline in that crash. Betas and correlations rise in real crises, so actual losses "
+             "can be deeper."),
+        ]
+        _mcards = "".join(
+            f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:1.1rem 1.25rem">'
+            f'<div style="font-size:1.15rem;margin-bottom:0.4rem">{ic}'
+            f'<span style="font-weight:700;color:#0f172a;font-size:0.9rem;margin-left:0.45rem">{ti}</span></div>'
+            f'<div style="color:#64748b;font-size:0.8rem;line-height:1.6">{tx}</div></div>'
+            for ic, ti, tx in _METHOD
+        )
+        st.markdown(
+            f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));'
+            f'gap:0.85rem">{_mcards}</div>'
+            f'<div style="color:#94a3b8;font-size:0.76rem;line-height:1.6;margin-top:1rem;max-width:680px">'
+            f'These tools are for research and education, not investment advice. Estimates and forecasts are '
+            f'not predictions — past performance and modeled scenarios do not guarantee future results.</div>',
+            unsafe_allow_html=True,
+        )
+
         # ── Pricing ───────────────────────────────────────────────────────────
         st.markdown("""
         <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
@@ -1074,6 +1126,19 @@ with tab1:
                     ticker_input, df, company_details, mc_summary, sharpe, sortino,
                     forecast_method=forecast_method)
 
+                # Fundamentals for the report (cached → the on-screen panel below
+                # reuses the same call for free). EDGAR-first, Polygon fallback.
+                _fund_report = {"ok": False}
+                if not is_crypto:
+                    try:
+                        _fr = (cached_fetch_sec_financials(ticker_input)
+                               or cached_fetch_financials(ticker_input, POLYGON_API_KEY))
+                        _fund_report = compute_fundamentals(
+                            _fr, market_cap=company_details.get("Market Cap"),
+                            price=float(df["Close"].iloc[-1]))
+                    except Exception:
+                        _fund_report = {"ok": False}
+
                 progress.progress(90, text="Building Excel report...")
                 excel_buf = build_excel(
                     ticker_input, df, period_label,
@@ -1083,7 +1148,7 @@ with tab1:
                     corr_matrix=corr_matrix,
                     resistance_levels=resistance, support_levels=support,
                     summary_text=summary_text,
-                    bar_size=bar_size,
+                    bar_size=bar_size, fundamentals=_fund_report,
                 )
 
                 pptx_buf = None
@@ -1096,6 +1161,7 @@ with tab1:
                             mc_sim_df=mc_sim_df, mc_summary=mc_summary,
                             news_list=news_list,
                             summary_text=summary_text,
+                            fundamentals=_fund_report,
                         )
                     except Exception:
                         pptx_buf = None

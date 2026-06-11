@@ -677,13 +677,102 @@ def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=N
 
 
 # ── Master orchestrator ───────────────────────────────────────────────────────
+# ── Fundamentals sheet (EDGAR-sourced statements + quality scores) ────────────
+def _build_fundamentals_sheet(wb, fundamentals):
+    if not fundamentals or not fundamentals.get("ok"):
+        return
+    ws = wb.create_sheet("Fundamentals")
+    f = fundamentals
+    v, m, r, l, g = f["valuation"], f["margins"], f["returns"], f["leverage"], f["growth"]
+    q, fc = f.get("quality", {}), f.get("fcf", {})
+
+    def _fmt(x, suffix=""):
+        return f"{x}{suffix}" if x is not None else "N/A"
+
+    def _bn(x):
+        return f"${x/1e9:,.1f}B" if isinstance(x, (int, float)) else "N/A"
+
+    row = 1
+    tc = ws.cell(row=row, column=1,
+                 value=f"Fundamentals & Valuation   ·   source: {f.get('source','—')}"
+                       f"   ·   FY ending {f.get('as_of','—')}")
+    tc.font = Font(size=14, bold=True, color=DARK_BLUE, name="Arial")
+    row += 2
+
+    def section(title, pairs):
+        nonlocal row
+        for col in (1, 2):
+            c = ws.cell(row=row, column=col, value=title if col == 1 else None)
+            c.font = Font(bold=True, color=WHITE, name="Arial", size=11)
+            c.fill = PatternFill("solid", fgColor=DARK_BLUE)
+        row += 1
+        for lbl, val in pairs:
+            cl = ws.cell(row=row, column=1, value=lbl)
+            cv = ws.cell(row=row, column=2, value=val)
+            cl.font, cv.font = Font(name="Arial", size=10), Font(name="Arial", size=10, bold=True)
+            cl.border = cv.border = _border()
+            if row % 2 == 0:
+                cl.fill = cv.fill = PatternFill("solid", fgColor=GREY_ROW)
+            row += 1
+        row += 1
+
+    _ig = f.get("implied_growth")
+    section("Valuation", [
+        ("P/E", _fmt(v["pe"], "x")), ("P/S", _fmt(v["ps"], "x")), ("P/B", _fmt(v["pb"], "x")),
+        ("EV / EBITDA", _fmt(f.get("ev_ebitda"), "x")),
+        ("Earnings Yield", _fmt(v["earnings_yield"], "%")),
+        ("FCF Yield", _fmt(fc.get("fcf_yield"), "%")),
+        ("Reverse-DCF implied growth", _fmt(round(_ig * 100, 1) if _ig is not None else None, "%")),
+    ])
+    section("Profitability & Returns", [
+        ("Gross Margin", _fmt(m["gross"], "%")), ("Operating Margin", _fmt(m["operating"], "%")),
+        ("Net Margin", _fmt(m["net"], "%")), ("Return on Equity", _fmt(r["roe"], "%")),
+        ("Return on Assets", _fmt(r["roa"], "%")), ("Free Cash Flow", _bn(fc.get("fcf"))),
+    ])
+    section("Growth", [
+        ("Revenue YoY", _fmt(g["revenue_yoy"], "%")), ("EPS YoY", _fmt(g["eps_yoy"], "%")),
+        ("Revenue CAGR", _fmt(g["revenue_cagr"], "%")), ("EPS CAGR", _fmt(g["eps_cagr"], "%")),
+    ])
+    section("Balance Sheet & Quality", [
+        ("Current Ratio", _fmt(l["current_ratio"])), ("Debt / Equity", _fmt(l["debt_to_equity"])),
+        ("Piotroski F-Score", f"{q['f_score']} / 9" if q.get("f_score") is not None else "N/A"),
+        ("Altman Z-Score", f"{q['z_score']} ({q['z_zone']})" if q.get("z_score") is not None else "N/A"),
+    ])
+
+    t = f.get("trend", {})
+    periods = t.get("periods", [])
+    if periods:
+        for col in range(1, len(periods) + 2):
+            hc = ws.cell(row=row, column=col,
+                         value=("Fiscal Period" if col == 1 else periods[col - 2]))
+            hc.font = Font(bold=True, color=WHITE, name="Arial", size=10)
+            hc.fill = PatternFill("solid", fgColor=MID_BLUE)
+            hc.border = _border()
+        row += 1
+        for label, key in [("Revenue ($B)", "revenue"), ("Net Income ($B)", "net_income"),
+                           ("Free Cash Flow ($B)", "fcf")]:
+            ws.cell(row=row, column=1, value=label).font = Font(name="Arial", size=10, bold=True)
+            for ci, x in enumerate(t.get(key, []), 2):
+                cc = ws.cell(row=row, column=ci,
+                             value=(round(x / 1e9, 1) if isinstance(x, (int, float)) else "—"))
+                cc.font = Font(name="Arial", size=10)
+                cc.border = _border()
+            ws.cell(row=row, column=1).border = _border()
+            row += 1
+
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 16
+    for col in "CDEFGHIJK":
+        ws.column_dimensions[col].width = 12
+
+
 def build_excel(ticker, df, period,
                 company_details=None, sector_df=None,
                 mc_sim_df=None, mc_summary=None,
                 news_list=None, peer_df=None,
                 corr_matrix=None,
                 resistance_levels=None, support_levels=None,
-                summary_text="", bar_size="day"):
+                summary_text="", bar_size="day", fundamentals=None):
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -698,12 +787,13 @@ def build_excel(ticker, df, period,
     _build_correlation_sheet(wb, corr_matrix)
     ws_mc_data = _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary)
     _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=df)
+    _build_fundamentals_sheet(wb, fundamentals)
 
     # Cover last so it knows all sheet names
     sheets_so_far = [s for s in wb.sheetnames]
     _build_cover(wb, ticker, period, sheets_so_far)
 
-    desired = ["Cover","Dashboard","Annual_Summary","Price_Indicators","News_Headlines",
+    desired = ["Cover","Dashboard","Fundamentals","Annual_Summary","Price_Indicators","News_Headlines",
                "Peer_Comparison","Sector_Comparison","Correlation_Matrix",
                "Monte_Carlo","Charts"]
     existing = wb.sheetnames

@@ -402,9 +402,53 @@ def _holdings_bar_chart(stock_metrics, w=9, h=4.0):
 
 # ── Stock Deck ────────────────────────────────────────────────────────────────
 
+def _build_fundamentals_slide(prs, ticker, fundamentals, page_num, total):
+    """One slide of EDGAR-sourced fundamentals + quality scores. Returns False if
+    no fundamentals are available (e.g. crypto)."""
+    f = fundamentals
+    if not f or not f.get("ok"):
+        return False
+    v, m, r, l, g = f["valuation"], f["margins"], f["returns"], f["leverage"], f["growth"]
+    q, fc = f.get("quality", {}), f.get("fcf", {})
+
+    def pc(x, suffix=""):
+        return f"{x}{suffix}" if x is not None else "N/A"
+
+    s = _blank_slide(prs)
+    _slide_header(s, f"{ticker} — Fundamentals & Valuation",
+                  f"Source: {f.get('source','—')}   ·   FY ending {f.get('as_of','—')}")
+
+    left = [
+        ("P/E", pc(v["pe"], "x")), ("P/S", pc(v["ps"], "x")), ("P/B", pc(v["pb"], "x")),
+        ("EV / EBITDA", pc(f.get("ev_ebitda"), "x")), ("FCF Yield", pc(fc.get("fcf_yield"), "%")),
+        ("Gross Margin", pc(m["gross"], "%")), ("Operating Margin", pc(m["operating"], "%")),
+        ("Net Margin", pc(m["net"], "%")), ("Return on Equity", pc(r["roe"], "%")),
+    ]
+    _fs, _z, _zone = q.get("f_score"), q.get("z_score"), q.get("z_zone")
+    right = [
+        ("Revenue YoY", pc(g["revenue_yoy"], "%"), (g["revenue_yoy"] or 0) >= 0),
+        ("EPS YoY", pc(g["eps_yoy"], "%"), (g["eps_yoy"] or 0) >= 0),
+        ("Revenue CAGR", pc(g["revenue_cagr"], "%")), ("EPS CAGR", pc(g["eps_cagr"], "%")),
+        ("Current Ratio", pc(l["current_ratio"])), ("Debt / Equity", pc(l["debt_to_equity"])),
+        ("Free Cash Flow", f"${fc['fcf']/1e9:,.1f}B" if fc.get("fcf") is not None else "N/A"),
+        ("Piotroski F-Score", f"{_fs} / 9" if _fs is not None else "N/A",
+         (_fs >= 7) if _fs is not None else None),
+        ("Altman Z-Score", f"{_z} ({_zone})" if _z is not None else "N/A",
+         (_zone == "safe") if _z is not None else None),
+    ]
+    _text_box(s, "Valuation & Profitability", 0.5, 1.4, 5.9, 0.35,
+              font_size=13, bold=True, color=C_NAVY)
+    _kv_block(s, left, 0.5, 1.85, 5.95, col_w=3.1, row_h=0.52)
+    _text_box(s, "Growth & Quality", 6.9, 1.4, 5.9, 0.35,
+              font_size=13, bold=True, color=C_NAVY)
+    _kv_block(s, right, 6.9, 1.85, 5.95, col_w=3.1, row_h=0.52)
+    _slide_footer(s, page_num, total)
+    return True
+
+
 def build_stock_pptx(ticker, df, period_label,
                      company_details=None, mc_sim_df=None, mc_summary=None,
-                     news_list=None, summary_text=""):
+                     news_list=None, summary_text="", fundamentals=None):
     """Build a professional stock analysis PowerPoint. Returns BytesIO."""
     if not PPTX_AVAILABLE:
         raise RuntimeError("python-pptx is not installed.")
@@ -435,7 +479,7 @@ def build_stock_pptx(ticker, df, period_label,
             return "N/A"
         return f"{v:.2f}"
 
-    total_slides = 10
+    total_slides = 11 if (fundamentals and fundamentals.get("ok")) else 10
     page = [0]
 
     def _next_page():
@@ -471,6 +515,10 @@ def build_stock_pptx(ticker, df, period_label,
               color=RGBColor(0x64, 0x74, 0x8B))
     _text_box(sl, "1", 12.9, 7.15, 0.4, 0.25, font_size=8,
               color=C_GREY_TEXT, align=PP_ALIGN.RIGHT)
+
+    # ── Fundamentals & Valuation (only when EDGAR/Polygon data is available) ───
+    if fundamentals and fundamentals.get("ok"):
+        _build_fundamentals_slide(prs, ticker, fundamentals, _next_page(), total_slides)
 
     # ── Slide 2: Company Snapshot ─────────────────────────────────────────────
     sl = _blank_slide(prs)
