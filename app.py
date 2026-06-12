@@ -847,10 +847,11 @@ with tab1:
                 ))
                 fig_candle.update_layout(
                     title=dict(text=f"{ticker_input} — Intraday Candlestick",
-                               font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
+                               font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left",
+                               y=0.97, yanchor="top"),
                     height=500, template=None,
                     plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=60, r=90, t=50, b=50),
+                    margin=dict(l=60, r=90, t=58, b=50),
                     xaxis_rangeslider_visible=False,
                     hovermode="x unified",
                     font=dict(family="DM Sans, system-ui, sans-serif"),
@@ -865,7 +866,7 @@ with tab1:
                     yaxis2=dict(title="Volume", overlaying="y", side="left",
                                 showgrid=False, range=[0, intraday_df["Volume"].max() * 5]),
                     legend=dict(
-                        orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                        orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
                         font=dict(size=11, family="DM Sans", color="#374151"),
                         bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
                     ),
@@ -1474,12 +1475,13 @@ with tab1:
                             x=_t["periods"], y=_t["operating_margin"], name="Operating Margin (%)",
                             yaxis="y2", line=dict(color="#059669", width=2.5), mode="lines+markers"))
                         fig_fund.update_layout(
-                            barmode="group", height=320, template=None,
+                            barmode="group", height=330, template=None,
                             plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                            margin=dict(l=55, r=60, t=46, b=40),
+                            margin=dict(l=55, r=60, t=58, b=40),
                             title=dict(text="Revenue, Net Income & Operating Margin",
-                                       font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                                       font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left",
+                                       y=0.97, yanchor="top"),
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
                                         font=dict(size=11, family="DM Sans", color="#374151")),
                             font=dict(family="DM Sans, system-ui, sans-serif"),
                             hovermode="x unified",
