@@ -331,7 +331,9 @@ def warm_portfolio_cache(rankings: dict):
             continue
         sector_groups[sector].append((ticker, data.get("score", 0)))
 
-    candidates = ["SPY", "QQQ"]
+    # SPY/QQQ are always pinned; GLD/TLT are pinned for conservative profiles
+    # (risk tolerance ≤ 3), so warm them too or those builds cold-fetch.
+    candidates = ["SPY", "QQQ", "GLD", "TLT"]
     for sector, ticker_scores in sector_groups.items():
         ranked = sorted(ticker_scores, key=lambda x: x[1], reverse=True)
         for t, _ in ranked[:6]:

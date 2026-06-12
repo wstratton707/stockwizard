@@ -304,17 +304,33 @@ def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
 
 
 def get_ticker_info(ticker, api_key):
+    # Persistent Supabase cache (shared across sessions/users, survives restarts).
+    # Company metadata barely changes, so a 30-day TTL avoids re-hitting the
+    # rate-limited Polygon reference endpoint on every fresh session — the
+    # Portfolio Builder fetches this for ~18 tickers per build.
+    _ck = f"tinfo_{ticker.upper()}"
+    try:
+        hit = cache_get(_ck)
+        if hit:
+            return hit
+    except Exception:
+        pass
     try:
         r = requests.get(f"{POLYGON_BASE}/v3/reference/tickers/{ticker}",
                          params={"apiKey":api_key}, timeout=10)
         if r.status_code == 200:
             res = r.json().get("results", {})
-            return {
+            info = {
                 "name":       res.get("name", ticker),
                 "sector":     res.get("sic_description","Unknown"),
                 "exchange":   res.get("primary_exchange",""),
                 "market_cap": res.get("market_cap", 0),
             }
+            try:
+                cache_set(_ck, info, ttl_hours=720)
+            except Exception:
+                pass
+            return info
     except Exception:
         pass
     return {"name":ticker,"sector":"Unknown","exchange":"","market_cap":0}

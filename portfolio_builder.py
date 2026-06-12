@@ -56,7 +56,8 @@ _K_RANKINGS    = "port_rankings"   # cached get_sharpe_rankings result
 # ── Optimizer / fetch config ──────────────────────────────────────────────────
 _MAX_PORTFOLIO_TICKERS = 18     # hard cap fed to the SLSQP optimizer
 _PRICE_HISTORY_YEARS   = 2      # years of OHLCV history fetched per candidate
-_EF_PORTFOLIOS         = 8_000  # random portfolios for efficient-frontier scatter
+_EF_PORTFOLIOS         = 4_000  # random portfolios for efficient-frontier scatter
+                                # (4k renders an identical-looking cloud ~2x faster)
 _MC_SIMULATIONS        = 1_000  # Monte Carlo paths
 _MIN_WEIGHT            = 0.01   # positions below 1% are dropped post-optimisation
 _FETCH_WORKERS         = 5      # ThreadPoolExecutor pool size for parallel fetches
