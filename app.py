@@ -1174,8 +1174,23 @@ with tab1:
 
             except Exception as e:
                 progress.empty()
-                st.error(f"❌ Analysis failed: {e}")
-                st.exception(e)
+                logs.empty()
+                _msg = str(e)
+                if "rate limit" in _msg.lower() or "429" in _msg:
+                    st.warning(
+                        "**Market data is busy right now.** QuantWizard runs on a "
+                        "shared data plan with a per-minute request cap, and it's "
+                        "temporarily maxed out. Wait about **30 seconds**, then click "
+                        "**▶ Run Analysis** again — it almost always goes through on "
+                        "the next try.",
+                        icon="⏳",
+                    )
+                else:
+                    # Clean message for users; full traces go to the server logs,
+                    # not the screen (a stack trace in the UI looks broken).
+                    st.error(f"❌ Couldn't complete the analysis for **{ticker_input}**: {_msg}")
+                import traceback as _tb
+                print(_tb.format_exc())   # server-side log for debugging
                 st.stop()
 
             # Results
