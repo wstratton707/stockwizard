@@ -132,7 +132,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
     <div style="background:linear-gradient(135deg,#0c1e35,#1e3a5f);border:1px solid #e2e8f0;
                 border-radius:3px;padding:1.5rem 2rem;margin-bottom:1.5rem">
         <div style="font-family:'JetBrains Mono',monospace;color:#1d4ed8;font-size:1.1rem;
-                    font-weight:500;margin-bottom:4px">🔥 Stress Test & Portfolio Autopsy</div>
+                    font-weight:500;margin-bottom:4px"><span class="material-symbols-outlined" style="vertical-align:middle;font-size:1.2rem">local_fire_department</span> Stress Test &amp; Portfolio Autopsy</div>
         <div style="color:#6b7a8d;font-size:0.85rem">
             Run your holdings through historical crashes · Upload a CSV to see what broke your portfolio
         </div>

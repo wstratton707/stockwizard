@@ -208,7 +208,7 @@ with st.sidebar:
                         border:1px solid rgba(59,130,246,0.3);border-radius:2px;
                         padding:0.75rem 1rem;margin-bottom:1.25rem;text-align:center">
                 <span style="color:#1d4ed8;font-weight:700;font-size:0.82rem;
-                             letter-spacing:0.5px">⚡ PRO MEMBER</span>
+                             letter-spacing:0.5px"><span class="material-symbols-outlined" style="font-size:0.95rem;vertical-align:middle">bolt</span> PRO MEMBER</span>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -221,7 +221,7 @@ with st.sidebar:
                     border:1px solid rgba(59,130,246,0.3);border-radius:2px;
                     padding:0.7rem 1rem;margin-bottom:1.25rem;text-align:center">
             <span style="color:#1d4ed8;font-weight:700;font-size:0.8rem;letter-spacing:0.5px">
-                ⚡ QUANTWIZARD
+<span class="material-symbols-outlined" style="font-size:0.95rem;vertical-align:middle">bolt</span> QUANTWIZARD
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -512,18 +512,19 @@ with tab1:
 
         p1, p2, p3 = st.columns(3)
         for col, icon, problem, solution in [
-            (p1, "📉", "Your brokerage shows you a chart.",
-             "It doesn't tell you if your portfolio would survive a crash. We run your holdings through 2008, COVID, and 2022 with real historical prices."),
-            (p2, "🔍", "Stock screeners give you data.",
+            (p1, "show_chart", "Your brokerage shows you a chart.",
+             "It doesn't tell you if your portfolio would survive a crash. We stress-test your holdings against the magnitude of 2008, COVID, and 2022 using each position's market sensitivity."),
+            (p2, "search", "Stock screeners give you data.",
              "They don't build your portfolio. We rank 330+ stocks daily by Sharpe ratio and momentum, then optimize weights for your risk tolerance."),
-            (p3, "💸", "Financial advisors charge thousands.",
+            (p3, "payments", "Financial advisors charge thousands.",
              "You shouldn't need one for quantitative analysis. Everything a quant analyst would run — Monte Carlo, efficient frontier, GARCH — for $9.99/month."),
         ]:
             with col:
                 st.markdown(f"""
                 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
                             padding:1.25rem;height:100%">
-                    <div style="font-size:1.5rem;margin-bottom:0.75rem">{icon}</div>
+                    <div style="margin-bottom:0.75rem"><span class="material-symbols-outlined"
+                         style="font-size:1.7rem;color:#1d4ed8">{icon}</span></div>
                     <div style="font-weight:600;color:#0f172a;font-size:0.88rem;
                                 margin-bottom:0.5rem">{problem}</div>
                     <div style="color:#64748b;font-size:0.82rem;line-height:1.6">{solution}</div>
@@ -541,18 +542,18 @@ with tab1:
         fc3, fc4 = st.columns(2)
 
         for col, icon, title, tier, items in [
-            (fc1, "📈", "Stock Analysis", "Free",
+            (fc1, "monitoring", "Stock Analysis", "Free",
              ["Bollinger Bands, RSI, GARCH volatility", "Monte Carlo simulation (1,000 paths)",
-              "Peer comparison vs sector", "Intraday candlestick chart", "Excel + PowerPoint export"]),
-            (fc2, "💼", "Portfolio Builder", "Pro",
+              "Peer comparison vs sector", "10-yr fundamentals + F-Score & Z-Score", "Excel + PowerPoint export"]),
+            (fc2, "account_balance_wallet", "Portfolio Builder", "Pro",
              ["330+ stocks ranked by multi-factor score", "2-year backtest with quarterly rebalancing",
               "Mean-variance optimization", "Portfolio Monte Carlo with milestone projections",
               "Diversification score + correlation heatmap"]),
-            (fc3, "🔥", "Stress Test", "Pro",
-             ["5 real historical crashes: 2008, COVID, 2022, dot-com, 2018", "Real Polygon price data for each scenario",
+            (fc3, "local_fire_department", "Stress Test", "Pro",
+             ["5 historical crashes: 2008, COVID, 2022, dot-com, 2018", "Beta-based shock from your holdings' sensitivity",
               "Portfolio return vs S&P 500 per crash", "Dollar impact calculator",
               "Correlation culprit detection"]),
-            (fc4, "🏦", "Bond & Portfolio Autopsy", "Pro",
+            (fc4, "account_balance", "Bond & Portfolio Autopsy", "Pro",
              ["Bond ETF analysis across 6 categories", "Upload your holdings CSV — see what broke",
               "P&L attribution per position", "Rolling volatility + drawdown charts",
               "Benchmark comparison"]),
@@ -567,9 +568,10 @@ with tab1:
                             border-top:3px solid {tier_color}">
                     <div style="display:flex;align-items:center;justify-content:space-between;
                                 margin-bottom:0.75rem">
-                        <div style="font-size:1.3rem">{icon}
-                            <span style="font-weight:700;color:#0f172a;font-size:0.95rem;
-                                         margin-left:0.5rem">{title}</span>
+                        <div style="display:flex;align-items:center;gap:0.5rem">
+                            <span class="material-symbols-outlined"
+                                  style="font-size:1.45rem;color:{tier_color}">{icon}</span>
+                            <span style="font-weight:700;color:#0f172a;font-size:0.95rem">{title}</span>
                         </div>
                         <div style="background:{tier_bg};color:{tier_color};font-size:0.68rem;
                                     font-weight:700;letter-spacing:0.5px;text-transform:uppercase;
@@ -624,34 +626,35 @@ with tab1:
         """, unsafe_allow_html=True)
 
         _METHOD = [
-            ("🗂️", "Data &amp; Freshness",
+            ("dataset", "Data &amp; Freshness",
              "Prices are <b>end-of-day / ~15-min delayed</b> (Polygon.io), with ~2 years of daily history. "
              "Fundamentals come straight from <b>SEC EDGAR</b> filings (10-K/10-Q), updated each filing — "
              "no real-time quotes are implied."),
-            ("⚖️", "Risk-Adjusted Returns",
+            ("balance", "Risk-Adjusted Returns",
              "Sharpe and Sortino use <b>excess return over the live 3-month T-bill</b> (FRED), not raw return. "
              "Volatility is the annualized standard deviation of daily returns (σ·√252)."),
-            ("🧮", "Backtesting",
+            ("query_stats", "Backtesting",
              "Portfolio backtests use a <b>time-weighted NAV</b> that separates your contributions from market "
              "performance, benchmark SPY on the <b>same contribution schedule</b>, and charge realistic "
              "rebalancing cost on traded value only."),
-            ("🎲", "Monte Carlo",
+            ("casino", "Monte Carlo",
              "Correlated multi-asset simulation via <b>Cholesky decomposition</b>. Per-asset drift is blended "
              "70/30 toward a 7% long-run mean and <b>capped at 12%</b> — deliberately conservative to avoid "
              "over-optimistic projections."),
-            ("🏛️", "Fundamental Quality",
+            ("account_balance", "Fundamental Quality",
              "From EDGAR statements: <b>Piotroski F-Score</b> (9-point profitability/leverage/efficiency test), "
              "<b>Altman Z-Score</b> (distress risk), free cash flow (operating cash flow − capex), and standard "
              "valuation multiples."),
-            ("🔥", "Stress Test",
+            ("local_fire_department", "Stress Test",
              "<b>Model estimates, not historical replays.</b> Each holding's drawdown ≈ its market beta × the "
              "S&P 500's decline in that crash. Betas and correlations rise in real crises, so actual losses "
              "can be deeper."),
         ]
         _mcards = "".join(
             f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:1.1rem 1.25rem">'
-            f'<div style="font-size:1.15rem;margin-bottom:0.4rem">{ic}'
-            f'<span style="font-weight:700;color:#0f172a;font-size:0.9rem;margin-left:0.45rem">{ti}</span></div>'
+            f'<div style="margin-bottom:0.5rem;display:flex;align-items:center;gap:0.5rem">'
+            f'<span class="material-symbols-outlined" style="color:#1d4ed8;font-size:1.4rem">{ic}</span>'
+            f'<span style="font-weight:700;color:#0f172a;font-size:0.9rem">{ti}</span></div>'
             f'<div style="color:#64748b;font-size:0.8rem;line-height:1.6">{tx}</div></div>'
             for ic, ti, tx in _METHOD
         )
@@ -988,7 +991,7 @@ with tab1:
             # Original locked-screen UI preserved below — do not delete.
             st.markdown("""
             <div class="pro-locked">
-                <div style="font-size:1.5rem;margin-bottom:0.5rem">🔒</div>
+                <div style="margin-bottom:0.5rem"><span class="material-symbols-outlined" style="font-size:1.8rem;color:#94a3b8">lock</span></div>
                 <div style="color:#fff;font-weight:600;font-size:1.1rem;margin-bottom:0.5rem">
                     Day Trader Mode is Pro Only
                 </div>
@@ -2515,7 +2518,7 @@ with tab3:
     <div style="background:linear-gradient(135deg,#0c1e35,#1e3a5f);border:1px solid #e2e8f0;
                 border-radius:3px;padding:1.5rem 2rem;margin-bottom:1.5rem">
         <div style="font-family:'JetBrains Mono',monospace;color:#1d4ed8;font-size:1.1rem;
-                    font-weight:500;margin-bottom:4px">🏦 Bond Analysis</div>
+                    font-weight:500;margin-bottom:4px"><span class="material-symbols-outlined" style="vertical-align:middle;font-size:1.2rem">account_balance</span> Bond Analysis</div>
         <div style="color:#6b7a8d;font-size:0.85rem">
             Analyse bond ETFs · Price history · Volatility · Drawdown · Yield proxy
         </div>
