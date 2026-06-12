@@ -508,8 +508,8 @@ def _render_step_2(api_key):
                     "Check that your tickers are valid US stock symbols."
                 )
             else:
-                st.error(f"❌ Something went wrong: {e}")
-                st.exception(e)
+                st.error(f"❌ Something went wrong building your portfolio: {e}")
+                import traceback as _tb; print(_tb.format_exc())   # server log, not UI
             if st.button("← Back", key="step2_err_back"):
                 st.session_state[_K_STEP] = 1
                 del st.session_state[_K_OPTIMISED]
@@ -872,7 +872,7 @@ def _render_step_3():
                 }
             except Exception as e:
                 st.error(f"❌ Backtest failed: {e}")
-                st.exception(e)
+                import traceback as _tb; print(_tb.format_exc())   # server log, not UI
                 return
 
     bt     = st.session_state[_K_BACKTEST]
@@ -1285,7 +1285,7 @@ def _render_step_4():
                 }
             except Exception as e:
                 st.error(f"❌ Monte Carlo failed: {e}")
-                st.exception(e)
+                import traceback as _tb; print(_tb.format_exc())   # server log, not UI
                 return
 
     mc_data    = st.session_state[_K_MC]
@@ -1496,7 +1496,7 @@ reflects that.
                     st.session_state[_K_EXCEL] = excel_buf
                 except Exception as e:
                     st.error(f"❌ Excel build failed: {e}")
-                    st.exception(e)
+                    import traceback as _tb; print(_tb.format_exc())   # server log, not UI
 
     with _gen_col2:
         if PPTX_AVAILABLE and st.button("📑 Generate PowerPoint Report", type="primary",
@@ -1525,7 +1525,7 @@ reflects that.
                     st.session_state[_K_PPTX] = pptx_buf
                 except Exception as e:
                     st.error(f"❌ PowerPoint build failed: {e}")
-                    st.exception(e)
+                    import traceback as _tb; print(_tb.format_exc())   # server log, not UI
 
     _dl_col1, _dl_col2 = st.columns(2)
     with _dl_col1:

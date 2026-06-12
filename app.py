@@ -415,7 +415,7 @@ with tab1:
             </h2>
             <p style="color:#94a3b8;font-size:1rem;max-width:560px;
                       line-height:1.7;margin:0 0 2rem">
-                Build optimized portfolios from 330+ ranked stocks, backtest 2 years of history,
+                Build optimized portfolios from 320+ ranked stocks, backtest 2 years of history,
                 stress test through real crashes, and get a complete Excel report —
                 all for <strong style="color:#60a5fa">&#36;9.99/month</strong>.
             </p>
@@ -430,7 +430,7 @@ with tab1:
                         padding-top:1.5rem">
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'JetBrains Mono',monospace">330+</div>
+                                font-family:'JetBrains Mono',monospace">320+</div>
                     <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Stocks Ranked Daily</div>
                 </div>
@@ -515,7 +515,7 @@ with tab1:
             (p1, "show_chart", "Your brokerage shows you a chart.",
              "It doesn't tell you if your portfolio would survive a crash. We stress-test your holdings against the magnitude of 2008, COVID, and 2022 using each position's market sensitivity."),
             (p2, "search", "Stock screeners give you data.",
-             "They don't build your portfolio. We rank 330+ stocks daily by Sharpe ratio and momentum, then optimize weights for your risk tolerance."),
+             "They don't build your portfolio. We rank 320+ stocks daily by Sharpe ratio and momentum, then optimize weights for your risk tolerance."),
             (p3, "payments", "Financial advisors charge thousands.",
              "You shouldn't need one for quantitative analysis. Everything a quant analyst would run — Monte Carlo, efficient frontier, GARCH — for $9.99/month."),
         ]:
@@ -546,7 +546,7 @@ with tab1:
              ["Bollinger Bands, RSI, GARCH volatility", "Monte Carlo simulation (1,000 paths)",
               "Peer comparison vs sector", "10-yr fundamentals + F-Score & Z-Score", "Excel + PowerPoint export"]),
             (fc2, "account_balance_wallet", "Portfolio Builder", "Pro",
-             ["330+ stocks ranked by multi-factor score", "2-year backtest with quarterly rebalancing",
+             ["320+ stocks ranked by multi-factor score", "2-year backtest with quarterly rebalancing",
               "Mean-variance optimization", "Portfolio Monte Carlo with milestone projections",
               "Diversification score + correlation heatmap"]),
             (fc3, "local_fire_department", "Stress Test", "Pro",
@@ -596,7 +596,7 @@ with tab1:
             (h1, "1", "Enter Your Preferences",
              "Set your risk tolerance, starting capital, sectors to include, and investment horizon. Takes 2 minutes."),
             (h2, "2", "We Rank & Optimize",
-             "QuantWizard scores 330+ stocks daily using Sharpe ratio and momentum, selects the best per sector, then runs mean-variance optimization."),
+             "QuantWizard scores 320+ stocks daily using Sharpe ratio and momentum, selects the best per sector, then runs mean-variance optimization."),
             (h3, "3", "Get Your Full Report",
              "2-year backtest, Monte Carlo forecast with milestone probabilities, stress test results, and a downloadable Excel + PowerPoint report."),
         ]:
@@ -705,7 +705,7 @@ with tab1:
                 <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">Cancel anytime</div>
                 <ul style="color:#0f172a;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0 0 1.25rem">
                     <li>Everything in Free</li>
-                    <li><strong>Portfolio Builder</strong> — 330+ stocks, 2-year backtest</li>
+                    <li><strong>Portfolio Builder</strong> — 320+ stocks, 2-year backtest</li>
                     <li><strong>Stress Test</strong> — 5 historical crash scenarios</li>
                     <li><strong>Bond Analysis</strong> — 60+ ETFs</li>
                     <li><strong>Portfolio Autopsy</strong> — CSV upload + P&L attribution</li>
@@ -942,7 +942,7 @@ with tab1:
                                 hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
                                                 font=dict(color="white", size=12, family="DM Sans")),
                                 legend=dict(
-                                    orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
                                     font=dict(size=11, family="DM Sans", color="#374151"),
                                     bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
                                 ),
@@ -2190,7 +2190,7 @@ with tab1:
                 hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
                                 font=dict(color="white", size=12, family="DM Sans")),
                 legend=dict(
-                    orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
                     font=dict(size=11, family="DM Sans", color="#374151"),
                     bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
                 ),
@@ -2311,7 +2311,7 @@ with tab1:
                         hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
                                         font=dict(color="white", size=12, family="DM Sans")),
                         legend=dict(
-                            orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
                             font=dict(size=11, family="DM Sans", color="#374151"),
                             bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
                         ),
@@ -2393,7 +2393,7 @@ with tab1:
                                 hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
                                                 font=dict(color="white", size=12, family="DM Sans")),
                                 legend=dict(
-                                    orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
                                     font=dict(size=11, family="DM Sans", color="#374151"),
                                     bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
                                 ),
@@ -2639,7 +2639,7 @@ with tab3:
             hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
                             font=dict(color="white", size=12, family="DM Sans")),
             legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
                 font=dict(size=11, family="DM Sans", color="#374151"),
                 bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
             ),
@@ -2674,7 +2674,7 @@ with tab3:
             hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
                             font=dict(color="white", size=12, family="DM Sans")),
             legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
                 font=dict(size=11, family="DM Sans", color="#374151"),
                 bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
             ),

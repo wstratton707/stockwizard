@@ -639,8 +639,8 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                 st.plotly_chart(fig_corr, use_container_width=True)
 
         except Exception as e:
-            st.error(f"❌ Error processing CSV: {e}")
-            st.exception(e)
+            st.error(f"❌ Couldn't process that CSV — check the columns and try again. ({e})")
+            import traceback as _tb; print(_tb.format_exc())   # server log, not UI
 
     st.markdown(render_section("Stress Test Methodology", _disc.STRESS_TEST),
                 unsafe_allow_html=True)
