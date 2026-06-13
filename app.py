@@ -648,9 +648,9 @@ with tab1:
              "<b>Altman Z-Score</b> (distress risk), free cash flow (operating cash flow − capex), and standard "
              "valuation multiples."),
             ("local_fire_department", "Stress Test",
-             "<b>Model estimates, not historical replays.</b> Each holding's drawdown ≈ its market beta × the "
-             "S&P 500's decline in that crash. Betas and correlations rise in real crises, so actual losses "
-             "can be deeper."),
+             "<b>Real historical performance</b> through each crash (2008, COVID, 2022, dot-com, 2018); a "
+             "position too new to have existed then falls back to a beta estimate. Correlations rise in real "
+             "crises, so future losses can differ."),
         ]
         _mcards = "".join(
             f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:1.1rem 1.25rem">'

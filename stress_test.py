@@ -22,26 +22,31 @@ CACHE_TTL     = 3600
 # ── Historical crash scenarios ─────────────────────────────────────────────────
 CRASH_SCENARIOS: dict[str, dict] = {
     "2008 Financial Crisis": {
+        "start": "2008-09-01", "end": "2009-03-09",
         "description":  "Lehman collapse  ·  S&P 500: −56%",
         "market_shock": -56.0,
         "color":        "#dc2626",
     },
     "COVID Crash (2020)": {
+        "start": "2020-02-19", "end": "2020-03-23",
         "description":  "Pandemic lockdown  ·  S&P 500: −34% in 33 days",
         "market_shock": -34.0,
         "color":        "#ea580c",
     },
     "2022 Rate-Hike Bear": {
+        "start": "2022-01-03", "end": "2022-10-12",
         "description":  "Fed rate hikes  ·  S&P 500: −25%, NASDAQ: −35%",
         "market_shock": -25.0,
         "color":        "#d97706",
     },
     "Dot-com Bust (2000–2002)": {
+        "start": "2000-03-10", "end": "2002-10-09",
         "description":  "Tech bubble burst  ·  S&P 500: −49%, NASDAQ: −78%",
         "market_shock": -49.0,
         "color":        "#7c3aed",
     },
     "2018 Q4 Selloff": {
+        "start": "2018-10-01", "end": "2018-12-24",
         "description":  "Fed tightening fears  ·  S&P 500: −20% in 12 weeks",
         "market_shock": -20.0,
         "color":        "#0369a1",
@@ -80,44 +85,62 @@ def _estimate_betas(tickers: list, api_key: str, log=lambda m: None) -> tuple:
     return betas, vols
 
 
+def _real_window_return(ticker: str, start: str, end: str, api_key: str) -> float | None:
+    """Actual % return for a ticker over a historical window, or None if the
+    ticker has no data spanning it (e.g. it IPO'd after the crash)."""
+    try:
+        from market_data import get_bars
+        df = get_bars(ticker, start, end, interval="day", polygon_key=api_key)
+        if df is not None and len(df) >= 2:
+            first, last = float(df["Close"].iloc[0]), float(df["Close"].iloc[-1])
+            if first > 0:
+                return (last / first - 1) * 100
+    except Exception:
+        pass
+    return None
+
+
 def run_stress_test(tickers: list, weights: dict, api_key: str) -> dict:
     """
-    Parametric stress test — estimates each holding's drawdown as
-    beta × (known S&P decline) per crash, floored at −95% (a long can't lose more
-    than ~100%). Works entirely on the free data tier. Returns the shape the
-    renderer expects:
-      {scenario: {ticker: est_ret | None, '__portfolio__', '__spy__', '__beta__'}}
+    Hybrid stress test. For each crash, each holding uses its REAL historical
+    performance over the window when it has data (yfinance gives deep history);
+    holdings too new to have existed fall back to a beta × (S&P decline) estimate.
+    Returns the shape the renderer expects:
+      {scenario: {ticker: ret | None, '__portfolio__', '__spy__', '__beta__',
+                  '__estimated__': bool}}
     """
-    betas, _vols = _estimate_betas(tickers, api_key)
-
-    # Portfolio beta — weighted over the holdings we could estimate
-    pf_beta, w_beta = 0.0, 0.0
-    for t in tickers:
-        if t in betas:
-            w = weights.get(t, 1 / len(tickers))
-            pf_beta += betas[t] * w
-            w_beta  += w
-    pf_beta = (pf_beta / w_beta) if w_beta > 0 else None
+    betas = None   # lazily computed only if a fallback estimate is actually needed
 
     results: dict = {}
     for scenario_name, scenario in CRASH_SCENARIOS.items():
-        shock = scenario["market_shock"]
+        shock        = scenario["market_shock"]
+        start, end   = scenario["start"], scenario["end"]
         scenario_ret: dict = {}
         weighted_sum = weight_total = 0.0
+        any_estimated = False
+
         for t in tickers:
-            b = betas.get(t)
-            if b is None:
-                scenario_ret[t] = None      # no beta → can't estimate this name
-                continue
-            est = max(b * shock, -95.0)      # floor: a long can't lose >~100%
-            scenario_ret[t] = round(est, 2)
+            real = _real_window_return(t, start, end, api_key)
+            if real is not None:
+                ret = real                                  # actual historical move
+            else:
+                if betas is None:                           # compute betas once, on demand
+                    betas, _ = _estimate_betas(tickers, api_key)
+                b = betas.get(t)
+                if b is None:
+                    scenario_ret[t] = None                  # no data and no beta
+                    continue
+                ret = max(b * shock, -95.0)                 # estimated; floor at ~-100%
+                any_estimated = True
+            scenario_ret[t] = round(ret, 2)
             w = weights.get(t, 1 / len(tickers))
-            weighted_sum += est * w
+            weighted_sum += ret * w
             weight_total += w
 
+        spy_real = _real_window_return("SPY", start, end, api_key)
         scenario_ret["__portfolio__"] = round(weighted_sum / weight_total, 2) if weight_total > 0 else None
-        scenario_ret["__spy__"]       = shock
-        scenario_ret["__beta__"]      = round(pf_beta, 2) if pf_beta is not None else None
+        scenario_ret["__spy__"]       = round(spy_real, 2) if spy_real is not None else shock
+        scenario_ret["__estimated__"] = any_estimated
         results[scenario_name] = scenario_ret
 
     return results
@@ -150,9 +173,9 @@ def render_stress_test(api_key: str, is_pro: bool = False):
 
     st.markdown(
         "<div style='font-size:0.83rem;color:#6b7a8d;margin-bottom:1rem'>"
-        "Estimate how your holdings would hold up in crashes of similar magnitude. Each position's drawdown "
-        "is modeled as its <b>market beta × the S&P 500's decline</b> in that crash, from ~2 years of recent "
-        "daily returns — so it works for any portfolio, even newer names.</div>",
+        "See how your holdings <b>actually performed</b> through history's worst crashes — real returns over "
+        "each crash window. Any position too new to have existed back then falls back to a beta-based "
+        "estimate, so it works for any portfolio.</div>",
         unsafe_allow_html=True,
     )
 
@@ -210,22 +233,22 @@ def render_stress_test(api_key: str, is_pro: bool = False):
             st.markdown(
                 "<div style='background:#fffbeb;border:1px solid #fde68a;border-radius:8px;"
                 "padding:1rem 1.25rem;font-size:0.84rem;color:#92400e;line-height:1.55;"
-                "margin-bottom:1rem'>⚠ <b>Couldn’t estimate sensitivities right now.</b> We need ~2 years of "
-                "recent daily returns for your tickers (and SPY) to compute beta, and the data came back "
-                "empty — most likely a temporary rate limit. Try again in a minute.</div>",
+                "margin-bottom:1rem'>⚠ <b>Couldn’t run the stress test right now.</b> We need historical "
+                "prices for your tickers (and SPY), and the data came back empty — most likely a temporary "
+                "rate limit or an unrecognized symbol. Try again in a minute.</div>",
                 unsafe_allow_html=True,
             )
         else:
-            _pf_beta = next((d.get("__beta__") for d in results.values()
-                             if d.get("__beta__") is not None), None)
-            if _pf_beta is not None:
-                st.markdown(
-                    f"<div style='font-size:0.78rem;color:#64748b;margin-bottom:0.9rem'>"
-                    f"Model estimate · portfolio beta to S&P 500 ≈ <b>{_pf_beta}</b>. Each crash applies that "
-                    f"sensitivity to the index's historical decline; real outcomes vary, and correlations "
-                    f"often rise in a crisis.</div>",
-                    unsafe_allow_html=True,
-                )
+            _any_est = any(d.get("__estimated__") for d in results.values())
+            _note = ("Real historical performance over each crash window."
+                     if not _any_est else
+                     "Real historical performance over each crash window; positions too new to have existed "
+                     "then are beta-estimated.")
+            st.markdown(
+                f"<div style='font-size:0.78rem;color:#64748b;margin-bottom:0.9rem'>{_note} "
+                f"Past crashes don't predict future ones — correlations often rise in a crisis.</div>",
+                unsafe_allow_html=True,
+            )
 
         for scenario_name, scenario_data in results.items():
             port_ret    = scenario_data.get("__portfolio__")
