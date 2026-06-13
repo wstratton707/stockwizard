@@ -1410,6 +1410,22 @@ with tab1:
                         <div class="metric-value {cls}">{value}</div>
                     </div>""", unsafe_allow_html=True)
 
+            # ── The Bottom Line (verdict up top) ──────────────────────────────
+            # Surface the plain-English takeaway here instead of only at the very
+            # bottom, so the app delivers on "tells you what to do" immediately.
+            if summary_text:
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,#0c1e35 0%,#1e3a5f 100%);'
+                    f'border:1px solid rgba(59,130,246,0.3);border-radius:12px;'
+                    f'padding:1.2rem 1.5rem;margin:1.4rem 0 0.4rem;box-shadow:0 4px 16px rgba(15,23,42,0.09)">'
+                    f'<div style="font-size:0.66rem;font-weight:700;letter-spacing:1.2px;'
+                    f'text-transform:uppercase;color:#60a5fa;margin-bottom:0.5rem;'
+                    f'display:flex;align-items:center;gap:0.4rem">'
+                    f'<span class="material-symbols-outlined" style="font-size:1rem">lightbulb</span> The Bottom Line</div>'
+                    f'<div style="color:#cbd5e1;font-size:0.9rem;line-height:1.75;'
+                    f'font-family:Inter,sans-serif">{summary_text}</div></div>',
+                    unsafe_allow_html=True)
+
             # ── Fundamentals & Valuation (stocks only) ────────────────────────
             # SEC-sourced statements via Polygon /vX/reference/financials, turned
             # into margins/returns/leverage/growth/valuation + a reverse-DCF lens.
@@ -2492,11 +2508,8 @@ with tab1:
                               if c in peer_df.columns]
                 st.dataframe(peer_df[_show_cols], use_container_width=True, hide_index=True)
 
-            st.markdown('<div class="section-header">Automated Analysis Summary</div>', unsafe_allow_html=True)
-            st.markdown(f"""
-            <div class="summary-box">{summary_text}</div>
-            """, unsafe_allow_html=True)
-
+            # (The plain-English summary is now surfaced as "The Bottom Line" up
+            # top, right under the key metrics — no need to repeat it here.)
             st.markdown("---")
             excel_buf.seek(0)
             _dl2_col1, _dl2_col2 = st.columns(2)
