@@ -34,6 +34,7 @@ from cached_fetchers import (
     cached_fetch_crypto_details, cached_fetch_etf_details,
     cached_run_monte_carlo, cached_run_custom_forecast,
     cached_detect_support_resistance, cached_build_correlation_matrix,
+    cached_get_analyst_data,
 )
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -1425,6 +1426,74 @@ with tab1:
                     f'<div style="color:#cbd5e1;font-size:0.9rem;line-height:1.75;'
                     f'font-family:Inter,sans-serif">{summary_text}</div></div>',
                     unsafe_allow_html=True)
+
+            # ── Analyst View (Finnhub: consensus + earnings surprises) ────────
+            if not is_crypto:
+                _adata = cached_get_analyst_data(ticker_input)
+                _rec, _earn = _adata.get("recommendation"), _adata.get("earnings")
+                if _rec or _earn:
+                    st.markdown(
+                        '<div class="section-header">Analyst View '
+                        '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                        'text-transform:none;font-size:0.7rem">· Wall Street consensus via Finnhub</span></div>',
+                        unsafe_allow_html=True)
+                    _ac1, _ac2 = st.columns([3, 2])
+                    with _ac1:
+                        _sb, _bb = int((_rec or {}).get("strongBuy", 0)), int((_rec or {}).get("buy", 0))
+                        _hh = int((_rec or {}).get("hold", 0))
+                        _sl, _ssl = int((_rec or {}).get("sell", 0)), int((_rec or {}).get("strongSell", 0))
+                        _tot = _sb + _bb + _hh + _sl + _ssl
+                        if _tot > 0:
+                            _score = (_sb * 2 + _bb - _sl - _ssl * 2) / _tot
+                            _verdict, _vcol = (
+                                ("Strong Buy", "#059669") if _score >= 1.0 else
+                                ("Buy",        "#16a34a") if _score >= 0.3 else
+                                ("Hold",       "#64748b") if _score > -0.3 else
+                                ("Sell",       "#dc2626") if _score > -1.0 else
+                                ("Strong Sell","#991b1b"))
+                            def _seg(_n, _c):
+                                return f'<div style="width:{_n / _tot * 100:.1f}%;background:{_c}"></div>' if _n else ""
+                            _bar = (_seg(_sb, "#059669") + _seg(_bb, "#34d399") + _seg(_hh, "#cbd5e1")
+                                    + _seg(_sl, "#f59e0b") + _seg(_ssl, "#dc2626"))
+                            st.markdown(
+                                f'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;'
+                                f'padding:1.1rem 1.25rem">'
+                                f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+                                f'margin-bottom:0.6rem"><span style="font-size:1.35rem;font-weight:700;'
+                                f'color:{_vcol}">{_verdict}</span>'
+                                f'<span style="font-size:0.78rem;color:#64748b">{_tot} analysts · {(_rec or {}).get("period","")[:7]}</span></div>'
+                                f'<div style="display:flex;height:9px;border-radius:5px;overflow:hidden;'
+                                f'background:#f1f5f9">{_bar}</div>'
+                                f'<div style="display:flex;gap:1rem;margin-top:0.6rem;font-size:0.72rem;flex-wrap:wrap">'
+                                f'<span style="color:#059669">● {_sb + _bb} Buy</span>'
+                                f'<span style="color:#94a3b8">● {_hh} Hold</span>'
+                                f'<span style="color:#dc2626">● {_sl + _ssl} Sell</span></div></div>',
+                                unsafe_allow_html=True)
+                    with _ac2:
+                        if _earn:
+                            _rows = ""
+                            for _e in _earn:
+                                _a, _est = _e.get("actual"), _e.get("estimate")
+                                if _a is None or _est is None:
+                                    continue
+                                _beat = _a >= _est
+                                _col  = "#16a34a" if _beat else "#dc2626"
+                                _sp   = _e.get("surprisePercent")
+                                _sps  = f"{_sp:+.1f}%" if isinstance(_sp, (int, float)) else ""
+                                _rows += (f'<div style="display:flex;justify-content:space-between;'
+                                          f'padding:0.3rem 0;border-bottom:1px solid #f1f5f9;font-size:0.76rem">'
+                                          f'<span style="color:#64748b">{str(_e.get("period",""))[:7]}</span>'
+                                          f'<span style="font-family:\'JetBrains Mono\',monospace;color:#0f172a">'
+                                          f'${_a} vs ${_est}</span>'
+                                          f'<span style="color:{_col};font-weight:600">{_sps}</span></div>')
+                            if _rows:
+                                st.markdown(
+                                    f'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;'
+                                    f'padding:0.7rem 1.1rem"><div style="font-size:0.64rem;font-weight:700;'
+                                    f'letter-spacing:0.5px;text-transform:uppercase;color:#64748b;'
+                                    f'margin-bottom:0.3rem">Earnings vs Estimate (EPS)</div>{_rows}</div>',
+                                    unsafe_allow_html=True)
+                    st.markdown("<div style='height:0.7rem'></div>", unsafe_allow_html=True)
 
             # ── Fundamentals & Valuation (stocks only) ────────────────────────
             # SEC-sourced statements via Polygon /vX/reference/financials, turned

@@ -148,6 +148,42 @@ def _polygon_quote(ticker: str, key: str) -> dict | None:
 
 # ── OHLCV bars ────────────────────────────────────────────────────────────────
 
+# ── Analyst data (Finnhub free tier) ──────────────────────────────────────────
+
+def get_analyst_data(ticker: str) -> dict:
+    """
+    Wall-Street analyst consensus + earnings-surprise history from Finnhub's free
+    tier. Returns {} if no key, and omits any piece that isn't available:
+      recommendation: {strongBuy, buy, hold, sell, strongSell, period}
+      earnings:       [{period, actual, estimate, surprisePercent}, ...]  (recent first)
+    (Price targets are a premium Finnhub endpoint, so they're intentionally skipped.)
+    """
+    key = finnhub_key()
+    if not key:
+        return {}
+    sym = to_finnhub_symbol(ticker)
+    out: dict = {}
+    try:
+        r = requests.get(f"{FINNHUB_BASE}/stock/recommendation",
+                         params={"symbol": sym, "token": key}, timeout=8)
+        if r.status_code == 200:
+            data = r.json()
+            if data:
+                out["recommendation"] = data[0]   # most recent period
+    except Exception:
+        pass
+    try:
+        r = requests.get(f"{FINNHUB_BASE}/stock/earnings",
+                         params={"symbol": sym, "token": key}, timeout=8)
+        if r.status_code == 200:
+            data = r.json()
+            if data:
+                out["earnings"] = data[:4]         # last 4 quarters
+    except Exception:
+        pass
+    return out
+
+
 _YF_INTERVAL = {"day": "1d", "1day": "1d", "week": "1wk", "month": "1mo",
                 "1min": "1m", "5min": "5m", "15min": "15m", "1hour": "1h",
                 "minute": "1m", "hour": "1h"}

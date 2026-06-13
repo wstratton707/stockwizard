@@ -148,6 +148,13 @@ def cached_get_ticker_info(ticker, _api_key):
     return _get_ticker_info(ticker, _api_key)
 
 
+@st.cache_data(ttl=_TTL_XLONG, max_entries=_MAX_ENTRIES, show_spinner=False)
+def cached_get_analyst_data(ticker):
+    """Finnhub analyst consensus + earnings surprises — changes slowly, cache long."""
+    from market_data import get_analyst_data
+    return get_analyst_data(ticker)
+
+
 @st.cache_data(ttl=_TTL_FMP, max_entries=_MAX_ENTRIES, show_spinner=False)
 def cached_fetch_etf_details(ticker, _fmp_key):
     """FMP free tier is 250 req/day — long TTL + empty-result fallback caching."""
