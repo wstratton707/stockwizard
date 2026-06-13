@@ -64,7 +64,9 @@ st.set_page_config(
     page_title="QuantWizard",
     page_icon=_page_icon,
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto" keeps the sidebar open on desktop but auto-collapses it on mobile,
+    # so phone users see the hero/content first instead of a full-screen sidebar.
+    initial_sidebar_state="auto",
 )
 
 POLYGON_API_KEY  = os.environ.get("POLYGON_API_KEY", "").strip()
