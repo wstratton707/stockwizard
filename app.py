@@ -1514,6 +1514,51 @@ with tab1:
                                 unsafe_allow_html=True)
                     st.markdown("<div style='height:0.7rem'></div>", unsafe_allow_html=True)
 
+                    # ── Fundamentals vs Peers ─────────────────────────────────
+                    # Context for the metrics above: how this name stacks up against
+                    # the entered peers on valuation, profitability and quality —
+                    # same EDGAR-sourced compute_fundamentals, one row each.
+                    if peers_list and not is_crypto:
+                        def _peer_fund_row(_tk, _fd):
+                            if not _fd or not _fd.get("ok"):
+                                return None
+                            return {
+                                "Ticker":       _tk,
+                                "P/E":          _fd["valuation"]["pe"],
+                                "P/S":          _fd["valuation"]["ps"],
+                                "Net Margin %": _fd["margins"]["net"],
+                                "ROE %":        _fd["returns"]["roe"],
+                                "Rev Grow %":   _fd["growth"]["revenue_yoy"],
+                                "F-Score /9":   _fd["quality"]["f_score"],
+                                "Z-Score":      _fd["quality"]["z_score"],
+                            }
+                        _frows = []
+                        _mrow = _peer_fund_row(ticker_input, fund)
+                        if _mrow:
+                            _frows.append(_mrow)
+                        for _pt in peers_list[:4]:
+                            try:
+                                _pfin = cached_fetch_sec_financials(_pt)
+                                if not _pfin:
+                                    continue
+                                _pmc  = (cached_fetch_company_details(_pt, POLYGON_API_KEY) or {}).get("Market Cap")
+                                _row  = _peer_fund_row(_pt, compute_fundamentals(_pfin, market_cap=_pmc))
+                                if _row:
+                                    _frows.append(_row)
+                            except Exception:
+                                pass
+                        if len(_frows) > 1:
+                            st.markdown('<div class="section-header">Fundamentals vs Peers</div>',
+                                        unsafe_allow_html=True)
+                            st.dataframe(pd.DataFrame(_frows).set_index("Ticker"),
+                                         use_container_width=True)
+                            st.markdown(
+                                "<div style='font-size:0.72rem;color:#94a3b8;margin-top:0.25rem'>"
+                                "Blanks mean a metric wasn't available for that peer (e.g. no market cap "
+                                "for valuation multiples, or banks for margins). F-Score 8–9 = strong; "
+                                "Z-Score &gt; 2.99 = safe zone.</div>",
+                                unsafe_allow_html=True)
+
                     # Revenue & net income trend with operating margin
                     _t = fund["trend"]
                     if any(x is not None for x in _t["revenue"]):
