@@ -684,8 +684,11 @@ def fetch_crypto_data(symbol, period="1y", api_key="", log=print,
     ann_ret  = ret.mean() * 252
     ann_std  = ret.std() * np.sqrt(252)
     downside = ret[ret < 0].std() * np.sqrt(252)
-    df["Sharpe_Ratio"]  = ann_ret / ann_std  if ann_std  else np.nan
-    df["Sortino_Ratio"] = ann_ret / downside if downside else np.nan
+    # Excess-return Sharpe/Sortino (subtract the risk-free rate) to match the
+    # stock and bond paths — crypto was previously the only raw ann_ret/vol one.
+    rfr      = get_risk_free_rate()
+    df["Sharpe_Ratio"]  = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
+    df["Sortino_Ratio"] = (ann_ret - rfr) / downside if downside else np.nan
 
     return df.sort_values("Date").reset_index(drop=True)
 
