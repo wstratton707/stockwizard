@@ -206,5 +206,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Playwright MCP scratch snapshots
+# Playwright MCP scratch snapshots + root-level QA screenshots
 .playwright-mcp/
+/*.png
