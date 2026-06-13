@@ -136,7 +136,10 @@ def main():
         print(f"\n{BENCHMARK} buy-hold: {m['benchmark_total_return_pct']:+.2f}%")
         print(f"vs Strategy:    {m['total_return_pct'] - m['benchmark_total_return_pct']:+.2f}% alpha")
 
-    ok = cache_set(CACHE_KEY, result, ttl_hours=48)
+    # 7-day TTL (not 48h): the nightly job refreshes this daily, but a longer
+    # window means a missed/failed run or a weekend gap can't strand the Strategy
+    # tab on "not computed yet" — it just serves slightly stale results instead.
+    ok = cache_set(CACHE_KEY, result, ttl_hours=168)
     print(f"\nSupabase write: {'✓ success' if ok else '✗ FAILED'}")
     if not ok:
         # Fail loudly: a silent write failure (e.g. NaN metrics rejected as
