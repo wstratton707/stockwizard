@@ -148,11 +148,12 @@ def _polygon_quote(ticker: str, key: str) -> dict | None:
 
 # ── OHLCV bars ────────────────────────────────────────────────────────────────
 
-_YF_INTERVAL = {"day": "1d", "1day": "1d", "1min": "1m", "5min": "5m",
-                "15min": "15m", "1hour": "1h", "minute": "1m", "hour": "1h"}
-_POLY_SPAN   = {"day": (1, "day"), "1min": (1, "minute"), "5min": (5, "minute"),
-                "15min": (15, "minute"), "1hour": (1, "hour"), "minute": (1, "minute"),
-                "hour": (1, "hour")}
+_YF_INTERVAL = {"day": "1d", "1day": "1d", "week": "1wk", "month": "1mo",
+                "1min": "1m", "5min": "5m", "15min": "15m", "1hour": "1h",
+                "minute": "1m", "hour": "1h"}
+_POLY_SPAN   = {"day": (1, "day"), "week": (1, "week"), "month": (1, "month"),
+                "1min": (1, "minute"), "5min": (5, "minute"), "15min": (15, "minute"),
+                "1hour": (1, "hour"), "minute": (1, "minute"), "hour": (1, "hour")}
 
 
 def get_bars(ticker: str, start: str, end: str, interval: str = "day",

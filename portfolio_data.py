@@ -167,11 +167,9 @@ def _week_floor(date_str: str) -> str:
 
 
 def _fetch_ohlcv(ticker, start, end, api_key, log=print):
-    # Snap to Monday-of-week so every run within the same week reuses one cache
-    # entry. Cost: data is up to 6 days stale at week's end. For 1-2y analysis
-    # windows that shift is negligible.
-    start = _week_floor(start)
-    end   = _week_floor(end)
+    # Cache key uses the real dates. With yfinance (no 5/min limit) we no longer
+    # week-bucket to conserve Polygon calls, so data refreshes daily instead of
+    # being up to ~6 days stale at week's end (the old _week_floor behaviour).
     cache_key = f"{ticker}_{start}_{end}"
 
     # 1. In-memory cache (fastest) — lock-protected, Streamlit sessions are concurrent
@@ -192,55 +190,27 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
         except Exception:
             pass
 
-    # 3. Fetch from Polygon in 6-month chunks (free tier caps ~180 rows per request)
-    all_results = []
-    partial     = False   # set if any chunk failed transiently (429/error)
-    current = datetime.strptime(start, "%Y-%m-%d")
-    end_dt  = datetime.strptime(end,   "%Y-%m-%d")
-
-    while current <= end_dt:
-        chunk_end = min(current + timedelta(days=180), end_dt)
-        chunk     = _polygon_fetch_chunk(
-            ticker,
-            current.strftime("%Y-%m-%d"),
-            chunk_end.strftime("%Y-%m-%d"),
-            api_key, log=log,
-        )
-        if chunk is None:
-            partial = True   # transient failure — result is now incomplete
-        else:
-            all_results.extend(chunk)
-        current = chunk_end + timedelta(days=1)
-        if current <= end_dt:
-            time.sleep(0.3)   # gentle pacing between chunks
-
-    if not all_results:
+    # 3. Fetch via the multi-source router: yfinance (same-day, deep history) →
+    #    Polygon fallback. get_bars returns a complete result or None — no partial
+    #    chunks to guard against — so a successful result is always safe to cache.
+    from market_data import get_bars
+    bars = get_bars(ticker, start, end, interval="day", polygon_key=api_key)
+    if bars is None or bars.empty:
         log(f"   ⚠ {ticker} — no data returned")
         return None
-
-    df = pd.DataFrame(all_results)
-    df = df.rename(columns={"t": "Date", "o": "Open", "h": "High",
-                              "l": "Low",  "c": "Close", "v": "Volume"})
-    df["Date"]   = pd.to_datetime(df["Date"], unit="ms")
+    df = bars.copy()
     df["Ticker"] = ticker
     df = df[["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]]
     df = df.drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
 
-    # Only cache COMPLETE fetches. A partial result (a chunk was rate-limited or
-    # errored) is returned best-effort for THIS request but never cached, so the
-    # next request retries for full history instead of pinning a truncated series
-    # for 30 days — which would silently drop the ticker from portfolios.
-    if not partial:
-        with _PORT_CACHE_LOCK:
-            _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
-        try:
-            cache_set(f"ohlcv_{cache_key}",
-                      df.assign(Date=df["Date"].astype(str)).to_dict(orient="records"),
-                      ttl_hours=720)
-        except Exception:
-            pass
-    else:
-        log(f"   ⚠ {ticker} — incomplete fetch ({len(df)} rows); not cached, will retry next run")
+    with _PORT_CACHE_LOCK:
+        _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
+    try:
+        cache_set(f"ohlcv_{cache_key}",
+                  df.assign(Date=df["Date"].astype(str)).to_dict(orient="records"),
+                  ttl_hours=720)
+    except Exception:
+        pass
     return df
 
 

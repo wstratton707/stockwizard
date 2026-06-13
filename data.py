@@ -76,22 +76,13 @@ def fetch_ohlcv(ticker, period, api_key, log=print,
     else:
         start, end = _period_to_dates(period)
     log(f"Downloading data for {ticker} ({start} → {end}, {bar_size})...")
-    data = _get(
-        f"/v2/aggs/ticker/{ticker}/range/1/{bar_size}/{start}/{end}",
-        api_key,
-        params={"adjusted": "true", "sort": "asc", "limit": 50000},
-        raise_on_error=True,
-    )
-    if not data or not data.get("results"):
+    # Multi-source: yfinance (same-day, deep history) → Polygon fallback. Returns
+    # the standardized [Date,Open,High,Low,Close,Volume] schema either way.
+    from market_data import get_bars
+    df = get_bars(ticker, start, end, interval=bar_size, polygon_key=api_key)
+    if df is None or df.empty:
         raise ValueError(f"No price data for '{ticker}'. Check the symbol.")
-    rows = data["results"]
-    df = pd.DataFrame(rows)
-    df = df.rename(columns={"t": "Date", "o": "Open", "h": "High",
-                             "l": "Low", "c": "Close", "v": "Volume"})
-    df["Date"] = pd.to_datetime(df["Date"], unit="ms")
-    df = df[["Date", "Open", "High", "Low", "Close", "Volume"]].copy()
-    df = df.sort_values("Date").reset_index(drop=True)
-    log(f"   {len(df)} bars fetched.")
+    log(f"   {len(df)} bars fetched ({get_bars.__module__}).")
     return df
 
 
