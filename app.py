@@ -468,7 +468,7 @@ with tab1:
         st.markdown("""
         <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
                     color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
-                    margin-bottom:1rem">Market Movers Today</div>
+                    margin-bottom:1rem">Market Movers · Last Close</div>
         """, unsafe_allow_html=True)
 
         with st.spinner("Loading market data..."):
@@ -1259,8 +1259,17 @@ with tab1:
             _change_cls   = "pos" if _change_abs >= 0 else "neg"
             _change_arrow = "▲" if _change_abs >= 0 else "▼"
             _change_sign  = "+" if _change_abs >= 0 else ""
+            # Always show a freshness stamp: a delayed-quote time when we have a
+            # live tick, otherwise the date of the last close (so an EOD price is
+            # never shown without saying how old it is).
+            try:
+                _close_dt = pd.to_datetime(latest["Date"]).strftime("%b %d, %Y")
+            except Exception:
+                _close_dt = ""
             _live_meta    = (f'<div class="stock-hero-meta">~15-min delayed · as of '
-                             f'{live["time"]}</div>') if live else ""
+                             f'{live["time"]}</div>') if live else \
+                            (f'<div class="stock-hero-meta">Last close · {_close_dt}</div>'
+                             if _close_dt else "")
 
             # Day range fill % (where current price sits between today's low and high)
             _day_open  = float(latest.get("Open",  _price_now))
