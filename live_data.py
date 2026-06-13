@@ -11,25 +11,23 @@ CACHE_TTL       = 30
 
 
 def get_live_price(ticker, api_key):
+    """
+    Live quote via the multi-source router: Finnhub real-time (if FINNHUB_API_KEY
+    is set) → Polygon last-trade. Returns None when no source has it (e.g. free
+    tier with no Finnhub key), in which case the caller falls back to last close.
+    Cached 30s. The returned dict carries a 'source' field so the UI can label it
+    'Live' (finnhub) vs 'delayed' (polygon).
+    """
     now    = time.time()
     cached = _PRICE_CACHE.get(ticker)
     if cached and (now - cached["ts"]) < CACHE_TTL:
         return cached
-    try:
-        r = requests.get(f"{POLYGON_BASE}/v2/last/trade/{ticker}",
-                         params={"apiKey": api_key}, timeout=10)
-        if r.status_code == 200:
-            price = r.json().get("results", {}).get("p", 0)
-            prev  = get_prev_close(ticker, api_key)
-            change = price - prev if prev else 0
-            pct    = (change / prev * 100) if prev else 0
-            entry  = {"ts": now, "ticker": ticker, "price": price,
-                      "change": change, "pct": pct, "prev": prev,
-                      "time": datetime.now().strftime("%H:%M:%S")}
-            _PRICE_CACHE[ticker] = entry
-            return entry
-    except Exception:
-        pass
+    from market_data import get_quote
+    q = get_quote(ticker, polygon_key=api_key)
+    if q:
+        entry = {**q, "ts": now, "ticker": ticker}
+        _PRICE_CACHE[ticker] = entry
+        return entry
     return _PRICE_CACHE.get(ticker)
 
 

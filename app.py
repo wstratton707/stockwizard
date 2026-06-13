@@ -806,6 +806,10 @@ with tab1:
                 asset_tag = '<span class="stock-hero-tag etf" style="margin-left:0.6rem">ETF</span>'
             sign       = "+" if live["change"] >= 0 else ""
             change_cls = "live-change-pos" if live["change"] >= 0 else "live-change-neg"
+            _dt_live   = live.get("source") == "finnhub"
+            _dt_qlabel = "● Live" if _dt_live else "● Delayed quote"
+            _dt_qcolor = "#059669" if _dt_live else "#94a3b8"
+            _dt_qsub   = "Real-time (Finnhub)" if _dt_live else "~15-min delayed (free data tier)"
             st.markdown(f"""
             <div class="live-ticker">
                 <div>
@@ -815,9 +819,9 @@ with tab1:
                     <span class="{change_cls}">{sign}{live['change']:,.2f} ({sign}{live['pct']:.2f}%)</span>
                 </div>
                 <div style="text-align:right">
-                    <div><span style="color:#94a3b8;font-size:0.78rem">● Delayed quote</span></div>
+                    <div><span style="color:{_dt_qcolor};font-size:0.78rem">{_dt_qlabel}</span></div>
                     <div style="color:#6b7a8d;font-size:0.75rem;margin-top:4px">As of {live['time']}</div>
-                    <div style="color:#6b7a8d;font-size:0.72rem">~15-min delayed (free data tier)</div>
+                    <div style="color:#6b7a8d;font-size:0.72rem">{_dt_qsub}</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -1250,7 +1254,8 @@ with tab1:
             elif is_etf:
                 _tags.append('<span class="stock-hero-tag etf">ETF</span>')
             if live:
-                _tags.append('<span class="stock-hero-tag live">Delayed quote</span>')
+                _is_live = live.get("source") == "finnhub"
+                _tags.append(f'<span class="stock-hero-tag live">{"● Live" if _is_live else "Delayed quote"}</span>')
 
             # Price + change — prefer live tick, fall back to last close
             _price_now    = float(live["price"]) if live else float(latest["Close"])
@@ -1266,10 +1271,13 @@ with tab1:
                 _close_dt = pd.to_datetime(latest["Date"]).strftime("%b %d, %Y")
             except Exception:
                 _close_dt = ""
-            _live_meta    = (f'<div class="stock-hero-meta">~15-min delayed · as of '
-                             f'{live["time"]}</div>') if live else \
-                            (f'<div class="stock-hero-meta">Last close · {_close_dt}</div>'
-                             if _close_dt else "")
+            if live:
+                _fresh     = "Live" if live.get("source") == "finnhub" else "Delayed (~15 min)"
+                _live_meta = f'<div class="stock-hero-meta">{_fresh} · as of {live["time"]}</div>'
+            elif _close_dt:
+                _live_meta = f'<div class="stock-hero-meta">Last close · {_close_dt}</div>'
+            else:
+                _live_meta = ""
 
             # Day range fill % (where current price sits between today's low and high)
             _day_open  = float(latest.get("Open",  _price_now))
