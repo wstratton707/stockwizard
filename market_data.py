@@ -235,6 +235,48 @@ def _yahoo_bars(ticker: str, start: str, end: str, interval: str) -> pd.DataFram
         return None
 
 
+def get_bars_batch(tickers: list, start: str, end: str, interval: str = "day") -> dict:
+    """
+    Fetch daily OHLCV for MANY tickers in a single yfinance request — far faster
+    than per-ticker calls and avoids Yahoo throttling a burst of sequential
+    requests. Returns {ticker: standardized DataFrame}; tickers with no data are
+    simply absent (caller falls back to per-ticker get_bars for those).
+    """
+    if not tickers:
+        return {}
+    try:
+        import yfinance as yf
+        yint    = _YF_INTERVAL.get(interval, "1d")
+        end_excl = (pd.to_datetime(end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d") \
+                   if yint == "1d" else end
+        sym_map = {to_yahoo_symbol(t): t for t in tickers}      # yahoo symbol -> original
+        raw = yf.download(list(sym_map.keys()), start=start, end=end_excl, interval=yint,
+                          auto_adjust=True, progress=False, group_by="ticker", threads=True)
+        if raw is None or raw.empty:
+            return {}
+        out: dict = {}
+        multi = len(sym_map) > 1
+        for ysym, orig in sym_map.items():
+            try:
+                sub = (raw[ysym] if multi else raw).reset_index()
+                date_col = "Datetime" if "Datetime" in sub.columns else "Date"
+                df = pd.DataFrame({
+                    "Date":   pd.to_datetime(sub[date_col]).dt.tz_localize(None),
+                    "Open":   sub["Open"].astype(float),
+                    "High":   sub["High"].astype(float),
+                    "Low":    sub["Low"].astype(float),
+                    "Close":  sub["Close"].astype(float),
+                    "Volume": sub["Volume"].fillna(0).astype(float),
+                }).dropna(subset=["Close"]).sort_values("Date").reset_index(drop=True)
+                if len(df) > 0:
+                    out[orig] = df
+            except Exception:
+                pass
+        return out
+    except Exception:
+        return {}
+
+
 def _polygon_bars(ticker: str, start: str, end: str, interval: str, key: str) -> pd.DataFrame | None:
     mult, tspan = _POLY_SPAN.get(interval, (1, "day"))
     try:

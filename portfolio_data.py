@@ -223,14 +223,40 @@ def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
     price_dict, failed = {}, []
     thread_logs = []  # collect logs from threads — Streamlit can't be called from worker threads
 
+    # ── Batch-prewarm (the big speedup) ──────────────────────────────────────
+    # Pull every not-yet-cached ticker in ONE yfinance request and seed the
+    # in-memory cache, so the per-ticker loop below mostly hits cache. Fetching a
+    # ~60-name universe one ticker at a time (and Yahoo throttling the burst)
+    # could take minutes; a single batched request is seconds.
+    _uncached = []
+    for _t in tickers:
+        _ck = f"{_t}_{start_s}_{end_s}"
+        with _PORT_CACHE_LOCK:
+            _hit = _PORT_CACHE.get(_ck)
+        if not (_hit and (time.time() - _hit["ts"]) < CACHE_TTL):
+            _uncached.append(_t)
+    if len(_uncached) > 3:
+        try:
+            from market_data import get_bars_batch
+            _batch = get_bars_batch(_uncached, start_s, end_s, "day")
+            for _bt, _bdf in _batch.items():
+                _d = _bdf.copy()
+                _d["Ticker"] = _bt
+                _d = _d[["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]]
+                with _PORT_CACHE_LOCK:
+                    _PORT_CACHE[f"{_bt}_{start_s}_{end_s}"] = {"ts": time.time(), "df": _d}
+            thread_logs.append(f"   ⚡ batch-fetched {len(_batch)}/{len(_uncached)} tickers in one request")
+        except Exception as _e:
+            thread_logs.append(f"   ⚠ batch prewarm failed ({_e}) — falling back to per-ticker")
+
     def fetch_one(ticker):
         msgs = []
         df = _fetch_ohlcv(ticker, start_s, end_s, api_key, log=lambda m: msgs.append(m))
         return ticker, df, msgs
 
-    # max_workers=2: parallel fetches are faster, but precompute learned the hard
-    # way that >2 concurrent Polygon requests cascade into 429 storms on free tier.
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    # yfinance (now the primary bar source) has no per-minute cap, so the few
+    # tickers the batch missed can be parallelised without the old Polygon-429 risk.
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {executor.submit(fetch_one, t): t for t in tickers}
         for future in as_completed(futures):
             ticker, df, msgs = future.result()
