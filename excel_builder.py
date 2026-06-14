@@ -27,6 +27,12 @@ GREEN_OK   = "70AD47"
 RED_BAD    = "FF0000"
 WHITE      = "FFFFFF"
 GREY_ROW   = "F2F2F2"
+TILE_BG    = "F0F5FB"   # pale blue KPI-tile fill
+BAD_FILL   = "FFC7CE"   # Excel-classic light red
+BAD_TEXT   = "9C0006"   # Excel-classic dark red
+
+# Kept in sync with the PowerPoint deck's data-source line (pptx_builder.py).
+DATA_SOURCE_LINE = "Polygon · Yahoo Finance · Finnhub · SEC EDGAR"
 
 
 def _border():
@@ -35,7 +41,7 @@ def _border():
 
 
 def _hdr_cell(cell, bg=DARK_BLUE, fg=WHITE):
-    cell.font      = Font(bold=True, color=fg, name="Arial", size=10)
+    cell.font      = Font(bold=True, color=fg, name="Calibri", size=10)
     cell.fill      = PatternFill("solid", fgColor=bg)
     cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     cell.border    = _border()
@@ -75,36 +81,70 @@ def make_sparkline(values, color="#2E75B6", width=2.2, height=0.45):
 
 
 # ── Cover page ────────────────────────────────────────────────────────────────
-def _build_cover(wb, ticker, period, sheetnames):
+def _build_cover(wb, ticker, period, sheetnames, df=None):
     ws = wb.create_sheet("Cover", 0)
     ws.sheet_view.showGridLines = False
-    ws.column_dimensions["A"].width = 6
-    ws.column_dimensions["B"].width = 44
-    ws.column_dimensions["C"].width = 28
+    ws.column_dimensions["A"].width = 4
+    for col in ("B", "C", "D", "E"):
+        ws.column_dimensions[col].width = 21
 
-    ws.merge_cells("B2:C3")
+    # Title band — solid navy with white text, matching the deck cover.
+    ws.merge_cells("B2:E3")
     c = ws["B2"]
-    c.value     = f"{ticker}  —  Stock Analysis Report"
-    c.font      = Font(size=22, bold=True, color=MID_BLUE, name="Arial")
-    c.alignment = Alignment(horizontal="left", vertical="center")
+    c.value     = f"{ticker}  —  Equity Research Report"
+    c.font      = Font(size=22, bold=True, color=WHITE, name="Calibri")
+    c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    c.fill      = PatternFill("solid", fgColor=DARK_BLUE)
     ws.row_dimensions[2].height = 30
+    ws.row_dimensions[3].height = 14
 
-    ws.merge_cells("B4:C4")
+    ws.merge_cells("B4:E4")
     c = ws["B4"]
-    c.value     = f"Period: {period}   |   Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}   |   Data: Polygon.io"
-    c.font      = Font(size=9, italic=True, color="888888", name="Arial")
-    c.alignment = Alignment(horizontal="left")
+    c.value     = (f"Period: {period}    |    Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}"
+                   f"    |    Multi-source data: {DATA_SOURCE_LINE}")
+    c.font      = Font(size=9, italic=True, color="888888", name="Calibri")
+    c.alignment = Alignment(horizontal="left", indent=1)
 
-    ws["B6"] = "TABLE OF CONTENTS"
-    ws["B6"].font = Font(bold=True, size=12, color=DARK_BLUE, name="Arial")
+    # KPI band — four headline stats so the cover reads like a tear-sheet, not a TOC.
+    toc_start = 6
+    if df is not None and len(df) > 1:
+        latest, firstrow = df.iloc[-1], df.iloc[0]
+        period_ret = latest["Close"] / firstrow["Close"] - 1
+        ret     = df["Daily_Return"].dropna()
+        ann_vol = ret.std() * np.sqrt(252)
+        ann_ret = ret.mean() * 252
+        sharpe  = (ann_ret - get_risk_free_rate()) / ann_vol if ann_vol else float("nan")
+        tiles = [
+            ("Current Price",   f"${latest['Close']:,.2f}",                    DARK_BLUE),
+            ("Period Return",   f"{period_ret * 100:+.1f}%",
+                                GREEN_OK if period_ret >= 0 else RED_BAD),
+            ("Sharpe Ratio",    f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A",
+                                GREEN_OK if pd.notna(sharpe) and sharpe >= 1 else DARK_BLUE),
+            ("Ann. Volatility", f"{ann_vol * 100:.1f}%",                       DARK_BLUE),
+        ]
+        for i, (label, value, accent) in enumerate(tiles):
+            col   = 2 + i   # B, C, D, E
+            vcell = ws.cell(row=6, column=col, value=value)
+            vcell.font      = Font(size=16, bold=True, name="Calibri", color=accent)
+            vcell.alignment = Alignment(horizontal="center", vertical="center")
+            vcell.fill      = PatternFill("solid", fgColor=TILE_BG)
+            vcell.border    = _border()
+            lcell = ws.cell(row=7, column=col, value=label.upper())
+            lcell.font      = Font(size=8, bold=True, name="Calibri", color="808080")
+            lcell.alignment = Alignment(horizontal="center", vertical="center")
+            lcell.fill      = PatternFill("solid", fgColor=TILE_BG)
+            lcell.border    = _border()
+        ws.row_dimensions[6].height = 30
+        ws.row_dimensions[7].height = 16
+        toc_start = 9
 
-    for i, name in enumerate(sheetnames, 7):
+    ws.cell(row=toc_start, column=2, value="TABLE OF CONTENTS").font = \
+        Font(bold=True, size=12, color=DARK_BLUE, name="Calibri")
+    for i, name in enumerate(sheetnames, toc_start + 1):
         cell = ws.cell(row=i, column=2, value=name.replace("_", " "))
-        cell.font      = Font(name="Arial", size=10, color=MID_BLUE, underline="single")
+        cell.font      = Font(name="Calibri", size=10, color=MID_BLUE, underline="single")
         cell.hyperlink = f"#{name}!A1"
         ws.row_dimensions[i].height = 16
-
-    ws["B2"].fill = PatternFill("solid", fgColor="F0F7FF")
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -137,20 +177,21 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
         rsi_val = np.nan
 
     ws.merge_cells("A1:D1")
-    ws["A1"] = f"{ticker} — Professional Stock Analysis"
-    ws["A1"].font      = Font(size=18, bold=True, color=DARK_BLUE, name="Arial")
+    ws["A1"] = f"{ticker} — Equity Research Dashboard"
+    ws["A1"].font      = Font(size=18, bold=True, color=DARK_BLUE, name="Calibri")
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 34
 
     ws.merge_cells("A2:D2")
-    ws["A2"] = f"Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}  |  Data source: Polygon.io"
-    ws["A2"].font      = Font(italic=True, color="888888", name="Arial", size=9)
+    ws["A2"] = (f"Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}"
+                f"  |  Multi-source data: {DATA_SOURCE_LINE}")
+    ws["A2"].font      = Font(italic=True, color="888888", name="Calibri", size=9)
     ws["A2"].alignment = Alignment(horizontal="center")
 
     def sec_hdr(row, label, col_end="D"):
         ws.merge_cells(f"A{row}:{col_end}{row}")
         c = ws.cell(row=row, column=1, value=label)
-        c.font      = Font(bold=True, color=WHITE, name="Arial", size=11)
+        c.font      = Font(bold=True, color=WHITE, name="Calibri", size=11)
         c.fill      = PatternFill("solid", fgColor=DARK_BLUE)
         c.alignment = Alignment(horizontal="left", vertical="center")
         ws.row_dimensions[row].height = 20
@@ -158,8 +199,8 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
     def kv(row, label, value, fmt=None, rag=None):
         cl = ws.cell(row=row, column=1, value=label)
         cv = ws.cell(row=row, column=2, value=value)
-        cl.font      = Font(name="Arial", size=10)
-        cv.font      = Font(name="Arial", size=10, bold=True)
+        cl.font      = Font(name="Calibri", size=10)
+        cv.font      = Font(name="Calibri", size=10, bold=True)
         cv.alignment = Alignment(horizontal="right")
         cl.border    = cv.border = _border()
         if fmt and isinstance(value, (int, float)):
@@ -169,7 +210,7 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
             colour = (GREEN_OK if value > thresh else RED_BAD) if direction == "gt" \
                      else (RED_BAD if value < thresh else GREEN_OK)
             cv.fill = PatternFill("solid", fgColor=colour)
-            cv.font = Font(name="Arial", size=10, bold=True, color=WHITE)
+            cv.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
         bg = GREY_ROW if row % 2 == 0 else WHITE
         for col in [1, 2]:
             c = ws.cell(row=row, column=col)
@@ -238,7 +279,7 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
     row_cursor += 1
     ws.merge_cells(f"A{row_cursor}:D{row_cursor + 4}")
     sc = ws.cell(row=row_cursor, column=1, value=summary_text)
-    sc.font      = Font(name="Arial", size=10, italic=True)
+    sc.font      = Font(name="Calibri", size=10, italic=True)
     sc.alignment = Alignment(wrap_text=True, vertical="top")
     sc.border    = _border()
     ws.row_dimensions[row_cursor].height = 90
@@ -253,11 +294,11 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
             ("Volatility", df["Volatility_20d"].tolist(), "#7030A0"),
             ("Drawdown",   df["Drawdown_60d"].tolist(),   "#C00000"),
         ]
-        ws.cell(row=4, column=5, value="SPARKLINES").font = Font(bold=True, color=WHITE, name="Arial")
+        ws.cell(row=4, column=5, value="SPARKLINES").font = Font(bold=True, color=WHITE, name="Calibri")
         ws.cell(row=4, column=5).fill = PatternFill("solid", fgColor=MID_BLUE)
         for i, (label, vals, col) in enumerate(spark_data):
             row = 5 + i * 3
-            ws.cell(row=row, column=5, value=label).font = Font(name="Arial", size=9, bold=True)
+            ws.cell(row=row, column=5, value=label).font = Font(name="Calibri", size=9, bold=True)
             buf = make_sparkline(vals, color=col)
             if buf:
                 img = XLImage(buf)
@@ -276,7 +317,7 @@ def _build_annual_summary(wb, df):
 
     ws_a.merge_cells("A1:H1")
     ws_a["A1"] = "Annual Performance Summary"
-    ws_a["A1"].font      = Font(size=14, bold=True, color=DARK_BLUE, name="Arial")
+    ws_a["A1"].font      = Font(size=14, bold=True, color=DARK_BLUE, name="Calibri")
     ws_a["A1"].alignment = Alignment(horizontal="center", vertical="center")
     ws_a.row_dimensions[1].height = 26
 
@@ -298,16 +339,19 @@ def _build_annual_summary(wb, df):
         bg = GREY_ROW if ri % 2 == 0 else WHITE
         for ci, val in enumerate(row_vals, 1):
             c = ws_a.cell(row=ri, column=ci, value=val)
-            c.font   = Font(name="Arial", size=10)
+            c.font   = Font(name="Calibri", size=10)
             c.border = _border()
             c.fill   = PatternFill("solid", fgColor=bg)
             if ci == 1: c.number_format = "0"
             elif ci in (2, 3, 4):
                 c.number_format = "0.00%"
-                if isinstance(val, float):
+                # RAG only for return (col 2) and drawdown (col 3); volatility (col 4)
+                # is not "good/bad" on its own, so it stays neutral.
+                if isinstance(val, float) and ci in (2, 3):
                     good = val > 0 if ci == 2 else val > -0.15
-                    c.fill = PatternFill("solid", fgColor=GREEN_OK if good else "FFAAAA")
-                    c.font = Font(name="Arial", size=10, bold=True)
+                    c.fill = PatternFill("solid", fgColor=GREEN_OK if good else BAD_FILL)
+                    c.font = Font(name="Calibri", size=10, bold=True,
+                                  color=WHITE if good else BAD_TEXT)
 
     auto_col_width(ws_a)
     ws_a.freeze_panes = "A3"
@@ -348,7 +392,7 @@ def _build_price_sheet(wb, df, bar_size="day"):
         ws_p.merge_cells(f"A1:{get_column_letter(len(export_df.columns))}1")
         nc = ws_p["A1"]
         nc.value     = note
-        nc.font      = Font(name="Arial", size=9, italic=True, color="1F4E79")
+        nc.font      = Font(name="Calibri", size=9, italic=True, color="1F4E79")
         nc.fill      = PatternFill("solid", fgColor="D6E4F0")
         nc.alignment = Alignment(wrap_text=True, vertical="center")
         ws_p.row_dimensions[1].height = 30
@@ -407,7 +451,7 @@ def _build_news_sheet(wb, news_list):
     for ni, item in enumerate(news_list, 2):
         for ci, key in enumerate(["Date","Headline","Publisher","URL"], 1):
             c = ws_n.cell(row=ni, column=ci, value=item.get(key,""))
-            c.font = Font(name="Arial", size=10)
+            c.font = Font(name="Calibri", size=10)
             c.border = _border()
             if ni % 2 == 0:
                 c.fill = PatternFill("solid", fgColor=GREY_ROW)
@@ -433,7 +477,7 @@ def _build_peer_sheet(wb, peer_df):
     for ri, row in enumerate(ws_peer.iter_rows(min_row=2), 2):
         bg = "D6E4F0" if ri == 2 else (GREY_ROW if ri % 2 == 0 else WHITE)
         for cell in row:
-            cell.font   = Font(name="Arial", size=10, bold=(ri == 2))
+            cell.font   = Font(name="Calibri", size=10, bold=(ri == 2))
             cell.border = _border()
             cell.fill   = PatternFill("solid", fgColor=bg)
 
@@ -464,7 +508,7 @@ def _build_correlation_sheet(wb, corr_matrix):
     ws_corr = wb.create_sheet("Correlation_Matrix")
     labels  = list(corr_matrix.columns)
     ws_corr.cell(row=1, column=1, value="Correlation Matrix (Daily Returns)")
-    ws_corr.cell(row=1, column=1).font = Font(bold=True, size=12, color=DARK_BLUE, name="Arial")
+    ws_corr.cell(row=1, column=1).font = Font(bold=True, size=12, color=DARK_BLUE, name="Calibri")
     ws_corr.merge_cells(f"A1:{get_column_letter(len(labels)+1)}1")
     for ci, lbl in enumerate(labels, 2):
         _hdr_cell(ws_corr.cell(row=2, column=ci, value=lbl), bg=MID_BLUE)
@@ -474,7 +518,7 @@ def _build_correlation_sheet(wb, corr_matrix):
             val  = corr_matrix.loc[lbl, col_lbl]
             cell = ws_corr.cell(row=ri, column=ci, value=round(float(val), 4))
             cell.number_format = "0.0000"
-            cell.font          = Font(name="Arial", size=10)
+            cell.font          = Font(name="Calibri", size=10)
             cell.border        = _border()
             cell.alignment     = Alignment(horizontal="center")
     ws_corr.conditional_formatting.add(
@@ -492,14 +536,14 @@ def _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary):
     pct_col_start = 53
     ws_mc = wb.create_sheet("Monte_Carlo")
     ws_mc["A1"] = "Monte Carlo Simulation Summary"
-    ws_mc["A1"].font = Font(bold=True, size=13, color=DARK_BLUE, name="Arial")
+    ws_mc["A1"].font = Font(bold=True, size=13, color=DARK_BLUE, name="Calibri")
     ws_mc["A2"] = "Field"
     ws_mc["B2"] = "Value"
     for cell in ws_mc[2]:
         _hdr_cell(cell, bg=MID_BLUE)
     for i, (k, v) in enumerate(mc_summary.items(), 3):
-        ws_mc.cell(row=i, column=1, value=k).font      = Font(name="Arial", size=10)
-        ws_mc.cell(row=i, column=2, value=str(v)).font = Font(name="Arial", size=10, bold=True)
+        ws_mc.cell(row=i, column=1, value=k).font      = Font(name="Calibri", size=10)
+        ws_mc.cell(row=i, column=2, value=str(v)).font = Font(name="Calibri", size=10, bold=True)
     summary_end  = 3 + len(mc_summary)
     start_row_mc = summary_end + 2
     ws_mc.cell(row=start_row_mc, column=1, value="Day")
@@ -696,20 +740,20 @@ def _build_fundamentals_sheet(wb, fundamentals):
     tc = ws.cell(row=row, column=1,
                  value=f"Fundamentals & Valuation   ·   source: {f.get('source','—')}"
                        f"   ·   FY ending {f.get('as_of','—')}")
-    tc.font = Font(size=14, bold=True, color=DARK_BLUE, name="Arial")
+    tc.font = Font(size=14, bold=True, color=DARK_BLUE, name="Calibri")
     row += 2
 
     def section(title, pairs):
         nonlocal row
         for col in (1, 2):
             c = ws.cell(row=row, column=col, value=title if col == 1 else None)
-            c.font = Font(bold=True, color=WHITE, name="Arial", size=11)
+            c.font = Font(bold=True, color=WHITE, name="Calibri", size=11)
             c.fill = PatternFill("solid", fgColor=DARK_BLUE)
         row += 1
         for lbl, val in pairs:
             cl = ws.cell(row=row, column=1, value=lbl)
             cv = ws.cell(row=row, column=2, value=val)
-            cl.font, cv.font = Font(name="Arial", size=10), Font(name="Arial", size=10, bold=True)
+            cl.font, cv.font = Font(name="Calibri", size=10), Font(name="Calibri", size=10, bold=True)
             cl.border = cv.border = _border()
             if row % 2 == 0:
                 cl.fill = cv.fill = PatternFill("solid", fgColor=GREY_ROW)
@@ -745,17 +789,17 @@ def _build_fundamentals_sheet(wb, fundamentals):
         for col in range(1, len(periods) + 2):
             hc = ws.cell(row=row, column=col,
                          value=("Fiscal Period" if col == 1 else periods[col - 2]))
-            hc.font = Font(bold=True, color=WHITE, name="Arial", size=10)
+            hc.font = Font(bold=True, color=WHITE, name="Calibri", size=10)
             hc.fill = PatternFill("solid", fgColor=MID_BLUE)
             hc.border = _border()
         row += 1
         for label, key in [("Revenue ($B)", "revenue"), ("Net Income ($B)", "net_income"),
                            ("Free Cash Flow ($B)", "fcf")]:
-            ws.cell(row=row, column=1, value=label).font = Font(name="Arial", size=10, bold=True)
+            ws.cell(row=row, column=1, value=label).font = Font(name="Calibri", size=10, bold=True)
             for ci, x in enumerate(t.get(key, []), 2):
                 cc = ws.cell(row=row, column=ci,
                              value=(round(x / 1e9, 1) if isinstance(x, (int, float)) else "—"))
-                cc.font = Font(name="Arial", size=10)
+                cc.font = Font(name="Calibri", size=10)
                 cc.border = _border()
             ws.cell(row=row, column=1).border = _border()
             row += 1
@@ -789,18 +833,24 @@ def build_excel(ticker, df, period,
     _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=df)
     _build_fundamentals_sheet(wb, fundamentals)
 
-    # Cover last so it knows all sheet names
-    sheets_so_far = [s for s in wb.sheetnames]
-    _build_cover(wb, ticker, period, sheets_so_far)
-
+    # Final tab order (Cover first, then Dashboard, then the rest). The TOC is
+    # built from this same order so the cover links match the tab strip.
     desired = ["Cover","Dashboard","Fundamentals","Annual_Summary","Price_Indicators","News_Headlines",
                "Peer_Comparison","Sector_Comparison","Correlation_Matrix",
                "Monte_Carlo","Charts"]
-    existing = wb.sheetnames
-    ordered  = [s for s in desired if s in existing]
-    extras   = [s for s in existing if s not in ordered]
-    for i, name in enumerate(ordered + extras):
-        wb.move_sheet(name, offset=wb.sheetnames.index(name) - i)
+    built     = wb.sheetnames                                   # everything except Cover
+    toc_order = [s for s in desired if s in built and s != "Cover"]
+    extras    = [s for s in built if s not in desired]
+    toc_order += extras
+
+    # Cover last so it knows all sheet names; pass df for the KPI band.
+    _build_cover(wb, ticker, period, toc_order, df=df)
+
+    # Reorder tabs by sorting the internal sheet list directly. (openpyxl's
+    # move_sheet offset is current_index + offset, so the old `index - i`
+    # math moved sheets the wrong way and left the order untouched.)
+    pos = {name: i for i, name in enumerate(["Cover"] + toc_order)}
+    wb._sheets.sort(key=lambda s: pos.get(s.title, 999))
 
     buf = io.BytesIO()
     wb.save(buf)
