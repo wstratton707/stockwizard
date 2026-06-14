@@ -327,14 +327,12 @@ def _drawdown_chart(df, ticker, w=11, h=2.8):
 # ── Portfolio chart helpers ───────────────────────────────────────────────────
 
 def _alloc_pie_chart(weights, ticker_info, w=6, h=4.5):
-    labels = []
-    sizes  = []
-    for tk, wt in sorted(weights.items(), key=lambda x: -x[1]):
-        name = (ticker_info or {}).get(tk, {}).get("name", tk)
-        short = name[:18] + "…" if len(name) > 18 else name
-        labels.append(f"{tk}\n{short}")
-        sizes.append(wt * 100)
-    colors = plt.cm.Blues(np.linspace(0.35, 0.85, len(sizes)))
+    # Sort once and use the SAME ordering for wedges and the legend — previously
+    # the legend zipped sorted sizes against the dict's unsorted keys, so every
+    # ticker was labelled with the wrong slice's percentage.
+    ordered = sorted(weights.items(), key=lambda x: -x[1])   # [(ticker, weight), ...] desc
+    sizes   = [wt * 100 for _, wt in ordered]
+    colors  = plt.cm.Blues(np.linspace(0.85, 0.40, len(sizes)))   # largest = darkest
     fig, ax = plt.subplots(figsize=(w, h))
     wedges, texts, autotexts = ax.pie(
         sizes, labels=None, colors=colors,
@@ -346,7 +344,7 @@ def _alloc_pie_chart(weights, ticker_info, w=6, h=4.5):
         at.set_fontsize(8)
         at.set_color("white")
         at.set_fontweight("bold")
-    ax.legend(wedges, [f"{tk} ({wt:.1f}%)" for tk, wt in zip(weights.keys(), sizes)],
+    ax.legend(wedges, [f"{tk} ({wt * 100:.1f}%)" for tk, wt in ordered],
               loc="center left", bbox_to_anchor=(1, 0, 0.5, 1),
               fontsize=8, framealpha=0.7)
     ax.set_title("Portfolio Allocation", fontsize=12, fontweight="bold",
