@@ -95,7 +95,7 @@ def _rect(slide, l, t, w, h, fill_rgb=None, line_rgb=None, line_width=None):
 def _text_box(slide, text, l, t, w, h,
               font_size=12, bold=False, italic=False,
               color=C_DARK_TEXT, align=PP_ALIGN.LEFT,
-              font_name="Arial"):
+              font_name="Calibri"):   # cleaner, modern Office default (was Arial)
     txb = slide.shapes.add_textbox(Inches(l), Inches(t), Inches(w), Inches(h))
     tf  = txb.text_frame
     tf.word_wrap = True
@@ -479,8 +479,9 @@ def build_stock_pptx(ticker, df, period_label,
             return "N/A"
         return f"{v:.2f}"
 
-    total_slides = 11 if (fundamentals and fundamentals.get("ok")) else 10
-    page = [0]
+    # +1 for the new "Bottom Line" executive-summary slide added after the cover.
+    total_slides = (11 if (fundamentals and fundamentals.get("ok")) else 10) + 1
+    page = [1]   # cover is page 1 (hardcoded); next slide starts at 2
 
     def _next_page():
         page[0] += 1
@@ -489,32 +490,77 @@ def build_stock_pptx(ticker, df, period_label,
     # ── Slide 1: Cover ────────────────────────────────────────────────────────
     sl = _blank_slide(prs)
     _rect(sl, 0, 0, 13.33, 7.5, fill_rgb=C_NAVY)
-    _rect(sl, 0, 5.8, 13.33, 1.7, fill_rgb=RGBColor(0x0F, 0x17, 0x2A))
-    _rect(sl, 0.35, 2.2, 0.08, 2.6, fill_rgb=C_ACCENT)  # left accent bar
+    _rect(sl, 0, 5.5, 13.33, 2.0, fill_rgb=RGBColor(0x0B, 0x14, 0x24))   # KPI band
+    _rect(sl, 0, 5.5, 13.33, 0.03, fill_rgb=C_ACCENT)                    # accent divider
+    _rect(sl, 0.6, 1.35, 0.09, 2.45, fill_rgb=C_ACCENT)                  # left accent bar
 
     company_name = cd.get("Name", ticker)
-    _text_box(sl, "QUANTWIZARD", 0.6, 1.0, 12, 0.5,
-              font_size=13, bold=True, color=C_ACCENT, align=PP_ALIGN.LEFT)
-    _text_box(sl, ticker, 0.6, 1.5, 12, 1.0,
-              font_size=60, bold=True, color=C_WHITE, align=PP_ALIGN.LEFT)
-    _text_box(sl, company_name, 0.6, 2.55, 12, 0.6,
-              font_size=20, bold=False, color=RGBColor(0xB0, 0xC4, 0xDE), align=PP_ALIGN.LEFT)
-    _text_box(sl, "Professional Stock Analysis Report", 0.6, 3.2, 12, 0.45,
-              font_size=14, italic=True, color=C_ACCENT, align=PP_ALIGN.LEFT)
+    _text_box(sl, "QUANTWIZARD", 0.9, 0.85, 12, 0.5,
+              font_size=14, bold=True, color=C_ACCENT, align=PP_ALIGN.LEFT)
+    _text_box(sl, ticker, 0.86, 1.3, 12, 1.2,
+              font_size=66, bold=True, color=C_WHITE, align=PP_ALIGN.LEFT)
+    _text_box(sl, company_name, 0.9, 2.65, 12, 0.6,
+              font_size=22, bold=False, color=RGBColor(0xB0, 0xC4, 0xDE), align=PP_ALIGN.LEFT)
+    _text_box(sl, "Equity Research Report", 0.9, 3.35, 12, 0.45,
+              font_size=15, italic=True, color=C_ACCENT, align=PP_ALIGN.LEFT)
 
     sector   = cd.get("Sector", "")
     exchange = cd.get("Exchange", "")
-    meta_str = "  ·  ".join(filter(None, [sector, exchange, f"Period: {period_label}"]))
-    _text_box(sl, meta_str, 0.6, 3.75, 12, 0.35,
-              font_size=10, color=RGBColor(0x94, 0xA3, 0xB8), align=PP_ALIGN.LEFT)
+    meta_str = "   ·   ".join(filter(None, [sector.title() if sector else "", exchange, f"Period: {period_label}"]))
+    _text_box(sl, meta_str, 0.9, 3.9, 12, 0.35,
+              font_size=11, color=RGBColor(0x94, 0xA3, 0xB8), align=PP_ALIGN.LEFT)
 
-    _text_box(sl, f"Generated {datetime.now().strftime('%B %d, %Y')}  ·  Data: Polygon.io",
-              0.6, 6.1, 10, 0.3, font_size=9, color=C_GREY_TEXT)
+    _text_box(sl, f"Generated {datetime.now().strftime('%B %d, %Y')}   ·   "
+                  f"Multi-source data: Polygon · Yahoo Finance · Finnhub · SEC EDGAR",
+              0.9, 4.45, 12, 0.3, font_size=9.5, color=C_GREY_TEXT)
     _text_box(sl, "For informational purposes only. Not financial advice.",
-              0.6, 6.45, 12, 0.3, font_size=8, italic=True,
-              color=RGBColor(0x64, 0x74, 0x8B))
-    _text_box(sl, "1", 12.9, 7.15, 0.4, 0.25, font_size=8,
-              color=C_GREY_TEXT, align=PP_ALIGN.RIGHT)
+              0.9, 4.78, 12, 0.3, font_size=8.5, italic=True, color=RGBColor(0x64, 0x74, 0x8B))
+
+    # KPI stat band — mirrors the web hero ribbon for an immediate read
+    _kpis = [
+        ("CURRENT PRICE",   f"${latest['Close']:,.2f}",       C_WHITE),
+        ("PERIOD RETURN",   f"{period_ret:+.1f}%",            C_GREEN if period_ret >= 0 else C_RED),
+        ("SHARPE RATIO",    _fmt_ratio(sharpe),               C_WHITE),
+        ("ANN. VOLATILITY", f"{ann_std * 100:.1f}%",          C_WHITE),
+    ]
+    for _i, (_lbl, _val, _col) in enumerate(_kpis):
+        _x = 0.9 + _i * 3.05
+        _text_box(sl, _val, _x, 5.85, 2.9, 0.75, font_size=30, bold=True, color=_col, align=PP_ALIGN.LEFT)
+        _text_box(sl, _lbl, _x + 0.03, 6.65, 2.9, 0.3, font_size=9.5, bold=True, color=C_ACCENT, align=PP_ALIGN.LEFT)
+
+    _text_box(sl, "1", 12.9, 7.15, 0.4, 0.25, font_size=8, color=C_GREY_TEXT, align=PP_ALIGN.RIGHT)
+
+    # ── Slide 2: The Bottom Line (executive summary) ──────────────────────────
+    sl = _blank_slide(prs)
+    _slide_header(sl, "The Bottom Line", ticker)
+    _slide_footer(sl, _next_page(), total_slides)
+
+    _rect(sl, 0.3, 1.45, 12.7, 2.15, fill_rgb=C_LIGHT)
+    _rect(sl, 0.3, 1.45, 0.09, 2.15, fill_rgb=C_ACCENT)
+    _text_box(sl, "VERDICT", 0.55, 1.62, 11, 0.3, font_size=11, bold=True, color=C_NAVY)
+    _bl_text = summary_text or f"{ticker} analysis generated by QuantWizard."
+    if len(_bl_text) > 620:
+        _bl_text = _bl_text[:620].rsplit(" ", 1)[0] + "…"
+    _text_box(sl, _bl_text, 0.55, 1.98, 12.2, 1.55, font_size=12, color=C_DARK_TEXT)
+
+    _bl_kpis = [
+        ("Current Price", f"${latest['Close']:,.2f}", None),
+        ("Period Return", f"{period_ret:+.1f}%",      period_ret >= 0),
+        ("Sharpe Ratio",  _fmt_ratio(sharpe),         (sharpe > 1) if not math.isnan(sharpe) else None),
+        ("Max Drawdown",  f"{max_dd:.1f}%" if not math.isnan(max_dd) else "N/A",
+                          False if not math.isnan(max_dd) else None),
+    ]
+    _tw = 3.0
+    for _i, (_lbl, _val, _pos) in enumerate(_bl_kpis):
+        _x = 0.3 + _i * (_tw + 0.18)
+        _rect(sl, _x, 4.05, _tw, 1.55, fill_rgb=C_WHITE,
+              line_rgb=RGBColor(0xE2, 0xE8, 0xF0), line_width=1)
+        _rect(sl, _x, 4.05, _tw, 0.07, fill_rgb=C_ACCENT)
+        _vcol = C_GREEN if _pos is True else (C_RED if _pos is False else C_NAVY)
+        _text_box(sl, _lbl.upper(), _x + 0.2, 4.28, _tw - 0.35, 0.3,
+                  font_size=9.5, bold=True, color=C_GREY_TEXT)
+        _text_box(sl, _val, _x + 0.2, 4.68, _tw - 0.35, 0.75,
+                  font_size=26, bold=True, color=_vcol)
 
     # ── Fundamentals & Valuation (only when EDGAR/Polygon data is available) ───
     if fundamentals and fundamentals.get("ok"):
