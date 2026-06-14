@@ -795,7 +795,7 @@ def build_portfolio_pptx(preferences, final_weights, stock_metrics,
     tickers = list(final_weights.keys()) if final_weights else []
 
     total_slides = 9
-    page = [0]
+    page = [1]   # cover is page 1; next slide starts at 2
 
     def _next_page():
         page[0] += 1
@@ -808,32 +808,61 @@ def build_portfolio_pptx(preferences, final_weights, stock_metrics,
     # ── Slide 1: Cover ────────────────────────────────────────────────────────
     sl = _blank_slide(prs)
     _rect(sl, 0, 0, 13.33, 7.5, fill_rgb=C_NAVY)
-    _rect(sl, 0, 5.8, 13.33, 1.7, fill_rgb=RGBColor(0x0F, 0x17, 0x2A))
-    _rect(sl, 0.35, 2.1, 0.08, 2.8, fill_rgb=C_ACCENT)
+    _rect(sl, 0, 5.5, 13.33, 2.0, fill_rgb=RGBColor(0x0B, 0x14, 0x24))   # KPI band
+    _rect(sl, 0, 5.5, 13.33, 0.03, fill_rgb=C_ACCENT)
+    _rect(sl, 0.6, 1.3, 0.09, 2.5, fill_rgb=C_ACCENT)
 
-    _text_box(sl, "QUANTWIZARD", 0.6, 0.95, 12, 0.5,
-              font_size=13, bold=True, color=C_ACCENT)
-    _text_box(sl, "Portfolio Analysis", 0.6, 1.5, 12, 0.85,
-              font_size=48, bold=True, color=C_WHITE)
-    _text_box(sl, "Professional Report", 0.6, 2.4, 12, 0.45,
+    _text_box(sl, "QUANTWIZARD", 0.9, 0.85, 12, 0.5,
+              font_size=14, bold=True, color=C_ACCENT)
+    _text_box(sl, "Portfolio Analysis", 0.86, 1.3, 12, 1.0,
+              font_size=52, bold=True, color=C_WHITE)
+    _text_box(sl, "Optimized Portfolio Report", 0.9, 2.45, 12, 0.45,
               font_size=16, italic=True, color=C_ACCENT)
 
-    holdings_str = "  ·  ".join(tickers[:10])
-    _text_box(sl, holdings_str, 0.6, 3.0, 12, 0.35,
-              font_size=10, color=RGBColor(0xB0, 0xC4, 0xDE))
+    holdings_str = "   ·   ".join(tickers[:12])
+    _text_box(sl, holdings_str, 0.9, 3.05, 12, 0.5,
+              font_size=11, color=RGBColor(0xB0, 0xC4, 0xDE))
 
     meta_parts = [
         f"Risk Profile: {risk_label}",
         f"Horizon: {horizon_yrs}yr",
         f"Amount: ${inv_amount:,.0f}",
+        f"{len(tickers)} Holdings",
     ]
-    _text_box(sl, "  ·  ".join(meta_parts), 0.6, 3.45, 12, 0.3,
-              font_size=10, color=RGBColor(0x94, 0xA3, 0xB8))
+    _text_box(sl, "   ·   ".join(meta_parts), 0.9, 3.75, 12, 0.3,
+              font_size=11, color=RGBColor(0x94, 0xA3, 0xB8))
 
-    _text_box(sl, f"Generated {datetime.now().strftime('%B %d, %Y')}  ·  Data: Polygon.io",
-              0.6, 6.1, 10, 0.3, font_size=9, color=C_GREY_TEXT)
+    _text_box(sl, f"Generated {datetime.now().strftime('%B %d, %Y')}   ·   "
+                  f"Multi-source data: Polygon · Yahoo Finance · Finnhub · SEC EDGAR",
+              0.9, 4.3, 12, 0.3, font_size=9.5, color=C_GREY_TEXT)
     _text_box(sl, "For informational purposes only. Not financial advice.",
-              0.6, 6.45, 12, 0.3, font_size=8, italic=True, color=C_GREY_TEXT)
+              0.9, 4.63, 12, 0.3, font_size=8.5, italic=True, color=C_GREY_TEXT)
+
+    # KPI stat band from the backtest metrics (falls back to portfolio facts)
+    def _bvf(k, d=0.0):
+        try:    return float(bm.get(k, d))
+        except Exception: return d
+    if bm:
+        _tr, _dd = _bvf("Total Return"), _bvf("Max Drawdown")
+        _pk = [
+            ("TOTAL RETURN", f"{_tr:+.1f}%", C_GREEN if _tr >= 0 else C_RED),
+            ("CAGR",         f"{_bvf('Ann. Return'):+.1f}%", C_WHITE),
+            ("SHARPE RATIO", f"{_bvf('Sharpe Ratio'):.2f}", C_WHITE),
+            ("MAX DRAWDOWN", f"{_dd:.1f}%", C_RED),
+        ]
+    else:
+        _pk = [
+            ("HOLDINGS",        str(len(tickers)),  C_WHITE),
+            ("RISK PROFILE",    risk_label,          C_WHITE),
+            ("HORIZON",         f"{horizon_yrs}yr",  C_WHITE),
+            ("DIVERSIFICATION", f"{diversification_score}/10" if diversification_score else "N/A", C_WHITE),
+        ]
+    for _i, (_l, _v, _c) in enumerate(_pk):
+        _x = 0.9 + _i * 3.05
+        _text_box(sl, _v, _x, 5.85, 2.9, 0.75, font_size=30, bold=True, color=_c)
+        _text_box(sl, _l, _x + 0.03, 6.65, 2.9, 0.3, font_size=9.5, bold=True, color=C_ACCENT)
+
+    _text_box(sl, "1", 12.9, 7.15, 0.4, 0.25, font_size=8, color=C_GREY_TEXT, align=PP_ALIGN.RIGHT)
 
     # ── Slide 2: Portfolio Allocation ─────────────────────────────────────────
     sl = _blank_slide(prs)
