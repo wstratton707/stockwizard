@@ -248,6 +248,100 @@ def part_e_edge_cases():
         check(True, "invalid ticker raises cleanly (handled)")
 
 
+# ── F. Single-stock report consistency (Excel + PowerPoint) ─────────────────────
+def part_f_stock_report_consistency():
+    print("\nF. Single-stock report consistency (Excel + PPTX)")
+    print("=" * 60)
+    import io
+    from data import (fetch_stock_data, fetch_company_details, fetch_news,
+                      fetch_sec_financials, fetch_financials)
+    from analysis import (run_monte_carlo, generate_summary_paragraph,
+                          detect_support_resistance, compute_fundamentals)
+    from constants import get_risk_free_rate
+    from excel_builder import build_excel
+    try:
+        from pptx import Presentation
+        from openpyxl import load_workbook
+    except ImportError:
+        check(True, "skipped — python-pptx/openpyxl not installed")
+        return
+
+    TK = "AAPL"
+    try:
+        df = fetch_stock_data(TK, benchmark_tickers=("SPY",), api_key=KEY, log=_quiet,
+                              start_override=START, end_override=END, bar_size="day")
+        cd  = fetch_company_details(TK, KEY, log=_quiet)
+        _mc = run_monte_carlo(df, n_simulations=300, forecast_days=252, log=_quiet)
+        mc_df, mc_sum = (_mc[0], _mc[1]) if isinstance(_mc, tuple) else (_mc, {})
+        res, sup = detect_support_resistance(df)
+        try:
+            _fr  = fetch_sec_financials(TK, log=_quiet) or fetch_financials(TK, KEY, log=_quiet)
+            fund = compute_fundamentals(_fr, market_cap=cd.get("Market Cap"),
+                                        price=float(df["Close"].iloc[-1]))
+        except Exception:
+            fund = {"ok": False}
+    except Exception as e:
+        check(False, f"{TK}: build pipeline", str(e)[:80])
+        return
+
+    # Independently-computed source truth (same formulas the reports use).
+    price   = float(df["Close"].iloc[-1])
+    ret     = df["Daily_Return"].dropna()
+    ann_ret = ret.mean() * 252
+    ann_std = ret.std() * np.sqrt(252)
+    sharpe  = (ann_ret - get_risk_free_rate()) / ann_std if ann_std else 0.0
+
+    # ── Excel: read Dashboard cells and compare to source truth ──────────────────
+    try:
+        xls = build_excel(TK, df, "2Y", company_details=cd, mc_sim_df=mc_df, mc_summary=mc_sum,
+                          news_list=fetch_news(TK, KEY, log=_quiet)[:5], summary_text="",
+                          resistance_levels=res, support_levels=sup, fundamentals=fund)
+        wb  = load_workbook(io.BytesIO(xls.getvalue()))
+        ws  = wb["Dashboard"]
+        kv  = {}                                    # {label: value} from cols A/B
+        for r in range(1, ws.max_row + 1):
+            lbl, val = ws.cell(r, 1).value, ws.cell(r, 2).value
+            if isinstance(lbl, str) and isinstance(val, (int, float)):
+                kv[lbl.strip()] = val
+        cp = kv.get("Current Price ($)")
+        sh = kv.get("Sharpe Ratio")
+        check(cp is not None and abs(cp - price) < 0.05,
+              "Excel dashboard 'Current Price' matches source", f"{cp} vs {price:.2f}")
+        check(sh is not None and abs(sh - round(sharpe, 2)) < 0.1,
+              "Excel dashboard 'Sharpe Ratio' matches source", f"{sh} vs {sharpe:.2f}")
+        # No %-formatted cell should hold a value implying >500% (the ×100 class).
+        bad_pct = []
+        for row in ws.iter_rows():
+            for c in row:
+                if isinstance(c.number_format, str) and "%" in c.number_format \
+                        and isinstance(c.value, (int, float)) and abs(c.value) >= 5:
+                    bad_pct.append((c.coordinate, c.value))
+        check(not bad_pct, "Excel: no %-cell implies >500%", str(bad_pct[:3]))
+    except Exception as e:
+        check(False, "Excel stock report build/read", str(e)[:80])
+
+    # ── PPTX: extract text, check price present and no absurd % ──────────────────
+    try:
+        from pptx_builder import build_stock_pptx
+        try:
+            summ = generate_summary_paragraph(TK, df, cd, mc_sum, sharpe, sharpe)
+        except Exception:
+            summ = ""
+        pbuf = build_stock_pptx(TK, df, "2Y", company_details=cd, mc_sim_df=mc_df,
+                                mc_summary=mc_sum, summary_text=summ, fundamentals=fund)
+        prs  = Presentation(io.BytesIO(pbuf.getvalue()))
+        blob = "\n".join(sh.text_frame.text for sl in prs.slides
+                         for sh in sl.shapes if sh.has_text_frame)
+        dollars = [float(x.replace(",", "")) for x in re.findall(r"\$([\d,]+\.\d{2})", blob)]
+        check(any(abs(d - price) < 0.5 for d in dollars),
+              "PPTX shows the current price", f"price {price:.2f}; ${'/'.join(f'{d:.0f}' for d in dollars[:4])}…")
+        pcts  = [float(m.replace(",", "")) for m in re.findall(r"([+-]?\d[\d,]*\.?\d*)%", blob)]
+        worst = max((abs(p) for p in pcts), default=0.0)
+        check(worst <= 300.0, "PPTX: no absurd percentage (≤300%)", f"max |%| = {worst:.0f}%")
+    except Exception as e:
+        check(False, "PPTX stock report build/read", str(e)[:80])
+
+
 def main():
     print("QuantWizard Data-Correctness Validation")
     print(f"Window: {START} → {END}")
@@ -256,6 +350,7 @@ def main():
     part_c_report_consistency()
     part_d_fundamentals()
     part_e_edge_cases()
+    part_f_stock_report_consistency()
 
     print("\n" + "=" * 60)
     print(f"Results: {len(_PASS)} passed, {len(_FAIL)} failed")
