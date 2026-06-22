@@ -5,6 +5,7 @@ Generates a polished stock analysis or portfolio deck using python-pptx + matplo
 
 import io
 import math
+import re
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -291,20 +292,27 @@ def _monte_carlo_chart(mc_sim_df, mc_summary, ticker, w=11, h=4.2):
     pct_labels = ["P5 (Bear)", "P25 (Low)", "P50 (Median)", "P75 (Bull)", "P95 (Best)"]
     pct_colors = [MPL_COLORS["red"], MPL_COLORS["orange"], MPL_COLORS["navy"],
                   MPL_COLORS["green"], "#27AE60"]
-    n = min(252, len(mc_sim_df))
-    days = list(range(n))
-    arr  = mc_sim_df.values[:n]
-    pcts = np.percentile(arr, [5, 25, 50, 75, 95], axis=1)
+    # Plot the FULL forecast horizon (was capped at 252, which truncated the
+    # portfolio's multi-year forecast to just year one). For long horizons show
+    # the x-axis in years; for ≤1yr (e.g. the single-stock deck) keep days.
+    n     = len(mc_sim_df)
+    arr   = mc_sim_df.values[:n]
+    pcts  = np.percentile(arr, [5, 25, 50, 75, 95], axis=1)
+    years = n / 252.0
+    if years > 1.5:
+        x_vals, xlabel, horizon = [d / 252.0 for d in range(n)], "Years Forward", f"{round(years)}-Year"
+    else:
+        x_vals, xlabel, horizon = list(range(n)), "Trading Days Forward", f"{n} Trading Days"
     fig, ax = plt.subplots(figsize=(w, h))
-    ax.fill_between(days, pcts[0], pcts[4], alpha=0.10, color=MPL_COLORS["blue"], label="P5–P95 range")
-    ax.fill_between(days, pcts[1], pcts[3], alpha=0.18, color=MPL_COLORS["blue"], label="P25–P75 range")
+    ax.fill_between(x_vals, pcts[0], pcts[4], alpha=0.10, color=MPL_COLORS["blue"], label="P5–P95 range")
+    ax.fill_between(x_vals, pcts[1], pcts[3], alpha=0.18, color=MPL_COLORS["blue"], label="P25–P75 range")
     for j, (lbl, col) in enumerate(zip(pct_labels, pct_colors)):
         lw = 2.2 if "Median" in lbl else 1.0
         ls = "-"  if "Median" in lbl else "--"
-        ax.plot(days, pcts[j], color=col, linewidth=lw, linestyle=ls, label=lbl)
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:,.2f}"))
-    _chart_style(ax, f"{ticker} — Monte Carlo Forecast ({n} Trading Days)",
-                 xlabel="Trading Days Forward", ylabel="Price ($)")
+        ax.plot(x_vals, pcts[j], color=col, linewidth=lw, linestyle=ls, label=lbl)
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
+    _chart_style(ax, f"{ticker} — Monte Carlo Forecast ({horizon})",
+                 xlabel=xlabel, ylabel="Value ($)")
     fig.tight_layout()
     return _fig_to_buf(fig)
 
@@ -355,26 +363,29 @@ def _alloc_pie_chart(weights, ticker_info, w=6, h=4.5):
 
 
 def _portfolio_performance_chart(backtest_df, w=11, h=4.0):
+    """Account value over the backtest: Portfolio vs a same-schedule S&P 500
+    benchmark, with the cumulative contributions line for context. backtest_df is
+    indexed by date with columns Portfolio / Contrib / NAV / SP500."""
     if backtest_df is None or backtest_df.empty:
         return None
-    dates = pd.to_datetime(backtest_df.index if backtest_df.index.name else backtest_df.iloc[:, 0])
-    cols  = [c for c in backtest_df.columns if "cumul" in c.lower() or "value" in c.lower() or "index" in c.lower()]
-    if not cols:
-        cols = [backtest_df.columns[1]] if len(backtest_df.columns) > 1 else []
-    if not cols:
-        return None
+    dates = pd.to_datetime(backtest_df.index)
+    series = [
+        ("Portfolio", "Portfolio",          MPL_COLORS["navy"],   2.0, "-"),
+        ("SP500",     "S&P 500 (same DCA)",  MPL_COLORS["grey"],   1.5, "--"),
+        ("Contrib",   "Total Contributed",   MPL_COLORS["orange"], 1.3, ":"),
+    ]
     fig, ax = plt.subplots(figsize=(w, h))
-    bench_colors = [MPL_COLORS["red"], MPL_COLORS["green"], MPL_COLORS["orange"]]
-    for i, col in enumerate(cols):
-        lw = 2.2 if i == 0 else 1.3
-        ls = "-"  if i == 0 else "--"
-        label = col.replace("_Cumulative", "").replace("_cumulative", "")
-        clr = MPL_COLORS["navy"] if i == 0 else bench_colors[i % len(bench_colors)]
-        ax.plot(dates, backtest_df[col], color=clr, linewidth=lw, linestyle=ls, label=label)
-    ax.axhline(100, color="#CBD5E1", linewidth=0.7, linestyle=":")
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.0f}"))
-    _chart_style(ax, "Portfolio vs Benchmark — Cumulative Return",
-                 ylabel="Index (100 = start)")
+    plotted = False
+    for col, label, clr, lw, ls in series:
+        if col in backtest_df.columns and not backtest_df[col].isna().all():
+            ax.plot(dates, backtest_df[col], color=clr, linewidth=lw, linestyle=ls, label=label)
+            plotted = True
+    if not plotted:
+        plt.close(fig)
+        return None
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
+    _chart_style(ax, "Portfolio vs Benchmark — Account Value",
+                 ylabel="Account Value ($)")
     fig.tight_layout()
     return _fig_to_buf(fig)
 
@@ -383,7 +394,8 @@ def _holdings_bar_chart(stock_metrics, w=9, h=4.0):
     if not stock_metrics:
         return None
     tickers = list(stock_metrics.keys())
-    returns = [stock_metrics[t].get("ann_return", 0) * 100 for t in tickers]
+    # ann_return is already stored as a percentage (compute_stock_metrics), so no ×100.
+    returns = [stock_metrics[t].get("ann_return", 0) for t in tickers]
     colors  = [MPL_COLORS["green"] if r >= 0 else MPL_COLORS["red"] for r in returns]
     fig, ax = plt.subplots(figsize=(w, h))
     bars = ax.bar(tickers, returns, color=colors, alpha=0.85, edgecolor="white", linewidth=1.2)
@@ -393,7 +405,7 @@ def _holdings_bar_chart(stock_metrics, w=9, h=4.0):
                 color="#1E293B")
     ax.axhline(0, color="#94A3B8", linewidth=0.8)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.0f}%"))
-    _chart_style(ax, "Annualized Return by Holding", ylabel="Ann. Return (%)")
+    _chart_style(ax, "Annualized Return by Holding", xlabel="", ylabel="Ann. Return (%)")
     fig.tight_layout()
     return _fig_to_buf(fig)
 
@@ -781,6 +793,32 @@ def build_stock_pptx(ticker, df, period_label,
 
 # ── Portfolio Deck ────────────────────────────────────────────────────────────
 
+def _risk_label_from_tolerance(tol):
+    """Map the app's 1-10 risk_tolerance to the same labels the UI shows."""
+    try:
+        tol = int(tol)
+    except (TypeError, ValueError):
+        return "Moderate"
+    if tol <= 3:
+        return "Conservative"
+    if tol <= 6:
+        return "Moderate"
+    if tol <= 9:
+        return "Aggressive"
+    return "Ultra Aggressive"
+
+
+def _horizon_to_years(horizon, default=5):
+    """The app stores horizon as a string ('5 years', '20+ years'); pull the number."""
+    if isinstance(horizon, (int, float)):
+        return int(horizon)
+    if isinstance(horizon, str):
+        m = re.search(r"\d+", horizon)
+        if m:
+            return int(m.group())
+    return default
+
+
 def build_portfolio_pptx(preferences, final_weights, stock_metrics,
                           backtest_df=None, backtest_metrics=None,
                           mc_sim_df=None, mc_summary=None, milestones=None,
@@ -803,9 +841,13 @@ def build_portfolio_pptx(preferences, final_weights, stock_metrics,
         page[0] += 1
         return page[0]
 
-    inv_amount  = prefs.get("investment_amount", 10000)
-    risk_label  = prefs.get("risk_label", "Moderate")
-    horizon_yrs = prefs.get("horizon_years", 5)
+    # Read the keys the app actually sets (starting_capital / risk_tolerance /
+    # horizon), falling back to the legacy names then sane defaults. Previously the
+    # deck read investment_amount/risk_label/horizon_years — which the app never
+    # sets — so every report silently showed $10,000 / Moderate / 5yr.
+    inv_amount  = prefs.get("starting_capital", prefs.get("investment_amount", 10000))
+    risk_label  = prefs.get("risk_label") or _risk_label_from_tolerance(prefs.get("risk_tolerance", 5))
+    horizon_yrs = _horizon_to_years(prefs.get("horizon", prefs.get("horizon_years")), 5)
 
     # ── Slide 1: Cover ────────────────────────────────────────────────────────
     sl = _blank_slide(prs)
@@ -894,7 +936,7 @@ def build_portfolio_pptx(preferences, final_weights, stock_metrics,
         metrics_pairs = []
         for tk in tickers[:8]:
             m = stock_metrics.get(tk, {})
-            ann_r = m.get("ann_return", 0) * 100
+            ann_r = m.get("ann_return", 0)   # already a percentage
             sharpe_v = m.get("sharpe", float("nan"))
             sharpe_s = f"{sharpe_v:.2f}" if not (isinstance(sharpe_v, float) and math.isnan(sharpe_v)) else "N/A"
             metrics_pairs.append((tk, f"Ret: {ann_r:+.1f}%  ·  Sharpe: {sharpe_s}",
@@ -912,18 +954,29 @@ def build_portfolio_pptx(preferences, final_weights, stock_metrics,
         v = bm.get(key, default)
         return v if v is not None else default
 
+    def _bvp(key, signed=True):
+        """Format a backtest metric (stored as a bare number) as a percent."""
+        v = bm.get(key)
+        if v is None or v == "N/A":
+            return "N/A"
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return str(v)
+        return f"{f:+.1f}%" if signed else f"{f:.1f}%"
+
     col1 = [
-        ("Total Return",         _bv("Total Return")),
-        ("Ann. Return",          _bv("Ann. Return")),
-        ("vs S&P 500",           _bv("vs S&P 500")),
+        ("Total Return",         _bvp("Total Return")),
+        ("Ann. Return",          _bvp("Ann. Return")),
+        ("vs S&P 500",           _bvp("vs S&P 500")),
         ("Final Portfolio Value", f"${float(str(_bv('Final Value')).replace('$','').replace(',','').replace('%','')):,.0f}"
                                   if _bv("Final Value") != "N/A" else "N/A"),
     ]
     col2 = [
         ("Sharpe Ratio",         _bv("Sharpe Ratio")),
-        ("Max Drawdown",         _bv("Max Drawdown")),
-        ("Best Month",           _bv("Best Month")),
-        ("% Months Positive",    _bv("% Months Positive")),
+        ("Max Drawdown",         _bvp("Max Drawdown")),
+        ("Best Month",           _bvp("Best Month")),
+        ("% Months Positive",    _bvp("% Months Positive", signed=False)),
     ]
     col3 = [
         ("Risk Profile",         risk_label),
@@ -932,16 +985,17 @@ def build_portfolio_pptx(preferences, final_weights, stock_metrics,
         ("Diversification",      f"{diversification_score:.1f}/10" if diversification_score else "N/A"),
     ]
 
-    _text_box(sl, "Return Metrics",    0.3,  1.25, 4.2, 0.28, font_size=10, bold=True, color=C_NAVY)
-    _text_box(sl, "Risk Metrics",      4.75, 1.25, 4.2, 0.28, font_size=10, bold=True, color=C_NAVY)
-    _text_box(sl, "Portfolio Profile", 9.2,  1.25, 4.2, 0.28, font_size=10, bold=True, color=C_NAVY)
-    _kv_block(sl, col1, 0.3,  1.55, 4.3, col_w=2.0, row_h=0.55)
-    _kv_block(sl, col2, 4.75, 1.55, 4.3, col_w=2.0, row_h=0.55)
-    _kv_block(sl, col3, 9.2,  1.55, 4.1, col_w=2.0, row_h=0.55)
+    _text_box(sl, "Return Metrics",    0.3,  1.5, 4.2, 0.28, font_size=11, bold=True, color=C_NAVY)
+    _text_box(sl, "Risk Metrics",      4.75, 1.5, 4.2, 0.28, font_size=11, bold=True, color=C_NAVY)
+    _text_box(sl, "Portfolio Profile", 9.2,  1.5, 4.2, 0.28, font_size=11, bold=True, color=C_NAVY)
+    # Taller rows so the three columns fill the slide instead of clustering at top.
+    _kv_block(sl, col1, 0.3,  1.9, 4.3, col_w=2.0, row_h=0.92)
+    _kv_block(sl, col2, 4.75, 1.9, 4.3, col_w=2.0, row_h=0.92)
+    _kv_block(sl, col3, 9.2,  1.9, 4.1, col_w=2.0, row_h=0.92)
 
     # ── Slide 5: Backtest Performance Chart ───────────────────────────────────
     sl = _blank_slide(prs)
-    _slide_header(sl, "Backtest — Cumulative Return", "Portfolio vs Benchmark")
+    _slide_header(sl, "Backtest — Portfolio Growth", "Account value vs S&P 500 (same contributions)")
     _slide_footer(sl, _next_page(), total_slides)
 
     buf_bt = _portfolio_performance_chart(backtest_df, w=12, h=5.0)
@@ -962,10 +1016,25 @@ def build_portfolio_pptx(preferences, final_weights, stock_metrics,
             _add_image(sl, buf_mc, 0.6, 1.25, 8.5, 5.0)
 
         if milestones:
-            ms_pairs = [(k, v) for k, v in milestones.items()]
-            _text_box(sl, "Value Milestones", 9.35, 1.25, 3.6, 0.3,
+            # Each milestone is a dict (P5/P25/P50/.../prob_gain); show the median
+            # projected value per horizon rather than dumping the raw dict.
+            def _num(x):
+                try:
+                    return float(str(x).replace("$", "").replace(",", ""))
+                except (TypeError, ValueError):
+                    return None
+            ms_pairs = []
+            for k, v in milestones.items():
+                if isinstance(v, dict):
+                    med = _num(v.get("P50"))
+                    pg  = str(v.get("prob_gain", "")).strip()
+                    val = (f"${med:,.0f}" + (f"  ·  {pg} gain" if pg else "")) if med is not None else "—"
+                else:
+                    val = str(v)
+                ms_pairs.append((k.replace("yr", "-Year"), val))
+            _text_box(sl, "Median Projected Value", 9.35, 1.25, 3.6, 0.3,
                       font_size=10, bold=True, color=C_NAVY)
-            _kv_block(sl, ms_pairs, 9.35, 1.6, 3.6, col_w=1.5, row_h=0.52)
+            _kv_block(sl, ms_pairs, 9.35, 1.6, 3.6, col_w=1.3, row_h=0.62)
     else:
         _text_box(sl, "Monte Carlo simulation not available.",
                   0.6, 3.5, 12, 0.5, font_size=13, color=C_GREY_TEXT, align=PP_ALIGN.CENTER)
@@ -1021,7 +1090,7 @@ def build_portfolio_pptx(preferences, final_weights, stock_metrics,
         name   = ti.get(tk, {}).get("name", "")
         if len(name) > 28:
             name = name[:28] + "…"
-        ann_r  = m.get("ann_return", 0) * 100
+        ann_r  = m.get("ann_return", 0)   # already a percentage
         sh_v   = m.get("sharpe", float("nan"))
         sh_s   = f"{sh_v:.2f}" if not (isinstance(sh_v, float) and math.isnan(sh_v)) else "N/A"
         _text_box(sl, name,                0.45, row_t + 0.06, 3.1, 0.3, font_size=9, color=C_DARK_TEXT)
