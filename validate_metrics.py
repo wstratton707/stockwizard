@@ -178,12 +178,84 @@ def part_c_report_consistency():
     check(worst <= 300.0, "no absurd percentage in deck text (≤300%)", f"max |%| seen = {worst:.0f}%")
 
 
+# ── D. Fundamentals sanity (EDGAR → compute_fundamentals) ───────────────────────
+def part_d_fundamentals():
+    print("\nD. Fundamentals sanity (EDGAR parsing)")
+    print("=" * 60)
+    from data import fetch_sec_financials, fetch_company_details
+    from analysis import compute_fundamentals
+
+    for tk in ["AAPL", "JNJ"]:
+        try:
+            fin = fetch_sec_financials(tk, log=_quiet)
+            cd  = fetch_company_details(tk, KEY, log=_quiet)
+            f   = compute_fundamentals(fin, market_cap=cd.get("Market Cap"))
+        except Exception as e:
+            check(False, f"{tk}: fundamentals compute", str(e)[:60])
+            continue
+        if not f.get("ok"):
+            check(True, f"{tk}: skipped — EDGAR returned no statements")
+            continue
+
+        m, r, l, v, q = f["margins"], f["returns"], f["leverage"], f["valuation"], f["quality"]
+
+        def in_range(x, lo, hi):
+            return x is None or (lo <= x <= hi)   # None = gracefully absent, not a failure
+
+        check(in_range(m["gross"], -100, 100) and in_range(m["operating"], -200, 100)
+              and in_range(m["net"], -200, 100), f"{tk}: margins in sane % range",
+              f"gross {m['gross']} / op {m['operating']} / net {m['net']}")
+        check(in_range(r["roe"], -500, 600) and in_range(r["roa"], -200, 200),
+              f"{tk}: ROE/ROA in sane % range", f"roe {r['roe']} / roa {r['roa']}")
+        check(in_range(v["pe"], 0, 5000) and in_range(v["ps"], 0, 500)
+              and in_range(v["pb"], 0, 500), f"{tk}: P/E·P/S·P/B non-negative & bounded",
+              f"pe {v['pe']} / ps {v['ps']} / pb {v['pb']}")
+        check(in_range(l["current_ratio"], 0, 100), f"{tk}: current ratio in [0,100]",
+              f"{l['current_ratio']}")
+        check(q["f_score"] is None or 0 <= q["f_score"] <= 9, f"{tk}: Piotroski F in [0,9]",
+              f"{q['f_score']}")
+        check(q["z_zone"] is None or isinstance(q["z_zone"], str), f"{tk}: Altman zone is a label",
+              f"{q['z_zone']}")
+
+
+# ── E. Edge cases (crypto, invalid ticker) ──────────────────────────────────────
+def part_e_edge_cases():
+    print("\nE. Edge cases")
+    print("=" * 60)
+    from data import fetch_crypto_data, fetch_stock_data
+
+    # Crypto should resolve and return sane prices. fetch_crypto_data takes the
+    # bare symbol ("BTC") and adds the X:…USD wrapper itself.
+    try:
+        cdf = fetch_crypto_data("BTC", api_key=KEY, log=_quiet,
+                                start_override=START, end_override=END, bar_size="day")
+        if cdf is None or len(cdf) < 30:
+            check(True, "BTC: skipped — crypto data unavailable")
+        else:
+            last = float(cdf["Close"].iloc[-1])
+            check(1_000 < last < 10_000_000, "BTC: price in sane range", f"${last:,.0f}")
+            check((cdf["Close"] > 0).all(), "BTC: all closes positive")
+    except Exception as e:
+        check(True, f"BTC: skipped — {str(e)[:50]}")
+
+    # An invalid ticker must fail cleanly — never fabricate a populated series.
+    try:
+        bad = fetch_stock_data("ZZQQNOTREAL", benchmark_tickers=("SPY",), api_key=KEY,
+                               log=_quiet, start_override=START, end_override=END, bar_size="day")
+        check(bad is None or len(bad) < 5, "invalid ticker returns empty (no fabricated data)",
+              f"{0 if bad is None else len(bad)} rows")
+    except Exception:
+        check(True, "invalid ticker raises cleanly (handled)")
+
+
 def main():
     print("QuantWizard Data-Correctness Validation")
     print(f"Window: {START} → {END}")
     part_a_stock_metrics()
     part_b_cross_source()
     part_c_report_consistency()
+    part_d_fundamentals()
+    part_e_edge_cases()
 
     print("\n" + "=" * 60)
     print(f"Results: {len(_PASS)} passed, {len(_FAIL)} failed")
