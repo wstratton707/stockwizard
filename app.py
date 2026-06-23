@@ -148,7 +148,7 @@ st.markdown(f"""
         <span class="badge">Portfolio Builder</span>
         <span class="badge">Stress Test</span>
         <span class="badge">Monte Carlo</span>
-        <span style="color:#6b7a8d;margin-left:0.5rem">· Powered by Polygon.io</span>
+        <span style="color:#6b7a8d;margin-left:0.5rem">· Live data: Finnhub · Yahoo Finance · Polygon</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -320,7 +320,7 @@ with st.sidebar:
                     '(Random Forest / XGBoost) — for smarter, more adaptive price projections. '
                     'GARCH captures volatility clustering, Monte Carlo simulates thousands of '
                     'price paths, and the ML model adds a data-driven drift signal — '
-                    'all powered by market data via Polygon.io.</div>',
+                    'all powered by multi-source market data (Polygon, Yahoo Finance &amp; Finnhub).</div>',
                     unsafe_allow_html=True,
                 )
             n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
@@ -630,9 +630,10 @@ with tab1:
 
         _METHOD = [
             ("dataset", "Data &amp; Freshness",
-             "Prices are <b>end-of-day / ~15-min delayed</b> (Polygon.io), with ~2 years of daily history. "
-             "Fundamentals come straight from <b>SEC EDGAR</b> filings (10-K/10-Q), updated each filing — "
-             "no real-time quotes are implied."),
+             "Live quotes are <b>real-time</b> via <b>Finnhub</b>; daily price history comes from "
+             "<b>Yahoo Finance</b> (same-day close) with <b>Polygon</b> as a fallback. "
+             "Fundamentals come straight from <b>SEC EDGAR</b> filings (10-K/10-Q), updated each filing. "
+             "Intraday charts are delayed on the free data tier."),
             ("balance", "Risk-Adjusted Returns",
              "Sharpe and Sortino use <b>excess return over the live 3-month T-bill</b> (FRED), not raw return. "
              "Volatility is the annualized standard deviation of daily returns (σ·√252)."),
@@ -2897,7 +2898,7 @@ with tab3:
         st.markdown("""
         <div class="disclaimer">
             ⚠ Bond ETF analysis is for informational purposes only and does not constitute
-            financial advice. Data provided by Polygon.io. Past performance is not indicative
+            financial advice. Data provided by Polygon, Yahoo Finance, Finnhub, and SEC EDGAR. Past performance is not indicative
             of future results.
         </div>
         """, unsafe_allow_html=True)

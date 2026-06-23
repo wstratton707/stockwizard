@@ -342,6 +342,34 @@ def part_f_stock_report_consistency():
         check(False, "PPTX stock report build/read", str(e)[:80])
 
 
+# ── G. Live quote freshness (verifies the "real-time via Finnhub" UI claim) ──────
+def part_g_quote_freshness():
+    print("\nG. Live quote freshness")
+    print("=" * 60)
+    from market_data import get_quote, get_bars, finnhub_key
+    tk = "AAPL"
+    if not finnhub_key():
+        check(True, "skipped — FINNHUB_API_KEY not set in this environment")
+        return
+    q = get_quote(tk, polygon_key=KEY)
+    if not q:
+        check(False, f"{tk}: get_quote returned a live quote")
+        return
+    # The UI now claims quotes are real-time via Finnhub — verify that's the path.
+    check(q.get("source") == "finnhub",
+          "live quote served by Finnhub (real-time path)", f"source={q.get('source')}")
+    price = q.get("price", 0) or 0
+    check(price > 0, f"{tk}: quote price positive", f"{price}")
+    # Sanity vs the last daily close: a real overnight/intraday move is small; a
+    # 20%+ gap means a stale/garbage/mis-symbol quote.
+    bars = get_bars(tk, START, END, interval="day", polygon_key=KEY)
+    if bars is not None and len(bars):
+        last_close = float(bars["Close"].iloc[-1])
+        drift = abs(price - last_close) / last_close if last_close else 1.0
+        check(drift < 0.20, "quote within 20% of last daily close",
+              f"quote {price:.2f} vs close {last_close:.2f} ({drift*100:.1f}%)")
+
+
 def main():
     print("QuantWizard Data-Correctness Validation")
     print(f"Window: {START} → {END}")
@@ -351,6 +379,7 @@ def main():
     part_d_fundamentals()
     part_e_edge_cases()
     part_f_stock_report_consistency()
+    part_g_quote_freshness()
 
     print("\n" + "=" * 60)
     print(f"Results: {len(_PASS)} passed, {len(_FAIL)} failed")
