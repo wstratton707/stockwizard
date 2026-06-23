@@ -220,3 +220,106 @@ def delete_portfolio(portfolio_id: str) -> bool:
     except Exception as e:
         logger.warning(f"delete_portfolio: {e}")
         return False
+
+
+# ── Tracked portfolios (forward mark-to-market — see tracker.py) ────────────────
+# One-time table setup (run in the Supabase SQL editor):
+#
+#   create table if not exists tracked_portfolios (
+#     id             uuid primary key default gen_random_uuid(),
+#     user_email     text        not null,
+#     name           text        not null,
+#     inception_date date        not null,
+#     holdings       jsonb       not null default '[]',
+#     created_at     timestamptz not null default now()
+#   );
+#   create index if not exists idx_tracked_user on tracked_portfolios(user_email);
+#
+# `holdings` is an array of lots: {ticker, shares, added_date, removed_date|null}.
+# All functions degrade gracefully (return [] / None / False) if the table or
+# Supabase isn't available, so the app never crashes on a missing backend.
+_TRACKED_TABLE = "tracked_portfolios"
+
+
+def save_tracked_portfolio(user_email: str, name: str, holdings: list,
+                           inception_date: str) -> str | None:
+    """Create a tracked portfolio. Returns its new UUID, or None on failure."""
+    if not _available() or not (user_email or "").strip():
+        return None
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/{_TRACKED_TABLE}",
+            headers={**_headers(), "Prefer": "return=representation"},
+            json={
+                "user_email":     user_email.strip().lower(),
+                "name":           (name or "Untitled").strip(),
+                "holdings":       holdings or [],
+                "inception_date": inception_date,
+            },
+            timeout=_TIMEOUT,
+        )
+        if r.status_code in (200, 201):
+            rows = r.json()
+            if rows:
+                return rows[0].get("id")
+    except Exception as e:
+        logger.warning(f"save_tracked_portfolio: {e}")
+    return None
+
+
+def load_tracked_portfolios(user_email: str) -> list:
+    """All tracked portfolios for a user, newest first. [] if none/unavailable."""
+    if not _available() or not (user_email or "").strip():
+        return []
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/{_TRACKED_TABLE}",
+            headers=_headers(),
+            params={
+                "user_email": f"eq.{user_email.strip().lower()}",
+                "select":     "*",
+                "order":      "created_at.desc",
+                "limit":      "50",
+            },
+            timeout=_TIMEOUT,
+        )
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        logger.warning(f"load_tracked_portfolios: {e}")
+    return []
+
+
+def update_tracked_portfolio(portfolio_id: str, holdings: list) -> bool:
+    """Replace a tracked portfolio's holdings (used when adding/removing lots)."""
+    if not _available() or not portfolio_id:
+        return False
+    try:
+        r = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/{_TRACKED_TABLE}",
+            headers={**_headers(), "Prefer": "return=minimal"},
+            params={"id": f"eq.{portfolio_id}"},
+            json={"holdings": holdings or []},
+            timeout=_TIMEOUT,
+        )
+        return r.status_code in (200, 204)
+    except Exception as e:
+        logger.warning(f"update_tracked_portfolio: {e}")
+        return False
+
+
+def delete_tracked_portfolio(portfolio_id: str) -> bool:
+    """Delete a tracked portfolio by UUID."""
+    if not _available() or not portfolio_id:
+        return False
+    try:
+        r = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/{_TRACKED_TABLE}",
+            headers=_headers(),
+            params={"id": f"eq.{portfolio_id}"},
+            timeout=_TIMEOUT,
+        )
+        return r.status_code in (200, 204)
+    except Exception as e:
+        logger.warning(f"delete_tracked_portfolio: {e}")
+        return False

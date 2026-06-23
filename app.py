@@ -53,6 +53,7 @@ from live_data import get_live_price, get_intraday_data, get_top_movers, get_tap
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
 from stress_test import render_stress_test
+from your_portfolios import render_your_portfolios
 from constants import DEV_MODE_FREE, get_risk_free_rate
 from disclaimers import render_inline, render_section, render_footer
 import disclaimers as _disc
@@ -383,11 +384,12 @@ if not DEV_MODE_FREE and SHOW_PRICING and st.session_state["show_payment"] and n
     st.markdown("---")
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📈  Stock Analysis",
     "💼  Portfolio Builder",
     "🏦  Bond Analysis",
     "🔥  Stress Test",
+    "📁  Your Portfolios",
 ])
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2911,3 +2913,10 @@ with tab3:
 # =============================================================================
 with tab4:
     render_stress_test(POLYGON_API_KEY, is_pro=st.session_state.get("is_pro", False))
+
+
+# =============================================================================
+# TAB 5 — YOUR PORTFOLIOS (forward-tracked, mark-to-market)
+# =============================================================================
+with tab5:
+    render_your_portfolios(POLYGON_API_KEY, is_pro=st.session_state.get("is_pro", False))
