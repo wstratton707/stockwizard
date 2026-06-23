@@ -370,6 +370,47 @@ def part_g_quote_freshness():
               f"quote {price:.2f} vs close {last_close:.2f} ({drift*100:.1f}%)")
 
 
+# ── H. Forward portfolio tracker (mark-to-market) ───────────────────────────────
+def part_h_tracker_math():
+    print("\nH. Forward portfolio tracker (mark-to-market)")
+    print("=" * 60)
+    from tracker import dollars_to_lots, track_portfolio
+    from market_data import get_bars
+
+    # Reference: AAPL's own price change over the window (a single buy-and-hold lot's
+    # time-weighted total return must equal exactly this).
+    a = get_bars("AAPL", START, END, interval="day", polygon_key=KEY)
+    if a is None or len(a) < 30:
+        check(False, "AAPL bars for tracker check", "no data")
+        return
+    a = a.sort_values("Date")
+    aapl_ret = (float(a["Close"].iloc[-1]) / float(a["Close"].iloc[0]) - 1) * 100
+
+    lots1, skip1 = dollars_to_lots({"AAPL": 10000}, START, KEY)
+    check(len(lots1) == 1 and not skip1, "single-ticker lots built", f"skipped={skip1}")
+    r1 = track_portfolio(lots1, api_key=KEY)
+    if not check("error" not in r1, "single-ticker tracks", r1.get("error", "")):
+        return
+    tr = float(r1["metrics"]["Total Return"])
+    check(abs(tr - aapl_ret) < 1.5, "tracker total return == AAPL price change",
+          f"{tr:+.1f}% vs {aapl_ret:+.1f}%")
+    check(abs(float(r1["curve"]["NAV"].iloc[0]) - 1.0) < 1e-6, "NAV index starts at 1.0")
+
+    # Two-ticker: Final Value must equal the sum of the per-holding values.
+    lots2, skip2 = dollars_to_lots({"AAPL": 6000, "MSFT": 4000}, START, KEY)
+    check(len(lots2) == 2 and not skip2, "two-ticker lots built", f"skipped={skip2}")
+    r2 = track_portfolio(lots2, api_key=KEY)
+    if "error" not in r2:
+        recomputed = sum(h["value"] for h in r2["holdings"])
+        fv = float(r2["metrics"]["Final Value"])
+        check(abs(fv - recomputed) / max(recomputed, 1) < 0.005,
+              "Final Value == Σ holding values", f"{fv:,.0f} vs {recomputed:,.0f}")
+        check(abs(float(r2["metrics"]["Total Return"])) < 1000, "total return not absurd",
+              f"{r2['metrics']['Total Return']}%")
+        check("SP500" in r2["curve"].columns and r2["metrics"].get("vs S&P 500") is not None,
+              "benchmark (vs S&P 500) computed", f"alpha={r2['metrics'].get('vs S&P 500')}")
+
+
 def main():
     print("QuantWizard Data-Correctness Validation")
     print(f"Window: {START} → {END}")
@@ -380,6 +421,7 @@ def main():
     part_e_edge_cases()
     part_f_stock_report_consistency()
     part_g_quote_freshness()
+    part_h_tracker_math()
 
     print("\n" + "=" * 60)
     print(f"Results: {len(_PASS)} passed, {len(_FAIL)} failed")
