@@ -14,7 +14,8 @@ SHORT = (
 # ── Backtest-specific disclosure ──────────────────────────────────────────────
 BACKTEST = (
     "Backtested performance is hypothetical. Results are simulated using historical "
-    "price data adjusted for splits and dividends (via Polygon.io) and do not reflect "
+    "price data adjusted for splits and dividends (via Yahoo Finance, with Polygon as "
+    "a fallback) and do not reflect "
     "actual trading. Backtests are subject to survivorship bias — the stock universe "
     "contains only currently-listed companies; delisted or bankrupt securities are "
     "excluded, which may overstate historical returns. Transaction costs are modelled "
@@ -57,8 +58,9 @@ OPTIMISATION = (
 
 # ── Dividend / price data note ────────────────────────────────────────────────
 DIVIDENDS = (
-    "Price data is sourced from Polygon.io using split- and dividend-adjusted closing "
-    "prices. Dividend reinvestment is implicitly reflected in the adjusted price series "
+    "Price data is sourced from Yahoo Finance (with Polygon as a fallback) using split- "
+    "and dividend-adjusted closing prices. Dividend reinvestment is implicitly reflected "
+    "in the adjusted price series "
     "but does not model the timing or tax treatment of actual dividend payments."
 )
 
@@ -111,10 +113,9 @@ def render_footer() -> str:
         </strong>
         {FULL_FOOTER}
         <div style="margin-top:0.75rem;color:#94a3b8;font-size:0.7rem">
-            Price data provided by
-            <a href="https://polygon.io" target="_blank"
-               style="color:#1d4ed8;text-decoration:none">Polygon.io</a>.
-            Risk-free rate sourced from the US Federal Reserve via FRED.
+            Market data provided by Polygon, Yahoo Finance, and Finnhub; company
+            fundamentals from SEC EDGAR. Risk-free rate sourced from the US Federal
+            Reserve via FRED.
             {DIVIDENDS}
         </div>
     </div>"""

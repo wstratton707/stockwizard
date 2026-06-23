@@ -93,7 +93,8 @@ def _build_cover(wb, preferences, final_weights, backtest_metrics, mc_summary, s
     ws.row_dimensions[2].height = 28
 
     ws.merge_cells("B4:C4")
-    ws["B4"].value = f"Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}  |  Data: Polygon.io"
+    ws["B4"].value = (f"Generated: {datetime.now().strftime('%B %d, %Y %H:%M')}"
+                      f"  |  Multi-source data: Polygon · Yahoo Finance · Finnhub · SEC EDGAR")
     ws["B4"].font  = Font(size=9, italic=True, color="888888", name="Arial")
 
     ws["B6"] = "TABLE OF CONTENTS"
