@@ -22,7 +22,8 @@ from cached_fetchers import (
     cached_validate_ticker as _cached_validate_ticker,
     cached_get_ticker_info as _cached_get_ticker_info,
 )
-from database import save_portfolio, load_portfolios, delete_portfolio
+from database import save_portfolio, load_portfolios, delete_portfolio, save_tracked_portfolio
+from tracker import dollars_to_lots
 from portfolio_analysis import (
     compute_stock_metrics, compute_correlation_matrix,
     optimise_portfolio, generate_efficient_frontier,
@@ -1592,6 +1593,31 @@ reflects that.
                     st.success("Portfolio saved!")
                 else:
                     st.error("Save failed — check your connection.")
+            else:
+                st.warning("Enter both an email and a name.")
+
+        st.markdown("<div style='color:#94a3b8;font-size:0.8rem;margin:0.4rem 0'>— or —</div>",
+                    unsafe_allow_html=True)
+        if st.button("📁  Track this forward", key="track_port_btn",
+                     help="Save to 'Your Portfolios' and track its real performance from today."):
+            if _save_email.strip() and _save_name.strip():
+                _tw  = st.session_state.get(_K_WEIGHTS, {})
+                _cap = float(st.session_state.get(_K_PREFS, {}).get("starting_capital", 10000) or 10000)
+                if not _tw:
+                    st.warning("Build a portfolio first.")
+                else:
+                    _alloc = {tk: w * _cap for tk, w in _tw.items() if w and w > 0}
+                    with st.spinner("Pricing holdings…"):
+                        _lots, _skipped = dollars_to_lots(_alloc, datetime.today().strftime("%Y-%m-%d"))
+                    if not _lots:
+                        st.error("Couldn't price the holdings.")
+                    else:
+                        _pid = save_tracked_portfolio(_save_email, _save_name, _lots,
+                                                      datetime.today().strftime("%Y-%m-%d"))
+                        if _pid:
+                            st.success("Now tracking — open the **Your Portfolios** tab.")
+                        else:
+                            st.error("Couldn't save (is the tracked_portfolios table set up in Supabase?).")
             else:
                 st.warning("Enter both an email and a name.")
 

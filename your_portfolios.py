@@ -157,6 +157,48 @@ def _render_create(email, api_key):
                                  "in Supabase? (See database.py for the DDL.)")
 
 
+def _render_edit(pid, holdings, api_key):
+    """Add a new lot (today) or sell an existing position (removed_date = today)."""
+    with st.expander("✏️  Edit holdings"):
+        active = [l for l in holdings if not l.get("removed_date")]
+        if active:
+            st.caption("Current positions")
+            for li, lot in enumerate(active):
+                c1, c2 = st.columns([4, 1])
+                c1.markdown(f"**{lot['ticker']}** · {float(lot['shares']):.3f} sh "
+                            f"· since {lot['added_date']}")
+                if c2.button("Sell", key=f"sell_{pid}_{li}"):
+                    today = date.today().isoformat()
+                    for l in holdings:
+                        if l["ticker"] == lot["ticker"] and not l.get("removed_date"):
+                            l["removed_date"] = today
+                    update_tracked_portfolio(pid, holdings)
+                    st.cache_data.clear()
+                    st.rerun()
+        with st.form(f"add_{pid}"):
+            a1, a2, a3 = st.columns([2, 2, 1])
+            tk  = a1.text_input("Add ticker", key=f"addtk_{pid}", placeholder="NVDA")
+            amt = a2.number_input("$ amount", min_value=0.0, step=500.0, value=0.0,
+                                  key=f"addamt_{pid}")
+            a3.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
+            add = a3.form_submit_button("Add")
+        if add:
+            tk = (tk or "").strip().upper()
+            if not tk or amt <= 0:
+                st.error("Enter a ticker and a positive amount.")
+            else:
+                shares, fill_date, _ = amount_to_shares(tk, amt, date.today().isoformat(), api_key)
+                if not shares:
+                    st.error(f"Couldn't price {tk}.")
+                else:
+                    added = fill_date.strftime("%Y-%m-%d") if fill_date is not None else date.today().isoformat()
+                    holdings.append({"ticker": tk, "shares": float(shares),
+                                     "added_date": added, "removed_date": None})
+                    update_tracked_portfolio(pid, holdings)
+                    st.cache_data.clear()
+                    st.rerun()
+
+
 # ── Per-portfolio card ──────────────────────────────────────────────────────────
 def _render_card(p, api_key):
     name     = p.get("name", "Untitled")
@@ -213,6 +255,8 @@ def _render_card(p, api_key):
 
     for w in res.get("warnings", []):
         st.caption(f"⚠ {w}")
+
+    _render_edit(pid, holdings, api_key)
 
     if st.button("🗑 Delete portfolio", key=f"del_{pid}"):
         delete_tracked_portfolio(pid)
