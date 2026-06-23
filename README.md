@@ -13,7 +13,27 @@ Professional stock & portfolio analysis tool powered by a multi-source data laye
 | `data.py` | Stock data fetching & enrichment (routes through `market_data.py`) |
 | `analysis.py` | Monte Carlo, support/resistance, correlation, summary |
 | `excel_builder.py` | All Excel sheet building logic |
+| `tracker.py` | Forward portfolio tracking — marks dated lots to market (no backtest) |
+| `your_portfolios.py` | "Your Portfolios" tab — save & forward-track portfolios |
 | `requirements.txt` | Python dependencies |
+
+### Your Portfolios (beta)
+
+The **Your Portfolios** tab forward-tracks saved portfolios from the day you add
+them. It needs a one-time Supabase table (run this in the Supabase SQL editor —
+DDL also lives in `database.py`):
+
+```sql
+create table if not exists tracked_portfolios (
+  id uuid primary key default gen_random_uuid(),
+  user_email text not null, name text not null,
+  inception_date date not null, holdings jsonb not null default '[]',
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_tracked_user on tracked_portfolios(user_email);
+```
+
+Beta sign-in is email-only (not secure) — harden to real auth before paid launch.
 
 ---
 
