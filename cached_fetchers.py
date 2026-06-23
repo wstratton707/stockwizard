@@ -2,8 +2,8 @@
 cached_fetchers.py — Streamlit-cached wrappers around expensive fetchers.
 
 Why a separate module?
-  • Keeps data.py / analysis.py pure so precompute_strategy.py, precompute.py
-    and CI tools don't pull in Streamlit as a dependency.
+  • Keeps data.py / analysis.py pure so precompute.py and CI tools don't pull in
+    Streamlit as a dependency.
   • Centralises TTL / max_entries decisions so they're easy to tune.
 
 Gotchas handled here:
