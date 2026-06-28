@@ -53,14 +53,19 @@ def amount_to_shares(ticker: str, amount: float, on_date, api_key: str = ""):
     after `on_date` (handles weekends/holidays). Returns (shares, fill_date, price)
     or (None, None, None) if no price is available.
     """
-    start = _as_ts(on_date)
-    end   = start + pd.Timedelta(days=10)
+    target = _as_ts(on_date)
+    # Look back as well as forward so "track from today" works even when today's
+    # close isn't out yet (weekend / holiday / market still open) — we then fall
+    # back to the most recent available close.
+    start = target - pd.Timedelta(days=7)
+    end   = target + pd.Timedelta(days=10)
     df = get_bars(ticker, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"),
                   interval="day", polygon_key=api_key)
     if df is None or df.empty:
         return None, None, None
     df = df.sort_values("Date")
-    row = df.iloc[0]
+    onafter = df[pd.to_datetime(df["Date"]) >= target]
+    row = onafter.iloc[0] if len(onafter) else df.iloc[-1]   # first close ≥ add date, else most recent
     price = float(row["Close"])
     if price <= 0:
         return None, None, None
