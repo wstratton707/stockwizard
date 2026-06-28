@@ -189,14 +189,28 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
                           method="SLSQP", bounds=bounds,
                           constraints=[{"type":"eq","fun":lambda w: np.sum(w)-1}])
 
-    # 3. Risk-adjusted (blend based on risk tolerance)
-    # Low risk → closer to min vol; high risk → closer to max sharpe
-    alpha = (risk_tolerance - 1) / 9.0  # 0 to 1
-    if res_sharpe.success and res_minvol.success:
-        blended_w = alpha * res_sharpe.x + (1 - alpha) * res_minvol.x
-        blended_w = blended_w / blended_w.sum()
+    # 3. Maximum expected return (= maximum beta under CAPM) — the aggressive anchor.
+    res_maxret = minimize(lambda w: -float(_mu @ w), init,
+                          method="SLSQP", bounds=bounds, constraints=constraints)
+
+    # 4. Risk-adjusted blend — slide along the efficient frontier by risk tolerance:
+    #    conservative → min-vol, balanced → max-Sharpe, aggressive → max-return.
+    #    Under CAPM, max-Sharpe is inherently defensive (it maximizes beta/sigma),
+    #    so the aggressive end must push toward higher beta/return, not just Sharpe —
+    #    otherwise every risk level lands on the same defensive portfolio.
+    w_minvol = res_minvol.x if res_minvol.success else init
+    w_sharpe = res_sharpe.x if res_sharpe.success else init
+    w_maxret = res_maxret.x if res_maxret.success else w_sharpe
+    MID = 5.5  # risk tolerance at which the blend is pure max-Sharpe
+    if risk_tolerance <= MID:
+        t = max(0.0, min(1.0, (risk_tolerance - 1) / (MID - 1)))
+        blended_w = (1 - t) * w_minvol + t * w_sharpe
     else:
-        blended_w = init
+        t = max(0.0, min(1.0, (risk_tolerance - MID) / (10 - MID)))
+        blended_w = (1 - t) * w_sharpe + t * w_maxret
+    blended_w = np.clip(blended_w, 0, None)
+    _bw_sum   = blended_w.sum()
+    blended_w = blended_w / _bw_sum if _bw_sum > 0 else init
 
     def w_to_dict(w, cols):
         raw = {col: max(0, w[i]) for i, col in enumerate(cols)}
@@ -207,6 +221,7 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
     result = {
         "max_sharpe":  w_to_dict(res_sharpe.x if res_sharpe.success else init, cols),
         "min_vol":     w_to_dict(res_minvol.x if res_minvol.success else init, cols),
+        "max_return":  w_to_dict(w_maxret, cols),
         "recommended": w_to_dict(blended_w, cols),
         "target_met":  True,
     }

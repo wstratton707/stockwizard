@@ -449,6 +449,13 @@ def part_i_capm():
     check(sm["AMD"].get("beta") is not None and sm["AMD"].get("capm_return") is not None,
           "compute_stock_metrics carries beta + capm_return")
 
+    # Risk tolerance must move beta: aggressive portfolio > conservative.
+    w_lo = optimise_portfolio(oret, risk_tolerance=2, expected_returns=capm)["recommended"]
+    w_hi = optimise_portfolio(oret, risk_tolerance=9, expected_returns=capm)["recommended"]
+    b_lo, b_hi = portfolio_beta(w_lo, betas), portfolio_beta(w_hi, betas)
+    check(b_hi > b_lo + 0.1, "aggressive risk → higher beta than conservative",
+          f"risk2 β={b_lo:.2f}  vs  risk9 β={b_hi:.2f}")
+
 
 def main():
     print("QuantWizard Data-Correctness Validation")
