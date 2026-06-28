@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 
-from constants import DEV_MODE_FREE, get_risk_free_rate
+from constants import DEV_MODE_FREE, get_risk_free_rate, EQUITY_RISK_PREMIUM
 from disclaimers import render_inline, render_section
 import disclaimers as _disc
 
@@ -29,7 +29,8 @@ from portfolio_analysis import (
     optimise_portfolio, generate_efficient_frontier,
     backtest_portfolio, compute_backtest_metrics,
     compute_monthly_heatmap, run_portfolio_monte_carlo,
-    compute_diversification_score, get_rebalancing_recommendations
+    compute_diversification_score, get_rebalancing_recommendations,
+    compute_betas, capm_expected_returns, portfolio_beta,
 )
 from portfolio_excel import build_portfolio_excel
 from pptx_builder import build_portfolio_pptx, PPTX_AVAILABLE
@@ -429,8 +430,23 @@ def _render_step_2(api_key):
             sector_map = {t: sector_map.get(t, "Unknown") for t in best_tickers}
             progress.progress(50, text="Computing stock metrics...")
 
+            # Market (SPY) daily returns for CAPM betas — reuse if SPY is already a
+            # holding, else fetch it once (cached). Drives expected returns:
+            # E(R) = Rf + beta * ERP, so nothing is forecast off its own recent run.
+            if "SPY" in returns_df.columns:
+                market_returns = returns_df["SPY"]
+            else:
+                try:
+                    _, _, _spy_df, _ = fetch_portfolio_prices_cached(
+                        ("SPY",), period_years=_PRICE_HISTORY_YEARS, api_key=api_key,
+                        log=lambda m: None)
+                    market_returns = _spy_df["SPY"] if "SPY" in _spy_df.columns else None
+                except Exception:
+                    market_returns = None
+            capm_mu = capm_expected_returns(compute_betas(returns_df, market_returns))
+
             # Metrics
-            stock_metrics = compute_stock_metrics(returns_df)
+            stock_metrics = compute_stock_metrics(returns_df, market_returns)
             corr_matrix   = compute_correlation_matrix(returns_df)
             progress.progress(65, text="Running optimisation...")
 
@@ -445,7 +461,8 @@ def _render_step_2(api_key):
                                             risk_tolerance=prefs.get("risk_tolerance", 5),
                                             target_return=target_ret,
                                             sector_map=sector_map,
-                                            max_weight=prefs.get("max_per_stock", 0.30))
+                                            max_weight=prefs.get("max_per_stock", 0.30),
+                                            expected_returns=capm_mu)
             progress.progress(80, text="Generating efficient frontier...")
 
             ef_df = generate_efficient_frontier(returns_df, n_portfolios=_EF_PORTFOLIOS)
@@ -483,6 +500,7 @@ def _render_step_2(api_key):
                 "price_dict":    price_dict,
                 "close_df":      close_df,
                 "returns_df":    returns_df,
+                "market_returns": market_returns,
                 "stock_metrics": stock_metrics,
                 "corr_matrix":   corr_matrix,
                 "portfolios":    portfolios,
@@ -578,36 +596,43 @@ def _render_step_2(api_key):
 
     # Portfolio metrics
     returns_df = opt["returns_df"]
-    ann_ret, ann_vol, sharpe = 0, 0, 0
+    ann_ret, ann_vol, sharpe, pbeta = 0, 0, 0, 1.0
     # RFR is in decimal form (e.g. 0.045); convert to % to match ann_ret/ann_vol
     _rfr_pct = get_risk_free_rate() * 100
     tickers_in = [t for t in selected_weights if t in returns_df.columns]
     if tickers_in:
         w_arr   = np.array([selected_weights[t] for t in tickers_in])
         w_arr  /= w_arr.sum()
-        ann_ret = returns_df[tickers_in].mean().values @ w_arr * 252 * 100
         cov     = returns_df[tickers_in].cov().values * 252
         ann_vol = np.sqrt(w_arr @ cov @ w_arr) * 100
-        # True Sharpe: (excess return over RFR) / vol — matches the per-stock
-        # Sharpe shown in the holdings table and the methodology documented
-        # in the expander below.
+        # Expected return is CAPM (Rf + portfolio-beta × ERP) — driven by how much
+        # market risk the portfolio carries, NOT the raw 2-yr mean (which over-
+        # weighted recent winners and produced unreal ~40% figures).
+        _betas  = {t: (stock_metrics.get(t, {}).get("beta") or 1.0) for t in tickers_in}
+        pbeta   = portfolio_beta(selected_weights, _betas)
+        ann_ret = (get_risk_free_rate() + pbeta * EQUITY_RISK_PREMIUM) * 100
         sharpe  = (ann_ret - _rfr_pct) / ann_vol if ann_vol > 0 else 0
 
     _section_header("Portfolio Overview")
-    cols = st.columns(4)
+    cols = st.columns(5)
     for col, label, value, color in [
         (cols[0], "Expected Ann. Return", f"{ann_ret:.1f}%",  GREEN if ann_ret > 0 else RED),
-        (cols[1], "Expected Volatility",  f"{ann_vol:.1f}%",  DARK),
-        (cols[2], "Sharpe Ratio",         f"{sharpe:.2f}",    GREEN if sharpe > 1 else AMBER),
-        (cols[3], "Diversification",      f"{div_score}/10",  GREEN if div_score > 6 else AMBER),
+        (cols[1], "Portfolio Beta",       f"{pbeta:.2f}",      DARK),
+        (cols[2], "Expected Volatility",  f"{ann_vol:.1f}%",  DARK),
+        (cols[3], "Sharpe Ratio",         f"{sharpe:.2f}",    GREEN if sharpe > 1 else AMBER),
+        (cols[4], "Diversification",      f"{div_score}/10",  GREEN if div_score > 6 else AMBER),
     ]:
         with col:
             st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
 
     with st.expander("ℹ️ About these numbers — methodology & assumptions"):
         st.markdown("""
-**Expected Ann. Return** — Arithmetic mean of daily returns × 252, based on 2 years of historical data.
-Past returns do not guarantee future performance.
+**Expected Ann. Return** — CAPM estimate: risk-free rate + (portfolio beta × 5% equity risk premium).
+It reflects how much *market* risk the portfolio carries, not which stocks recently ran up — so it
+isn't inflated by a hot 2-year stretch. Past returns do not guarantee future performance.
+
+**Portfolio Beta** — How much the portfolio moves with the market (S&P 500). 1.0 = moves with the
+market; below 1.0 = less market-sensitive (more defensive); above 1.0 = more sensitive.
 
 **Expected Volatility** — Annualised standard deviation of daily returns over the 2-year window.
 Higher volatility = wider range of possible outcomes.
@@ -689,13 +714,15 @@ concentration penalty for any single position above 25%.
         m    = stock_metrics.get(ticker, {})
         info = ticker_info.get(ticker, {})
         holdings_data.append({
-            "Ticker":        ticker,
-            "Company":       info.get("name", ticker)[:25],
-            "Weight":        f"{weight*100:.1f}%",
-            "Ann. Return":   f"{m.get('ann_return',0):.1f}%",
-            "Volatility":    f"{m.get('ann_vol',0):.1f}%",
-            "Sharpe":        f"{m.get('sharpe',0):.2f}",
-            "Max Drawdown":  f"{m.get('max_drawdown',0):.1f}%",
+            "Ticker":          ticker,
+            "Company":         info.get("name", ticker)[:25],
+            "Weight":          f"{weight*100:.1f}%",
+            "Beta":            f"{m.get('beta'):.2f}" if m.get("beta") is not None else "—",
+            "Expected (CAPM)": f"{m.get('capm_return'):.1f}%" if m.get("capm_return") is not None else "—",
+            "Ann. Ret (hist)": f"{m.get('ann_return',0):.1f}%",
+            "Volatility":      f"{m.get('ann_vol',0):.1f}%",
+            "Sharpe":          f"{m.get('sharpe',0):.2f}",
+            "Max Drawdown":    f"{m.get('max_drawdown',0):.1f}%",
         })
     st.dataframe(pd.DataFrame(holdings_data), use_container_width=True, hide_index=True)
 
@@ -1278,6 +1305,7 @@ def _render_step_4():
                     n_simulations=_MC_SIMULATIONS,
                     target_value=target_val,
                     log=lambda m: None,
+                    market_returns=opt.get("market_returns"),
                 )
                 st.session_state[_K_MC] = {
                     "sim_df":     mc_sim_df,

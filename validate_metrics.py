@@ -411,6 +411,45 @@ def part_h_tracker_math():
               "benchmark (vs S&P 500) computed", f"alpha={r2['metrics'].get('vs S&P 500')}")
 
 
+# ── I. CAPM expected returns (portfolio builder) ────────────────────────────────
+def part_i_capm():
+    print("\nI. CAPM expected returns")
+    print("=" * 60)
+    from portfolio_data import fetch_portfolio_prices
+    from portfolio_analysis import (compute_betas, capm_expected_returns,
+        portfolio_beta, optimise_portfolio, compute_stock_metrics)
+    from constants import get_risk_free_rate, EQUITY_RISK_PREMIUM
+    tk = ["JNJ", "CAT", "AMD", "NVDA", "JPM"]
+    try:
+        _, _, rdf, _ = fetch_portfolio_prices(tk + ["SPY"], period_years=2, api_key=KEY, log=_quiet)
+    except Exception as e:
+        check(False, "fetch portfolio prices", str(e)[:60]); return
+    if "SPY" not in rdf.columns:
+        check(False, "SPY market data present"); return
+    mkt  = rdf["SPY"]
+    oret = rdf[[t for t in tk if t in rdf.columns]]
+    betas = compute_betas(oret, mkt)
+    capm  = capm_expected_returns(betas)
+    rf    = get_risk_free_rate()
+
+    check(abs(compute_betas(rdf[["SPY"]], mkt)["SPY"] - 1.0) < 0.05, "SPY self-beta == 1.0")
+    check(all(abs(capm[t] - (rf + betas[t] * EQUITY_RISK_PREMIUM)) < 1e-9 for t in oret.columns),
+          "CAPM = Rf + beta*ERP for every holding")
+    check(all(-0.10 < capm[t] < 0.30 for t in oret.columns),
+          "no holding's CAPM expected return is absurd (<30%)",
+          f"max={max(capm.values())*100:.1f}%")
+
+    port = optimise_portfolio(oret, expected_returns=capm)
+    w    = port["recommended"]
+    pb   = portfolio_beta(w, betas)
+    capm_port = rf + pb * EQUITY_RISK_PREMIUM
+    check(0 < capm_port < 0.20, "portfolio CAPM expected return is believable (<20%)",
+          f"{capm_port*100:.1f}% at beta {pb:.2f}")
+    sm = compute_stock_metrics(oret, mkt)
+    check(sm["AMD"].get("beta") is not None and sm["AMD"].get("capm_return") is not None,
+          "compute_stock_metrics carries beta + capm_return")
+
+
 def main():
     print("QuantWizard Data-Correctness Validation")
     print(f"Window: {START} → {END}")
@@ -422,6 +461,7 @@ def main():
     part_f_stock_report_consistency()
     part_g_quote_freshness()
     part_h_tracker_math()
+    part_i_capm()
 
     print("\n" + "=" * 60)
     print(f"Results: {len(_PASS)} passed, {len(_FAIL)} failed")

@@ -8,11 +8,15 @@ from constants import get_risk_free_rate
 
 # ── Individual stock metrics ──────────────────────────────────────────────────
 
-def compute_stock_metrics(returns_df):
+def compute_stock_metrics(returns_df, market_returns=None):
     """
     Compute per-stock metrics from a returns DataFrame.
-    Returns a dict: {ticker: {metrics}}
+    Returns a dict: {ticker: {metrics}}. When market_returns is provided, also
+    includes each stock's beta and CAPM expected return (the forward number);
+    ann_return stays as the trailing historical figure.
     """
+    betas = compute_betas(returns_df, market_returns) if market_returns is not None else {}
+    capm  = capm_expected_returns(betas) if betas else {}
     metrics = {}
     for ticker in returns_df.columns:
         r       = returns_df[ticker].dropna()
@@ -30,18 +34,62 @@ def compute_stock_metrics(returns_df):
         max_dd   = drawdown.min()
 
         metrics[ticker] = {
-            "ann_return":   round(ann_ret * 100, 2),
+            "ann_return":   round(ann_ret * 100, 2),   # trailing historical
             "ann_vol":      round(ann_std * 100, 2),
             "sharpe":       round(sharpe, 3),
             "sortino":      round(sortino, 3),
             "max_drawdown": round(max_dd * 100, 2),
             "total_return": round(((1 + r).prod() - 1) * 100, 2),
+            "beta":         round(betas[ticker], 3) if ticker in betas else None,
+            "capm_return":  round(capm[ticker] * 100, 2) if ticker in capm else None,  # forward (CAPM)
         }
     return metrics
 
 
 def compute_correlation_matrix(returns_df):
     return returns_df.corr()
+
+
+# ── CAPM expected returns ───────────────────────────────────────────────────────
+# Expected return comes from each asset's market risk (beta), NOT its own past
+# return — so a stock that merely ran up recently doesn't get a sky-high forecast.
+#   E(R) = Rf + beta * ERP
+
+def compute_betas(returns_df, market_returns):
+    """Beta of each column vs the market: cov(r_i, r_m)/var(r_m), aligned on common
+    dates. Falls back to 1.0 for any series with <30 overlapping days."""
+    if market_returns is None:
+        return {c: 1.0 for c in returns_df.columns}
+    m = market_returns.copy()
+    m.index = pd.to_datetime(m.index)
+    betas = {}
+    for col in returns_df.columns:
+        r = returns_df[col].copy()
+        r.index = pd.to_datetime(r.index)
+        paired = pd.concat([r.rename("r"), m.rename("m")], axis=1).dropna()
+        var_m = paired["m"].var()
+        if len(paired) < 30 or not var_m:
+            betas[col] = 1.0
+        else:
+            betas[col] = float(paired["r"].cov(paired["m"]) / var_m)
+    return betas
+
+
+def capm_expected_returns(betas, rf=None, erp=None):
+    """CAPM expected ANNUAL return per ticker (decimal): Rf + beta * ERP."""
+    from constants import EQUITY_RISK_PREMIUM
+    rf  = get_risk_free_rate() if rf is None else rf
+    erp = EQUITY_RISK_PREMIUM if erp is None else erp
+    return {t: rf + b * erp for t, b in betas.items()}
+
+
+def portfolio_beta(weights, betas):
+    """Weighted-average beta of a portfolio. Beta is linear, so this equals
+    regressing the blended portfolio's returns on the market."""
+    tot = sum(max(0.0, w) for w in weights.values())
+    if tot <= 0:
+        return 1.0
+    return sum(max(0.0, w) * betas.get(t, 1.0) for t, w in weights.items()) / tot
 
 
 # ── Portfolio optimisation (Mean-Variance) ────────────────────────────────────
@@ -65,7 +113,8 @@ def _portfolio_vol(weights, returns_df):
 
 
 def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
-                       sector_map=None, max_sector_weight=0.40, max_weight=0.30):
+                       sector_map=None, max_sector_weight=0.40, max_weight=0.30,
+                       expected_returns=None):
     """
     Run mean-variance optimisation.
     Returns weights dict for max Sharpe, min vol, and target return portfolios.
@@ -87,7 +136,13 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
 
     # Pre-compute constants once — the optimizer calls the objective O(n²) times
     # per run, so recomputing mean/cov inside the objective is massively redundant.
-    _mu  = returns_df.mean().values * 252
+    # Expected returns are CAPM (Rf + beta*ERP) when provided, so the optimizer
+    # tilts on market risk, not on which names merely ran up recently. Falls back
+    # to the raw historical mean only if no CAPM vector is supplied.
+    if expected_returns is not None:
+        _mu = np.array([expected_returns.get(c, get_risk_free_rate()) for c in cols])
+    else:
+        _mu = returns_df.mean().values * 252
     _cov = returns_df.cov().values * 252
     _rfr = get_risk_free_rate()
 
@@ -375,7 +430,8 @@ def compute_monthly_heatmap(backtest_df):
 
 def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
                                monthly_contribution, forecast_years=10,
-                               n_simulations=1000, target_value=None, log=print):
+                               n_simulations=1000, target_value=None, log=print,
+                               market_returns=None):
     """
     Run Monte Carlo on the full portfolio preserving cross-asset correlations.
 
@@ -405,17 +461,20 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
     hist_mu         = float(port_ret_series.mean())
     sigma           = float(port_ret_series.std())
 
-    # Blend per-asset historical returns with long-term market mean.
-    # 70% historical, 30% long-term — moderates extreme recent bull/bear runs.
-    LONGTERM_DAILY_MU = 0.07 / 252
-    mu_vec = 0.70 * mu_vec + 0.30 * LONGTERM_DAILY_MU
-
-    # Hard cap element-wise: no asset's annualised drift exceeds 12%
-    mu_vec = np.minimum(mu_vec, 0.12 / 252)
+    # CAPM per-asset drift: Rf + beta*ERP (annual) -> daily. Replaces the old
+    # blend-and-cap heuristic so the forecast matches the optimizer's expected
+    # returns. Falls back to a soft blend toward a 7% long-run mean only if no
+    # market series is supplied (no hard cap).
+    if market_returns is not None:
+        _betas = compute_betas(returns_matrix, market_returns)
+        _capm  = capm_expected_returns(_betas)                 # annual fractions
+        mu_vec = np.array([_capm.get(t, get_risk_free_rate()) for t in tickers]) / 252
+    else:
+        mu_vec = 0.70 * mu_vec + 0.30 * (0.07 / 252)
 
     ann_mu_pct = float(mu_vec @ w_arr) * 252 * 100
     log(f"   Assumed annual return: {ann_mu_pct:.1f}% "
-        f"(historical: {hist_mu*252*100:.1f}%, blended with 7% long-term avg, capped at 12%)")
+        f"(CAPM: Rf + beta*ERP; historical was {hist_mu*252*100:.1f}%)")
 
     # Correlation matrix and Cholesky factor
     corr_matrix = returns_matrix.corr().values

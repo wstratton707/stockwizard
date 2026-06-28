@@ -11,6 +11,11 @@ DEV_MODE_FREE = True
 # Hardcoded fallback — used if the live fetch below fails.
 RISK_FREE_RATE = 0.045  # 4.5%
 
+# Equity risk premium for CAPM expected returns: E(R) = Rf + beta * ERP.
+# This is the ONE stated assumption in the model — the market's expected return
+# above cash. Historical US ERP ≈ 5–6%; forward-looking estimates ≈ 4–5%.
+EQUITY_RISK_PREMIUM = 0.05  # 5%
+
 # In-memory cache so we only hit FRED once per process lifetime (refreshes daily).
 _rfr_cache: dict = {"rate": None, "ts": 0.0}
 
