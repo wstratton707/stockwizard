@@ -20,7 +20,13 @@ from tracker import track_portfolio, dollars_to_lots, amount_to_shares
 from database import (
     save_tracked_portfolio, load_tracked_portfolios,
     update_tracked_portfolio, delete_tracked_portfolio,
+    tracked_storage_status,
 )
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _storage_status():
+    return tracked_storage_status()
 
 DARK  = "#0f172a"
 BLUE  = "#38bdf8"
@@ -277,6 +283,15 @@ def render_your_portfolios(api_key, is_pro=False):
         st.session_state["user_email"] = ""
         st.query_params.pop("email", None)
         st.rerun()
+
+    _status = _storage_status()
+    if _status == "no_creds":
+        st.warning("⚠ Storage isn't configured on this app instance — Supabase keys "
+                   "(`SUPABASE_URL` / `SUPABASE_KEY`) are missing. On Streamlit Cloud, add "
+                   "them in **Settings → Secrets**. Portfolios won't save until then.")
+    elif _status == "no_table":
+        st.warning("⚠ Connected to Supabase, but the **tracked_portfolios** table isn't in "
+                   "*this* project. Run the DDL from `database.py` in this project's SQL editor.")
 
     _render_create(email, api_key)
 

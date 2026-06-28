@@ -323,3 +323,20 @@ def delete_tracked_portfolio(portfolio_id: str) -> bool:
     except Exception as e:
         logger.warning(f"delete_tracked_portfolio: {e}")
         return False
+
+
+def tracked_storage_status() -> str:
+    """Diagnose why saves might fail, for a clear UI message:
+      'ok'       — Supabase configured and the tracked_portfolios table is reachable
+      'no_creds' — SUPABASE_URL/KEY not set for THIS app instance (check secrets)
+      'no_table' — connected, but tracked_portfolios isn't in this project (run the DDL)
+    """
+    if not _available():
+        return "no_creds"
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/{_TRACKED_TABLE}",
+            headers=_headers(), params={"select": "id", "limit": "1"}, timeout=_TIMEOUT)
+        return "ok" if r.status_code == 200 else "no_table"
+    except Exception:
+        return "no_table"
