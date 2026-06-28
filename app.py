@@ -145,8 +145,8 @@ st.markdown(f"""
     <div class="main-header-sub">
         <span class="badge">Stocks</span>
         <span class="badge">ETFs</span>
+        <span class="badge">Bonds</span>
         <span class="badge">Portfolio Builder</span>
-        <span class="badge">Stress Test</span>
         <span class="badge">Monte Carlo</span>
         <span style="color:#6b7a8d;margin-left:0.5rem">· Live data: Finnhub · Yahoo Finance · Polygon</span>
     </div>
@@ -229,113 +229,6 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
 
-    # ── Mode ──────────────────────────────────────────────────────────────────
-    st.markdown('<div class="sidebar-group">Mode</div>', unsafe_allow_html=True)
-    if st.session_state["is_pro"]:
-        mode = st.radio("", ["Investor Mode", "Day Trader Mode"],
-                        horizontal=True, label_visibility="collapsed")
-    else:
-        mode = "Investor Mode"
-
-    # ── Ticker ────────────────────────────────────────────────────────────────
-    st.markdown('<div class="sidebar-group" style="margin-top:1rem">Ticker</div>',
-                unsafe_allow_html=True)
-    ticker_input = st.text_input(
-        "", placeholder="e.g. AAPL, SPY, BTC, ETH",
-        label_visibility="collapsed"
-    ).strip().upper()
-
-    # ── Date range ────────────────────────────────────────────────────────────
-    if mode == "Investor Mode":
-        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Date Range</div>',
-                    unsafe_allow_html=True)
-        _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y"]
-        _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730}
-        period_key = st.select_slider("", options=_SLIDER_OPTIONS, value="1Y",
-                                      label_visibility="collapsed")
-        _today      = datetime.today().date()
-        _days       = _SLIDER_DAYS[period_key]
-        date_end    = _today.strftime("%Y-%m-%d")
-        date_start  = (_today - timedelta(days=_days)).strftime("%Y-%m-%d")
-        bar_size    = "day"
-        period_label = period_key
-    else:
-        date_start   = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
-        date_end     = datetime.today().strftime("%Y-%m-%d")
-        bar_size     = "day"
-        period_label = "1Y"
-        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Candle Size</div>',
-                    unsafe_allow_html=True)
-        tf_options = {"1 Min":"1min","5 Min":"5min","15 Min":"15min","1 Hour":"1hour"}
-        tf_label   = st.radio("", list(tf_options.keys()), index=1,
-                              horizontal=True, label_visibility="collapsed")
-        st.session_state["candle_tf"] = tf_options[tf_label]
-
-    # ── Benchmarks ────────────────────────────────────────────────────────────
-    st.markdown('<div class="sidebar-group" style="margin-top:1rem">Benchmarks</div>',
-                unsafe_allow_html=True)
-    include_spy = st.checkbox("S&P 500 (SPY)", value=True)
-    include_qqq = st.checkbox("NASDAQ (QQQ)", value=True)
-
-    if mode == "Investor Mode":
-        # ── Peer comparison ───────────────────────────────────────────────────
-        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Peer Comparison</div>',
-                    unsafe_allow_html=True)
-        peers_input = st.text_input("", placeholder="e.g. GOOGL, AMZN",
-                                    label_visibility="collapsed")
-
-        # ── Report modules ────────────────────────────────────────────────────
-        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Report Modules</div>',
-                    unsafe_allow_html=True)
-        do_mc     = st.checkbox("Price Forecast", value=True)
-        do_sector = st.checkbox("Sector Comparison",    value=True)
-        do_corr   = st.checkbox("Correlation Matrix",   value=True)
-        do_sr     = st.checkbox("Support & Resistance", value=True)
-        do_news   = st.checkbox("News Headlines",       value=True)
-        do_peers  = st.checkbox("Peer Comparison",      value=True)
-
-        if do_mc:
-            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Forecast Settings</div>',
-                        unsafe_allow_html=True)
-            forecast_method = st.selectbox(
-                "Method",
-                ["Monte Carlo", "Custom Forecast"],
-                label_visibility="collapsed",
-            )
-            if forecast_method == "Custom Forecast":
-                st.markdown(
-                    '<div style="font-size:0.73rem;line-height:1.6;'
-                    'padding:0.65rem 0.75rem;'
-                    'background:rgba(29,78,216,0.04);'
-                    'border-radius:2px;'
-                    'border:1px solid #e2e8f0;'
-                    'border-left:3px solid #1d4ed8;'
-                    'margin-bottom:0.5rem;'
-                    'font-family:Inter,sans-serif">'
-                    'Our <span style="color:#1d4ed8 !important;font-weight:600">Custom Forecast</span> '
-                    'combines three models — '
-                    '<span style="color:#1d4ed8 !important;font-weight:500">GARCH</span> volatility modeling, '
-                    '<span style="color:#1d4ed8 !important;font-weight:500">Monte Carlo</span> simulation, '
-                    'and a <span style="color:#1d4ed8 !important;font-weight:500">ML ensemble</span> '
-                    '(Random Forest / XGBoost) — for smarter, more adaptive price projections. '
-                    'GARCH captures volatility clustering, Monte Carlo simulates thousands of '
-                    'price paths, and the ML model adds a data-driven drift signal — '
-                    'all powered by multi-source market data (Polygon, Yahoo Finance &amp; Finnhub).</div>',
-                    unsafe_allow_html=True,
-                )
-            n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
-            n_horizon = st.slider("Horizon (days)",  21,  504,  252, step=21)
-        else:
-            forecast_method = "Monte Carlo"
-            n_sims = 1000; n_horizon = 252
-    else:
-        peers_input = ""
-        do_mc = do_sector = do_corr = do_sr = do_news = do_peers = False
-        forecast_method = "Monte Carlo"
-        n_sims = 1000; n_horizon = 252
-
-    st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
-    run_btn = st.button("▶  Run Analysis", type="primary", use_container_width=True)
 
     # ── Waitlist ──────────────────────────────────────────────────────────────
     st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
@@ -394,6 +287,116 @@ tab1, tab2, tab3 = st.tabs([
 # ═════════════════════════════════════════════════════════════════════════════
 with tab1:
 
+    with st.expander("⚙️  Analysis inputs", expanded=True):
+        # ── Mode ──────────────────────────────────────────────────────────────────
+        st.markdown('<div class="sidebar-group">Mode</div>', unsafe_allow_html=True)
+        if st.session_state["is_pro"]:
+            mode = st.radio("", ["Investor Mode", "Day Trader Mode"],
+                            horizontal=True, label_visibility="collapsed")
+        else:
+            mode = "Investor Mode"
+
+        # ── Ticker ────────────────────────────────────────────────────────────────
+        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Ticker</div>',
+                    unsafe_allow_html=True)
+        ticker_input = st.text_input(
+            "", placeholder="e.g. AAPL, SPY, BTC, ETH",
+            label_visibility="collapsed"
+        ).strip().upper()
+
+        # ── Date range ────────────────────────────────────────────────────────────
+        if mode == "Investor Mode":
+            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Date Range</div>',
+                        unsafe_allow_html=True)
+            _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y"]
+            _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730}
+            period_key = st.select_slider("", options=_SLIDER_OPTIONS, value="1Y",
+                                          label_visibility="collapsed")
+            _today      = datetime.today().date()
+            _days       = _SLIDER_DAYS[period_key]
+            date_end    = _today.strftime("%Y-%m-%d")
+            date_start  = (_today - timedelta(days=_days)).strftime("%Y-%m-%d")
+            bar_size    = "day"
+            period_label = period_key
+        else:
+            date_start   = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
+            date_end     = datetime.today().strftime("%Y-%m-%d")
+            bar_size     = "day"
+            period_label = "1Y"
+            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Candle Size</div>',
+                        unsafe_allow_html=True)
+            tf_options = {"1 Min":"1min","5 Min":"5min","15 Min":"15min","1 Hour":"1hour"}
+            tf_label   = st.radio("", list(tf_options.keys()), index=1,
+                                  horizontal=True, label_visibility="collapsed")
+            st.session_state["candle_tf"] = tf_options[tf_label]
+
+        # ── Benchmarks ────────────────────────────────────────────────────────────
+        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Benchmarks</div>',
+                    unsafe_allow_html=True)
+        include_spy = st.checkbox("S&P 500 (SPY)", value=True)
+        include_qqq = st.checkbox("NASDAQ (QQQ)", value=True)
+
+        if mode == "Investor Mode":
+            # ── Peer comparison ───────────────────────────────────────────────────
+            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Peer Comparison</div>',
+                        unsafe_allow_html=True)
+            peers_input = st.text_input("", placeholder="e.g. GOOGL, AMZN",
+                                        label_visibility="collapsed")
+
+            # ── Report modules ────────────────────────────────────────────────────
+            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Report Modules</div>',
+                        unsafe_allow_html=True)
+            do_mc     = st.checkbox("Price Forecast", value=True)
+            do_sector = st.checkbox("Sector Comparison",    value=True)
+            do_corr   = st.checkbox("Correlation Matrix",   value=True)
+            do_sr     = st.checkbox("Support & Resistance", value=True)
+            do_news   = st.checkbox("News Headlines",       value=True)
+            do_peers  = st.checkbox("Peer Comparison",      value=True)
+
+            if do_mc:
+                st.markdown('<div class="sidebar-group" style="margin-top:1rem">Forecast Settings</div>',
+                            unsafe_allow_html=True)
+                forecast_method = st.selectbox(
+                    "Method",
+                    ["Monte Carlo", "Custom Forecast"],
+                    label_visibility="collapsed",
+                )
+                if forecast_method == "Custom Forecast":
+                    st.markdown(
+                        '<div style="font-size:0.73rem;line-height:1.6;'
+                        'padding:0.65rem 0.75rem;'
+                        'background:rgba(29,78,216,0.04);'
+                        'border-radius:2px;'
+                        'border:1px solid #e2e8f0;'
+                        'border-left:3px solid #1d4ed8;'
+                        'margin-bottom:0.5rem;'
+                        'font-family:Inter,sans-serif">'
+                        'Our <span style="color:#1d4ed8 !important;font-weight:600">Custom Forecast</span> '
+                        'combines three models — '
+                        '<span style="color:#1d4ed8 !important;font-weight:500">GARCH</span> volatility modeling, '
+                        '<span style="color:#1d4ed8 !important;font-weight:500">Monte Carlo</span> simulation, '
+                        'and a <span style="color:#1d4ed8 !important;font-weight:500">ML ensemble</span> '
+                        '(Random Forest / XGBoost) — for smarter, more adaptive price projections. '
+                        'GARCH captures volatility clustering, Monte Carlo simulates thousands of '
+                        'price paths, and the ML model adds a data-driven drift signal — '
+                        'all powered by multi-source market data (Polygon, Yahoo Finance &amp; Finnhub).</div>',
+                        unsafe_allow_html=True,
+                    )
+                n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
+                n_horizon = st.slider("Horizon (days)",  21,  504,  252, step=21)
+            else:
+                forecast_method = "Monte Carlo"
+                n_sims = 1000; n_horizon = 252
+        else:
+            peers_input = ""
+            do_mc = do_sector = do_corr = do_sr = do_news = do_peers = False
+            forecast_method = "Monte Carlo"
+            n_sims = 1000; n_horizon = 252
+
+        st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
+        run_btn = st.button("▶  Run Analysis", type="primary", use_container_width=True)
+
+
     # ── Landing page (no ticker entered) ─────────────────────────────────────
     if not run_btn and not ticker_input:
 
@@ -412,19 +415,19 @@ with tab1:
             </div>
             <h2 style="color:#ffffff;font-size:2rem;font-weight:700;
                        line-height:1.2;margin:0 0 1rem;font-family:'DM Sans',sans-serif">
-                Portfolio Analysis That Actually<br>Tells You What to Do
+                Deep Analysis on Any<br>Stock, ETF, Crypto or Bond
             </h2>
             <p style="color:#94a3b8;font-size:1rem;max-width:560px;
                       line-height:1.7;margin:0 0 2rem">
-                Build optimized portfolios from 320+ ranked stocks, backtest 2 years of history,
-                stress test through real crashes, and get a complete Excel report —
-                all for <strong style="color:#60a5fa">&#36;9.99/month</strong>.
+                Enter a ticker for the full breakdown — price action, technical signals,
+                fundamentals, a Monte Carlo forecast, and a downloadable Excel &amp; PowerPoint
+                research report.
             </p>
             <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:2.5rem">
                 <div style="background:#1d4ed8;color:#fff;padding:0.75rem 1.75rem;
                             border-radius:6px;font-weight:600;font-size:0.9rem;
                             cursor:default">
-                    &#8593; Enter a ticker in the sidebar to start free
+                    &#8593; Enter a ticker above to start — free
                 </div>
             </div>
             <div style="display:flex;gap:3rem;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,0.08);
