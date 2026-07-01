@@ -2,17 +2,15 @@
 Internal reference file for Claude. Tracks known issues, architectural decisions,
 conversation history, and onboarding context. Not for users.
 
-Founders: Wyatt Stratton + Nicholas Carriello (IU Bloomington)
+Founder: Wyatt Stratton (IU Bloomington)
 - Wyatt LinkedIn: https://www.linkedin.com/in/wyattstratton7/
-- Nicholas LinkedIn: https://www.linkedin.com/in/nicholas-carriello-471306254/
 
 ---
 
 ## FOR ANY CLAUDE READING THIS — START HERE
 
-This is QuantWizard, a Streamlit-based stock analysis SaaS being built by two
-college co-founders. You may be talking to either Wyatt (the one who set up this
-file) or Nicholas. Before doing anything, read this whole file. It will save you
+This is QuantWizard, a Streamlit-based stock analysis SaaS built by Wyatt
+Stratton. Before doing anything, read this whole file. It will save you
 from re-discovering things that were already figured out.
 
 **The single most important thing to know:**

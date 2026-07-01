@@ -711,8 +711,8 @@ with tab1:
                     margin-bottom:1.5rem;margin-top:2rem">Built By</div>
         """, unsafe_allow_html=True)
 
-        tc1, tc2 = st.columns(2)
-        with tc1:
+        _fc, _ = st.columns([3, 2])
+        with _fc:
             st.markdown("""
             <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
                 <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0434.jpeg"
@@ -725,23 +725,6 @@ with tab1:
                     <div style="color:#64748b;font-size:0.82rem;line-height:1.6;font-style:italic">
                         "I built QuantWizard because I was tired of spending hours pulling financial
                         data manually. Any investor deserves a professional report in seconds."
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        with tc2:
-            st.markdown("""
-            <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
-                <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0433.jpeg"
-                     style="width:64px;height:64px;border-radius:50%;object-fit:cover;
-                            flex-shrink:0;border:2px solid #1d4ed8">
-                <div>
-                    <div style="font-weight:700;color:#0f172a;font-size:0.92rem">Nicholas Carriello</div>
-                    <div style="color:#1d4ed8;font-size:0.78rem;margin-bottom:0.5rem">
-                        Co-Founder &amp; Quantitative Lead · Bucknell University</div>
-                    <div style="color:#64748b;font-size:0.82rem;line-height:1.6;font-style:italic">
-                        "Every number QuantWizard produces is something a professional quant
-                        would stand behind. Rigorous analysis, clean interface."
                     </div>
                 </div>
             </div>
