@@ -275,13 +275,8 @@ tab1, tab2, tab3 = st.tabs([
 with tab1:
 
     with st.expander("⚙️  Analysis inputs", expanded=True):
-        # ── Mode ──────────────────────────────────────────────────────────────────
-        st.markdown('<div class="sidebar-group">Mode</div>', unsafe_allow_html=True)
-        if st.session_state["is_pro"]:
-            mode = st.radio("", ["Investor Mode", "Day Trader Mode"],
-                            horizontal=True, label_visibility="collapsed")
-        else:
-            mode = "Investor Mode"
+        # Day Trader Mode removed — Investor Mode is the only experience now.
+        mode = "Investor Mode"
 
         # ── Ticker ────────────────────────────────────────────────────────────────
         st.markdown('<div class="sidebar-group" style="margin-top:1rem">Ticker</div>',
