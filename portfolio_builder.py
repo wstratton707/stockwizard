@@ -1645,7 +1645,14 @@ reflects that.
                         if _pid:
                             st.success("Now tracking — open the **Your Portfolios** tab.")
                         else:
-                            st.error("Couldn't save (is the tracked_portfolios table set up in Supabase?).")
+                            from database import tracked_storage_status, supabase_project_url
+                            if tracked_storage_status() == "no_table":
+                                st.error(f"Couldn't save — the **tracked_portfolios** table isn't in "
+                                         f"this Supabase project:\n\n`{supabase_project_url()}`\n\n"
+                                         f"Run the DDL from `database.py` in **that** project's SQL editor.")
+                            else:
+                                st.error("Couldn't save — Supabase isn't reachable/configured for "
+                                         "this app instance (check `SUPABASE_URL` / `SUPABASE_KEY`).")
             else:
                 st.warning("Enter both an email and a name.")
 

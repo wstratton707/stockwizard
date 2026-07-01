@@ -24,6 +24,12 @@ _TABLE       = "api_cache"
 _TIMEOUT     = 8  # seconds
 
 
+def supabase_project_url() -> str:
+    """The configured Supabase project URL (safe to show — it's in every request,
+    not a secret). Used to tell the user exactly which project needs the table."""
+    return SUPABASE_URL or "(no SUPABASE_URL configured)"
+
+
 def _headers() -> dict:
     return {
         "apikey":        SUPABASE_KEY,

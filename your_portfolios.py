@@ -290,8 +290,10 @@ def render_your_portfolios(api_key, is_pro=False):
                    "(`SUPABASE_URL` / `SUPABASE_KEY`) are missing. On Streamlit Cloud, add "
                    "them in **Settings → Secrets**. Portfolios won't save until then.")
     elif _status == "no_table":
-        st.warning("⚠ Connected to Supabase, but the **tracked_portfolios** table isn't in "
-                   "*this* project. Run the DDL from `database.py` in this project's SQL editor.")
+        from database import supabase_project_url
+        st.warning(f"⚠ Connected to Supabase, but the **tracked_portfolios** table isn't in "
+                   f"this project:\n\n`{supabase_project_url()}`\n\nRun the DDL from "
+                   f"`database.py` in **that** project's SQL editor (not your local one).")
 
     _render_create(email, api_key)
 
