@@ -143,12 +143,12 @@ st.markdown(f"""
         <h1>Quant<span>Wizard</span></h1>
     </div>
     <div class="main-header-sub">
-        <span class="badge">Stocks</span>
-        <span class="badge">ETFs</span>
-        <span class="badge">Bonds</span>
-        <span class="badge">Portfolio Builder</span>
-        <span class="badge">Monte Carlo</span>
-        <span style="color:#6b7a8d;margin-left:0.5rem">· Live data: Finnhub · Yahoo Finance · Polygon</span>
+        <span style="color:#8b98a8;font-size:0.9rem;font-weight:500">
+            Equity, ETF &amp; portfolio research
+        </span>
+        <span style="color:#5b6b7d;font-size:0.8rem;margin-left:0.6rem">
+            · real-time multi-source data
+        </span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -178,31 +178,18 @@ def _cached_movers(_api_key):
     return get_top_movers(_api_key)
 
 _tape_items = _cached_tape(POLYGON_API_KEY)
-if not _tape_items:
-    # Static fallback if market is closed or API is unavailable
-    _tape_items = [
-        ("AAPL","$—","",True),("TSLA","$—","",True),("NVDA","$—","",True),
-        ("SPY","$—","",True),("MSFT","$—","",True),("QQQ","$—","",True),
-    ]
-st.markdown(_tape_html(_tape_items), unsafe_allow_html=True)
+# Only render the tape when we actually have live prices — a row of "$—"
+# placeholders reads as broken. If prices aren't available, show nothing.
+if _tape_items:
+    st.markdown(_tape_html(_tape_items), unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     # ── Pro status / upgrade ──────────────────────────────────────────────────
     if DEV_MODE_FREE:
-        # Development phase banner — replace with payment UI when DEV_MODE_FREE = False
-        st.markdown("""
-        <div style="background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.35);
-                    border-radius:4px;padding:0.6rem 0.9rem;margin-bottom:1.25rem">
-            <div style="font-size:0.62rem;font-weight:700;letter-spacing:1.5px;
-                        text-transform:uppercase;color:#f5a623;margin-bottom:3px">
-                Dev Mode
-            </div>
-            <div style="font-size:0.75rem;color:#94a3b8;line-height:1.4">
-                All features unlocked.<br>Payments disabled.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # No user-facing "dev mode" banner — it reads as unfinished. Payments stay
+        # disabled via DEV_MODE_FREE; the UI just doesn't advertise it.
+        pass
     elif SHOW_PRICING:
         # ── Original payment UI preserved below — do not delete ──────────────
         if st.session_state["is_pro"]:
