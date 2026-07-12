@@ -682,6 +682,14 @@ button[kind="primary"]:active,
   margin-bottom: 0.6rem;
 }
 
+/* Main-panel form label — softer than .sidebar-group (which is tuned for the
+   dark sidebar). Muted slate reads cleanly on the light content background. */
+.field-label {
+  font-family: var(--font-sans); font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 0.4px; text-transform: uppercase; color: #64748b;
+  margin: 0.9rem 0 0.3rem;
+}
+
 /* ── Page footer ── */
 .page-footer {
   text-align: center; padding: 2rem 0 1rem;

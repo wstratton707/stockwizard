@@ -279,7 +279,7 @@ with tab1:
         mode = "Investor Mode"
 
         # ── Ticker ────────────────────────────────────────────────────────────────
-        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Ticker</div>',
+        st.markdown('<div class="field-label">Ticker</div>',
                     unsafe_allow_html=True)
         ticker_input = st.text_input(
             "", placeholder="e.g. AAPL, SPY, BTC, ETH",
@@ -288,7 +288,7 @@ with tab1:
 
         # ── Date range ────────────────────────────────────────────────────────────
         if mode == "Investor Mode":
-            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Date Range</div>',
+            st.markdown('<div class="field-label">Date Range</div>',
                         unsafe_allow_html=True)
             _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y"]
             _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730}
@@ -305,7 +305,7 @@ with tab1:
             date_end     = datetime.today().strftime("%Y-%m-%d")
             bar_size     = "day"
             period_label = "1Y"
-            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Candle Size</div>',
+            st.markdown('<div class="field-label">Candle Size</div>',
                         unsafe_allow_html=True)
             tf_options = {"1 Min":"1min","5 Min":"5min","15 Min":"15min","1 Hour":"1hour"}
             tf_label   = st.radio("", list(tf_options.keys()), index=1,
@@ -313,20 +313,20 @@ with tab1:
             st.session_state["candle_tf"] = tf_options[tf_label]
 
         # ── Benchmarks ────────────────────────────────────────────────────────────
-        st.markdown('<div class="sidebar-group" style="margin-top:1rem">Benchmarks</div>',
+        st.markdown('<div class="field-label">Benchmarks</div>',
                     unsafe_allow_html=True)
         include_spy = st.checkbox("S&P 500 (SPY)", value=True)
         include_qqq = st.checkbox("NASDAQ (QQQ)", value=True)
 
         if mode == "Investor Mode":
             # ── Peer comparison ───────────────────────────────────────────────────
-            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Peer Comparison</div>',
+            st.markdown('<div class="field-label">Peer Comparison</div>',
                         unsafe_allow_html=True)
             peers_input = st.text_input("", placeholder="e.g. GOOGL, AMZN",
                                         label_visibility="collapsed")
 
             # ── Report modules ────────────────────────────────────────────────────
-            st.markdown('<div class="sidebar-group" style="margin-top:1rem">Report Modules</div>',
+            st.markdown('<div class="field-label">Report Modules</div>',
                         unsafe_allow_html=True)
             do_mc     = st.checkbox("Price Forecast", value=True)
             do_sector = st.checkbox("Sector Comparison",    value=True)
@@ -336,7 +336,7 @@ with tab1:
             do_peers  = st.checkbox("Peer Comparison",      value=True)
 
             if do_mc:
-                st.markdown('<div class="sidebar-group" style="margin-top:1rem">Forecast Settings</div>',
+                st.markdown('<div class="field-label">Forecast Settings</div>',
                             unsafe_allow_html=True)
                 forecast_method = st.selectbox(
                     "Method",
