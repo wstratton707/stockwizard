@@ -268,12 +268,72 @@ if not DEV_MODE_FREE and SHOW_PRICING and st.session_state["show_payment"] and n
 
 # ── Page routing ──────────────────────────────────────────────────────────────
 if _page == "home":
+    # ── Hero ──────────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="home-hero">
+      <span class="home-hero-badge">Institutional tools · retail price</span>
+      <h1 class="home-hero-title">Institutional-grade equity &amp;<br>portfolio research — in seconds.</h1>
+      <p class="home-hero-sub">Analyze any stock, ETF, crypto or bond. Build a risk-optimized
+      portfolio and track it forward. Then export a <b>professional research report</b> with one click.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    _hc = st.columns([1.1, 1.1, 2.8])
+    if _hc[0].button("📈  Analyze a stock", type="primary", use_container_width=True, key="cta_analyze"):
+        _goto("analysis")
+    if _hc[1].button("💼  Build a portfolio", use_container_width=True, key="cta_build"):
+        _goto("builder")
+
+    # ── Live ticker tape ──────────────────────────────────────────────────────
     _tape_items = _cached_tape(POLYGON_API_KEY)
     if _tape_items:
         st.markdown(_tape_html(_tape_items), unsafe_allow_html=True)
-    st.markdown("### Welcome to QuantWizard")
-    st.caption("Pick a tool from the top nav — Analysis, Portfolio Builder, or Your "
-               "Portfolios. (Full homepage coming next.)")
+
+    # ── What you can do ───────────────────────────────────────────────────────
+    st.markdown('<div class="home-section-title">What you can do</div>', unsafe_allow_html=True)
+    _cards = [
+        ("📈", "Analysis", "Deep-dive any ticker — price action, technical signals, fundamentals, "
+                           "a Monte Carlo forecast, and peers.", "Open Analysis", "analysis"),
+        ("💼", "Portfolio Builder", "Build a risk-optimized portfolio (CAPM expected returns) from a "
+                                    "ranked universe, backtested over 5 years.", "Open Builder", "builder"),
+        ("📁", "Your Portfolios", "Save a portfolio and track its real performance from day one — "
+                                  "value vs the S&P 500, drawdown, and holdings.", "Open Portfolios", "portfolios"),
+    ]
+    for _col, (_ic, _ti, _desc, _btn, _pg) in zip(st.columns(3), _cards):
+        with _col:
+            st.markdown(f"""<div class="home-card">
+              <div class="home-card-icon">{_ic}</div>
+              <div class="home-card-title">{_ti}</div>
+              <div class="home-card-desc">{_desc}</div>
+            </div>""", unsafe_allow_html=True)
+            if st.button(_btn, key=f"card_{_pg}", use_container_width=True):
+                _goto(_pg)
+
+    # ── Excel-export spotlight (the hero feature) ─────────────────────────────
+    st.markdown('<div class="home-section-title">★ The one-click professional report</div>',
+                unsafe_allow_html=True)
+    _sp = st.columns([1.15, 1], gap="large", vertical_alignment="center")
+    with _sp[0]:
+        if os.path.exists(os.path.join(os.path.dirname(__file__), "assets", "sample_report.png")):
+            st.image("assets/sample_report.png", use_container_width=True)
+    with _sp[1]:
+        st.markdown("""
+        <div class="home-spotlight">
+          <h3>A full analyst report on any stock — in ~30 seconds.</h3>
+          <p>Every analysis exports to a polished multi-sheet <b>Excel</b> workbook (plus a
+          <b>PowerPoint</b> deck): dashboard, price &amp; indicators, Monte Carlo, peers,
+          correlations, and charts — the kind of report that takes an analyst hours.</p>
+          <ul>
+            <li>10 formatted, brand-styled sheets</li>
+            <li>Monte Carlo forecast + full risk metrics</li>
+            <li>Shareable — send it to a client or a group chat</li>
+          </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Generate one →", type="primary", use_container_width=True, key="cta_report"):
+            _goto("analysis")
+
+    st.markdown('<div class="home-footer">QuantWizard · For informational purposes only · '
+                'Not investment advice</div>', unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ANALYSIS
