@@ -321,7 +321,6 @@ if _page == "home":
     """, unsafe_allow_html=True)
 
     _shots = [
-        ("assets/report_cover.png",     "Cover — headline metrics & contents"),
         ("assets/report_dashboard.png", "Dashboard — metrics, risk & sparklines"),
         ("assets/report_charts.png",    "Charts — price, volume, Bollinger & RSI"),
     ]
