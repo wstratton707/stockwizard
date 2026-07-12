@@ -308,27 +308,43 @@ if _page == "home":
             if st.button(_btn, key=f"card_{_pg}", use_container_width=True):
                 _goto(_pg)
 
-    # ── Excel-export spotlight (the hero feature) ─────────────────────────────
+    # ── Excel-export spotlight (the hero feature) — carousel ──────────────────
     st.markdown('<div class="home-section-title">★ The one-click professional report</div>',
                 unsafe_allow_html=True)
-    _sp = st.columns([1.15, 1], gap="large", vertical_alignment="center")
-    with _sp[0]:
-        if os.path.exists(os.path.join(os.path.dirname(__file__), "assets", "sample_report.png")):
-            st.image("assets/sample_report.png", use_container_width=True)
-    with _sp[1]:
-        st.markdown("""
-        <div class="home-spotlight">
-          <h3>A full analyst report on any stock — in ~30 seconds.</h3>
-          <p>Every analysis exports to a polished multi-sheet <b>Excel</b> workbook (plus a
-          <b>PowerPoint</b> deck): dashboard, price &amp; indicators, Monte Carlo, peers,
-          correlations, and charts — the kind of report that takes an analyst hours.</p>
-          <ul>
-            <li>10 formatted, brand-styled sheets</li>
-            <li>Monte Carlo forecast + full risk metrics</li>
-            <li>Shareable — send it to a client or a group chat</li>
-          </ul>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown("""
+    <div class="home-spotlight-lead">
+      <h3>A full analyst report on any stock — in ~30 seconds.</h3>
+      <p>Every analysis exports to a polished multi-sheet <b>Excel</b> workbook (plus a
+      <b>PowerPoint</b> deck) — the kind of report that takes an analyst hours. Flip through
+      a few pages below.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    _shots = [
+        ("assets/report_cover.png",     "Cover — headline metrics & contents"),
+        ("assets/report_dashboard.png", "Dashboard — metrics, risk & sparklines"),
+        ("assets/report_charts.png",    "Charts — price, volume, Bollinger & RSI"),
+    ]
+    _ri = st.session_state.get("_rep_i", 0) % len(_shots)
+    with st.container(key="report_carousel"):
+        _ca = st.columns([1, 12, 1], vertical_alignment="center")
+        if _ca[0].button("◀", key="rep_prev", use_container_width=True):
+            st.session_state["_rep_i"] = (_ri - 1) % len(_shots); st.rerun()
+        with _ca[1]:
+            st.image(_shots[_ri][0])
+        if _ca[2].button("▶", key="rep_next", use_container_width=True):
+            st.session_state["_rep_i"] = (_ri + 1) % len(_shots); st.rerun()
+        st.markdown(f'<div class="carousel-cap">{_shots[_ri][1]}  ·  {_ri + 1} / {len(_shots)}</div>',
+                    unsafe_allow_html=True)
+
+    _bc = st.columns([2, 1], vertical_alignment="center")
+    with _bc[0]:
+        st.markdown("""<ul class="home-spotlight-ul">
+          <li>10 formatted, brand-styled sheets + a PowerPoint deck</li>
+          <li>Monte Carlo forecast + full risk metrics</li>
+          <li>Shareable — send it to a client or a group chat</li>
+        </ul>""", unsafe_allow_html=True)
+    with _bc[1]:
         if st.button("Generate one →", type="primary", use_container_width=True, key="cta_report"):
             _goto("analysis")
 

@@ -735,10 +735,23 @@ button[kind="primary"]:active,
 .home-card-icon { font-size: 1.6rem; margin-bottom: 0.5rem; }
 .home-card-title { font-weight: 700; font-size: 1.05rem; color: #0f2747; margin-bottom: 0.4rem; }
 .home-card-desc { font-size: 0.88rem; color: #64748b; line-height: 1.55; }
-.home-spotlight h3 { font-size: 1.4rem; font-weight: 700; color: #0f2747; margin: 0 0 0.7rem; line-height: 1.25; }
-.home-spotlight p { font-size: 0.95rem; color: #5b6b7d; line-height: 1.6; }
-.home-spotlight ul { margin: 0.6rem 0 0; padding-left: 1.1rem; }
-.home-spotlight li { font-size: 0.9rem; color: #334155; margin-bottom: 0.3rem; }
+.home-spotlight-lead h3 { font-size: 1.45rem; font-weight: 700; color: #0f2747; margin: 0 0 0.5rem; line-height: 1.25; }
+.home-spotlight-lead p { font-size: 0.98rem; color: #5b6b7d; line-height: 1.6; max-width: 760px; }
+.home-spotlight-ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
+.home-spotlight-ul li { font-size: 0.92rem; color: #334155; margin-bottom: 0.3rem; }
+/* Report carousel */
+.st-key-report_carousel { margin: 0.7rem 0 0.2rem; }
+.st-key-report_carousel [data-testid="stImage"] img {
+  max-height: 470px; width: auto !important; margin: 0 auto; display: block;
+  border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 6px 20px rgba(15,39,71,0.10);
+}
+.st-key-report_carousel button {
+  min-height: 200px; height: 100%; font-size: 1.5rem; font-weight: 700;
+  background: #eef2f7 !important; color: #64748b !important; border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+}
+.st-key-report_carousel button:hover { background: #dbe4ee !important; color: #0f2747 !important; }
+.carousel-cap { text-align: center; color: #64748b; font-size: 0.82rem; margin-top: 0.55rem; font-weight: 500; }
 .home-footer { text-align: center; color: #94a3b8; font-size: 0.8rem; padding: 2.5rem 0 1rem; }
 
 /* ── Page footer ── */
