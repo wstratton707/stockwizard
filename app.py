@@ -129,6 +129,29 @@ elif not DEV_MODE_FREE and not st.session_state.get("is_pro"):
             st.session_state["is_pro"]     = True
             st.session_state["user_email"] = saved_email
 
+# ── Top navigation ────────────────────────────────────────────────────────────
+# Custom sticky navbar (replaces Streamlit's empty built-in header). Uses native
+# buttons in a keyed container so nav clicks are reruns — session state (e.g. a
+# built portfolio) survives — while ?page= keeps the URL shareable.
+_PAGES = ("home", "analysis", "builder", "portfolios")
+_page  = st.query_params.get("page", "home")
+if _page not in _PAGES:
+    _page = "home"
+
+def _goto(pg):
+    st.query_params["page"] = pg
+    st.rerun()
+
+with st.container(key="topnav"):
+    _nc = st.columns([2.3, 1, 1.1, 1.9, 1.7], vertical_alignment="center")
+    _nc[0].markdown('<div class="topnav-brand">◈ QuantWizard</div>', unsafe_allow_html=True)
+    for _i, (_lbl, _pg) in enumerate(
+            [("Home", "home"), ("Analysis", "analysis"),
+             ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=1):
+        if _nc[_i].button(_lbl, key=f"nav_{_pg}", use_container_width=True,
+                          type="primary" if _page == _pg else "tertiary"):
+            _goto(_pg)
+
 # ── Header ────────────────────────────────────────────────────────────────────
 _logo_html = (
     f'<img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/logo.png" '
@@ -136,22 +159,7 @@ _logo_html = (
     f'box-shadow:0 4px 12px rgba(59,130,246,0.4)">'
 ) if os.path.exists(_LOGO_PATH) else '<div class="main-header-logo-icon">W</div>'
 
-st.markdown(f"""
-<div class="main-header">
-    <div class="main-header-logo">
-        {_logo_html}
-        <h1>Quant<span>Wizard</span></h1>
-    </div>
-    <div class="main-header-sub">
-        <span style="color:#8b98a8;font-size:0.9rem;font-weight:500">
-            Equity, ETF &amp; portfolio research
-        </span>
-        <span style="color:#5b6b7d;font-size:0.8rem;margin-left:0.6rem">
-            · real-time multi-source data
-        </span>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+# (The old global header card moved into the Home page hero — see routing below.)
 
 # ── Ticker tape ──────────────────────────────────────────────────────────────
 def _tape_html(items):
@@ -177,11 +185,7 @@ def _cached_tape(_api_key):
 def _cached_movers(_api_key):
     return get_top_movers(_api_key)
 
-_tape_items = _cached_tape(POLYGON_API_KEY)
-# Only render the tape when we actually have live prices — a row of "$—"
-# placeholders reads as broken. If prices aren't available, show nothing.
-if _tape_items:
-    st.markdown(_tape_html(_tape_items), unsafe_allow_html=True)
+# Ticker tape is rendered on the Home page (see routing below), not globally.
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -262,17 +266,19 @@ if not DEV_MODE_FREE and SHOW_PRICING and st.session_state["show_payment"] and n
         st.rerun()
     st.markdown("---")
 
-# ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs([
-    "📈  Analysis",
-    "💼  Portfolio Builder",
-    "📁  Your Portfolios",
-])
+# ── Page routing ──────────────────────────────────────────────────────────────
+if _page == "home":
+    _tape_items = _cached_tape(POLYGON_API_KEY)
+    if _tape_items:
+        st.markdown(_tape_html(_tape_items), unsafe_allow_html=True)
+    st.markdown("### Welcome to QuantWizard")
+    st.caption("Pick a tool from the top nav — Analysis, Portfolio Builder, or Your "
+               "Portfolios. (Full homepage coming next.)")
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TAB 1 — STOCK ANALYSIS
+# ANALYSIS
 # ═════════════════════════════════════════════════════════════════════════════
-with tab1:
+elif _page == "analysis":
 
     with st.expander("⚙️  Analysis inputs", expanded=True):
         # Day Trader Mode removed — Investor Mode is the only experience now.
@@ -2618,13 +2624,13 @@ with tab1:
         st.markdown(render_inline(_disc.SHORT), unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TAB 2 — PORTFOLIO BUILDER
+# PORTFOLIO BUILDER
 # ═════════════════════════════════════════════════════════════════════════════
-with tab2:
+elif _page == "builder":
     render_portfolio_builder(POLYGON_API_KEY, is_pro=st.session_state.get("is_pro", False))
 
 # =============================================================================
-# TAB 3 — YOUR PORTFOLIOS (forward-tracked, mark-to-market)
+# YOUR PORTFOLIOS (forward-tracked, mark-to-market)
 # =============================================================================
-with tab3:
+elif _page == "portfolios":
     render_your_portfolios(POLYGON_API_KEY, is_pro=st.session_state.get("is_pro", False))

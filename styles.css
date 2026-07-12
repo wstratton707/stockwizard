@@ -690,6 +690,28 @@ button[kind="primary"]:active,
   margin: 0.9rem 0 0.3rem;
 }
 
+/* ── Custom top navigation (replaces Streamlit's empty built-in header bar) ── */
+[data-testid="stHeader"] { display: none; }
+
+.st-key-topnav {
+  position: sticky; top: 0; z-index: 1000;
+  background: #0b1220; border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: 0.15rem 1rem; margin-bottom: 1.1rem; border-radius: 0 0 10px 10px;
+}
+.st-key-topnav [data-testid="stHorizontalBlock"] { align-items: center; gap: 0.25rem; }
+.topnav-brand {
+  font-weight: 800; font-size: 1.15rem; color: #38bdf8; letter-spacing: 0.3px;
+  padding: 0.55rem 0; white-space: nowrap;
+}
+.st-key-topnav button {
+  background: transparent !important; border: none !important; box-shadow: none !important;
+  color: #a9b6c6 !important; font-weight: 600 !important; border-radius: 7px !important;
+}
+.st-key-topnav button:hover { color: #fff !important; background: rgba(255,255,255,0.07) !important; }
+.st-key-topnav [data-testid="stBaseButton-primary"] {
+  color: #fff !important; background: rgba(56,189,240,0.18) !important;
+}
+
 /* ── Page footer ── */
 .page-footer {
   text-align: center; padding: 2rem 0 1rem;
