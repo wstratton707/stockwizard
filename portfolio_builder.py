@@ -57,7 +57,9 @@ _K_RANKINGS    = "port_rankings"   # cached get_sharpe_rankings result
 
 # ── Optimizer / fetch config ──────────────────────────────────────────────────
 _MAX_PORTFOLIO_TICKERS = 18     # hard cap fed to the SLSQP optimizer
-_PRICE_HISTORY_YEARS   = 2      # years of OHLCV history fetched per candidate
+_PRICE_HISTORY_YEARS   = 5      # years of OHLCV history fetched per candidate
+                               # (yfinance has no depth cap; longer window → more
+                               #  stable covariance/betas + real crashes in risk stats)
 _EF_PORTFOLIOS         = 4_000  # random portfolios for efficient-frontier scatter
                                 # (4k renders an identical-looking cloud ~2x faster)
 _MC_SIMULATIONS        = 1_000  # Monte Carlo paths
@@ -399,7 +401,7 @@ def _render_step_2(api_key):
                     st.info(f"Conservative profile: growth sectors excluded — "
                             f"{', '.join(skipped_sectors)}.")
 
-            progress.progress(15, text=f"Fetching 2-year price history for {len(candidates)} candidates...")
+            progress.progress(15, text=f"Fetching 5-year price history for {len(candidates)} candidates...")
 
             # Fetch prices — uses Supabase cache if available (instant on repeat runs)
             price_dict, close_df, returns_df, failed = fetch_portfolio_prices_cached(
@@ -408,7 +410,7 @@ def _render_step_2(api_key):
 
             # Trim to 18 for optimizer.
             # When precompute was used: rank by precompute score (avoids in-sample bias).
-            # Fallback: rank by 2-year Sharpe (only option when precompute unavailable).
+            # Fallback: rank by 5-year Sharpe (only option when precompute unavailable).
             if used_precompute:
                 available = [t for t in candidates if t in returns_df.columns]
                 pinned_set = {t for t, s in sector_map.items()
@@ -629,17 +631,17 @@ def _render_step_2(api_key):
         st.markdown("""
 **Expected Ann. Return** — CAPM estimate: risk-free rate + (portfolio beta × 5% equity risk premium).
 It reflects how much *market* risk the portfolio carries, not which stocks recently ran up — so it
-isn't inflated by a hot 2-year stretch. Past returns do not guarantee future performance.
+isn't inflated by a hot recent stretch. Past returns do not guarantee future performance.
 
 **Portfolio Beta** — How much the portfolio moves with the market (S&P 500). 1.0 = moves with the
 market; below 1.0 = less market-sensitive (more defensive); above 1.0 = more sensitive.
 
-**Expected Volatility** — Annualised standard deviation of daily returns over the 2-year window.
+**Expected Volatility** — Annualised standard deviation of daily returns over the 5-year window.
 Higher volatility = wider range of possible outcomes.
 
 **Sharpe Ratio** — Excess return above the risk-free rate (4.5%) divided by volatility.
 A Sharpe above 1.0 is generally considered good. Above 2.0 is exceptional.
-Calculated using 2 years of historical data — short-term market conditions may differ.
+Calculated from up to 5 years of history — spanning multiple market regimes.
 
 **Diversification Score** — Proprietary 1–10 score combining:
 effective number of holdings (Herfindahl index), average pairwise correlation, and
@@ -1389,9 +1391,9 @@ sampled from historical data. Each scenario compounds daily over the forecast pe
 with monthly contributions added throughout.
 
 **Return assumption:**
-Daily returns are blended — 70% from your portfolio's 2-year historical average,
-30% from a long-run 7% annual market mean. Individual stock drift is capped at 12%/year.
-This prevents recent bull or bear runs from distorting long-range projections.
+Each stock's expected return uses CAPM — the risk-free rate plus its beta × a 5%
+equity risk premium. The forecast is driven by how much *market* risk each holding
+carries, not by which names recently ran up, so a hot recent stretch can't distort it.
 
 **Correlation:**
 Cross-asset correlations are preserved using Cholesky decomposition of the

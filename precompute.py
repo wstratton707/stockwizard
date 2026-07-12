@@ -340,12 +340,14 @@ def warm_portfolio_cache(rankings: dict):
             if t not in candidates:
                 candidates.append(t)
 
-    print(f"Pre-fetching 2-year prices for {len(candidates)} tickers "
+    print(f"Pre-fetching 5-year prices for {len(candidates)} tickers "
           f"(top 6 per sector)...")
 
     try:
+        # Must match portfolio_builder._PRICE_HISTORY_YEARS so the warmed bundle
+        # actually satisfies the builder's request (else cold 5yr fetches).
         _, close_df, _, failed = fetch_portfolio_prices_cached(
-            candidates, period_years=2, api_key=POLYGON_API_KEY, log=print
+            candidates, period_years=5, api_key=POLYGON_API_KEY, log=print
         )
         print(f"Portfolio cache warmed — {len(close_df.columns)} tickers ready")
         if failed:

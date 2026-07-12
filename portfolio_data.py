@@ -280,14 +280,22 @@ def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
     closes = {t: df.set_index("Date")["Close"].rename(t)
               for t, df in price_dict.items()}
     close_df = pd.DataFrame(closes)
-    # Drop tickers whose history is too short (starts >60 days after the majority)
-    earliest_common = close_df.apply(lambda s: s.first_valid_index()).max()
-    short_tickers   = [t for t in close_df.columns
-                       if close_df[t].first_valid_index() > earliest_common - pd.Timedelta(days=60)]
-    if short_tickers and len(short_tickers) < len(close_df.columns):
-        log(f"   ⚠ Dropping late-start tickers to preserve history: {short_tickers}")
-        close_df = close_df.drop(columns=short_tickers)
-        failed.extend(short_tickers)
+    # Keep the common window as long as possible. The ffill/dropna below aligns every
+    # ticker to a shared window, so one young name (recent IPO) would otherwise
+    # truncate the whole matrix. Instead, drop tickers whose history doesn't reach
+    # near the requested window start — but only if enough mature names remain, so a
+    # young-heavy candidate set still returns something usable.
+    window_start = pd.Timestamp(start)
+    first_valid  = close_df.apply(lambda s: s.first_valid_index())
+    mature = [t for t in close_df.columns
+              if pd.notna(first_valid[t]) and first_valid[t] <= window_start + pd.Timedelta(days=120)]
+    short  = [t for t in close_df.columns if t not in mature]
+    if mature and len(mature) >= max(5, len(close_df.columns) // 2):
+        if short:
+            log(f"   ⚠ Excluding {len(short)} ticker(s) with insufficient history "
+                f"(need ~{period_years}y): {short}")
+            failed.extend(short)
+        close_df = close_df[mature]
     close_df   = close_df.ffill().dropna()
     returns_df = close_df.pct_change().dropna()
 

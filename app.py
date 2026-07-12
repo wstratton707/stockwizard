@@ -290,8 +290,9 @@ with tab1:
         if mode == "Investor Mode":
             st.markdown('<div class="field-label">Date Range</div>',
                         unsafe_allow_html=True)
-            _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y"]
-            _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730}
+            _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y","5Y","10Y"]
+            _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730,
+                               "5Y":1825,"10Y":3650}
             period_key = st.select_slider("", options=_SLIDER_OPTIONS, value="1Y",
                                           label_visibility="collapsed")
             _today      = datetime.today().date()
@@ -532,7 +533,7 @@ with tab1:
              ["Bollinger Bands, RSI, GARCH volatility", "Monte Carlo simulation (1,000 paths)",
               "Peer comparison vs sector", "10-yr fundamentals + F-Score & Z-Score", "Excel + PowerPoint export"]),
             (fc2, "account_balance_wallet", "Portfolio Builder", "Pro",
-             ["320+ stocks ranked by multi-factor score", "2-year backtest with quarterly rebalancing",
+             ["320+ stocks ranked by multi-factor score", "5-year backtest with quarterly rebalancing",
               "Mean-variance optimization", "Portfolio Monte Carlo with milestone projections",
               "Diversification score + correlation heatmap"]),
             (fc3, "local_fire_department", "Stress Test", "Pro",
@@ -584,7 +585,7 @@ with tab1:
             (h2, "2", "We Rank & Optimize",
              "QuantWizard scores 320+ stocks daily using Sharpe ratio and momentum, selects the best per sector, then runs mean-variance optimization."),
             (h3, "3", "Get Your Full Report",
-             "2-year backtest, Monte Carlo forecast with milestone probabilities, stress test results, and a downloadable Excel + PowerPoint report."),
+             "5-year backtest, Monte Carlo forecast with milestone probabilities, stress test results, and a downloadable Excel + PowerPoint report."),
         ]:
             with col:
                 st.markdown(f"""
@@ -692,7 +693,7 @@ with tab1:
                 <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">Cancel anytime</div>
                 <ul style="color:#0f172a;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0 0 1.25rem">
                     <li>Everything in Free</li>
-                    <li><strong>Portfolio Builder</strong> — 320+ stocks, 2-year backtest</li>
+                    <li><strong>Portfolio Builder</strong> — 320+ stocks, 5-year backtest</li>
                     <li><strong>Stress Test</strong> — 5 historical crash scenarios</li>
                     <li><strong>Bond Analysis</strong> — 60+ ETFs</li>
                     <li><strong>Portfolio Autopsy</strong> — CSV upload + P&L attribution</li>
