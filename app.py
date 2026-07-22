@@ -185,6 +185,68 @@ def _cached_tape(_api_key):
 def _cached_movers(_api_key):
     return get_top_movers(_api_key)
 
+# ── Report carousel (client-side: images baked into the iframe → instant, no rerun) ──
+_REPORT_SLIDES = [
+    ("assets/rep_dashboard.png",         "Dashboard — metrics, risk & sparklines"),
+    ("assets/rep_charts.png",            "Charts — price, volume, Bollinger & RSI"),
+    ("assets/rep_fundamentals.png",      "Fundamentals — valuation, margins, growth & quality"),
+    ("assets/rep_monte_carlo.png",       "Monte Carlo — forecast summary & simulations"),
+    ("assets/rep_peer_comparison.png",   "Peer Comparison"),
+    ("assets/rep_correlation_matrix.png","Correlation Matrix"),
+    ("assets/rep_annual_summary.png",    "Annual Performance Summary"),
+    ("assets/rep_price_indicators.png",  "Price & Technical Indicators"),
+    ("assets/rep_news_headlines.png",    "News Headlines"),
+    ("assets/rep_cover.png",             "Cover — headline metrics & contents"),
+]
+
+@st.cache_data(show_spinner=False)
+def _report_carousel_html():
+    """Self-contained HTML/JS carousel with every report sheet base64-baked in, so
+    cycling is instant (client-side) — no Streamlit rerun / page reload per click."""
+    import base64
+    _here = os.path.dirname(__file__)
+    slides, caps = [], []
+    for path, cap in _REPORT_SLIDES:
+        fp = os.path.join(_here, path)
+        if os.path.exists(fp):
+            slides.append(base64.b64encode(open(fp, "rb").read()).decode())
+            caps.append(cap)
+    if not slides:
+        return "<div style='color:#94a3b8'>Sample report preview unavailable.</div>"
+    imgs = "".join('<img class="' + ("on" if i == 0 else "") +
+                   '" src="data:image/png;base64,' + b + '">' for i, b in enumerate(slides))
+    caps_js = ",".join('"' + c.replace('"', "") + '"' for c in caps)
+    tmpl = """<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:'DM Sans',system-ui,Arial,sans-serif}
+body{background:transparent}
+.wrap{display:flex;align-items:center;gap:12px}
+.frame{flex:1;text-align:center;min-width:0}
+.frame img{display:none;max-height:458px;max-width:100%;width:auto;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(15,39,71,.10)}
+.frame img.on{display:inline-block}
+.arrow{flex:0 0 auto;width:42px;height:60px;border:1px solid #e2e8f0;border-radius:8px;background:#eef2f7;color:#64748b;font-size:1.05rem;cursor:pointer}
+.arrow:hover{background:#dbe4ee;color:#0f2747}
+.cap{text-align:center;color:#64748b;font-size:.82rem;margin-top:.6rem;font-weight:500}
+.dots{text-align:center;margin-top:.5rem}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#cbd5e1;margin:0 3px;cursor:pointer}
+.dot.on{background:#38bdf8}
+</style></head><body>
+<div class="wrap">
+<button class="arrow" onclick="go(-1)">&#9664;</button>
+<div class="frame" id="frame">__IMGS__</div>
+<button class="arrow" onclick="go(1)">&#9654;</button>
+</div>
+<div class="cap" id="cap"></div>
+<div class="dots" id="dots"></div>
+<script>
+var caps=[__CAPS__],i=0,imgs=document.querySelectorAll('#frame img'),dots=document.getElementById('dots');
+for(var n=0;n<imgs.length;n++){var d=document.createElement('span');d.className='dot'+(n===0?' on':'');(function(k){d.onclick=function(){show(k)}})(n);dots.appendChild(d);}
+function show(n){i=(n+imgs.length)%imgs.length;for(var k=0;k<imgs.length;k++)imgs[k].className=(k===i?'on':'');var ds=dots.children;for(var k=0;k<ds.length;k++)ds[k].className='dot'+(k===i?' on':'');document.getElementById('cap').textContent=caps[i]+' · '+(i+1)+' / '+imgs.length;}
+function go(d){show(i+d)}
+document.addEventListener('keydown',function(e){if(e.key==='ArrowLeft')go(-1);if(e.key==='ArrowRight')go(1)});
+show(0);
+</script></body></html>"""
+    return tmpl.replace("__IMGS__", imgs).replace("__CAPS__", caps_js)
+
 # Ticker tape is rendered on the Home page (see routing below), not globally.
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -320,21 +382,7 @@ if _page == "home":
     </div>
     """, unsafe_allow_html=True)
 
-    _shots = [
-        ("assets/report_dashboard.png", "Dashboard — metrics, risk & sparklines"),
-        ("assets/report_charts.png",    "Charts — price, volume, Bollinger & RSI"),
-    ]
-    _ri = st.session_state.get("_rep_i", 0) % len(_shots)
-    with st.container(key="report_carousel"):
-        _ca = st.columns([1, 12, 1], vertical_alignment="center")
-        if _ca[0].button("◀", key="rep_prev", use_container_width=True):
-            st.session_state["_rep_i"] = (_ri - 1) % len(_shots); st.rerun()
-        with _ca[1]:
-            st.image(_shots[_ri][0])
-        if _ca[2].button("▶", key="rep_next", use_container_width=True):
-            st.session_state["_rep_i"] = (_ri + 1) % len(_shots); st.rerun()
-        st.markdown(f'<div class="carousel-cap">{_shots[_ri][1]}  ·  {_ri + 1} / {len(_shots)}</div>',
-                    unsafe_allow_html=True)
+    st.components.v1.html(_report_carousel_html(), height=580, scrolling=False)
 
     _bc = st.columns([2, 1], vertical_alignment="center")
     with _bc[0]:

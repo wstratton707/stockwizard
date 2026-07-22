@@ -739,19 +739,7 @@ button[kind="primary"]:active,
 .home-spotlight-lead p { font-size: 0.98rem; color: #5b6b7d; line-height: 1.6; max-width: 760px; }
 .home-spotlight-ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
 .home-spotlight-ul li { font-size: 0.92rem; color: #334155; margin-bottom: 0.3rem; }
-/* Report carousel */
-.st-key-report_carousel { margin: 0.7rem 0 0.2rem; }
-.st-key-report_carousel [data-testid="stImage"] img {
-  max-height: 470px; width: auto !important; margin: 0 auto; display: block;
-  border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 6px 20px rgba(15,39,71,0.10);
-}
-.st-key-report_carousel button {
-  min-height: 38px; padding: 0.25rem 0 !important; font-size: 1rem; font-weight: 700;
-  background: #eef2f7 !important; color: #64748b !important; border: 1px solid #e2e8f0 !important;
-  border-radius: 8px !important;
-}
-.st-key-report_carousel button:hover { background: #dbe4ee !important; color: #0f2747 !important; }
-.carousel-cap { text-align: center; color: #64748b; font-size: 0.82rem; margin-top: 0.55rem; font-weight: 500; }
+/* (Report carousel is a self-contained client-side iframe — see _report_carousel_html.) */
 .home-footer { text-align: center; color: #94a3b8; font-size: 0.8rem; padding: 2.5rem 0 1rem; }
 
 /* ── Page footer ── */
