@@ -187,16 +187,10 @@ def _cached_movers(_api_key):
 
 # ── Report carousel (client-side: images baked into the iframe → instant, no rerun) ──
 _REPORT_SLIDES = [
-    ("assets/rep_dashboard.png",         "Dashboard — metrics, risk & sparklines"),
-    ("assets/rep_charts.png",            "Charts — price, volume, Bollinger & RSI"),
-    ("assets/rep_fundamentals.png",      "Fundamentals — valuation, margins, growth & quality"),
-    ("assets/rep_monte_carlo.png",       "Monte Carlo — forecast summary & simulations"),
-    ("assets/rep_peer_comparison.png",   "Peer Comparison"),
-    ("assets/rep_correlation_matrix.png","Correlation Matrix"),
-    ("assets/rep_annual_summary.png",    "Annual Performance Summary"),
-    ("assets/rep_price_indicators.png",  "Price & Technical Indicators"),
-    ("assets/rep_news_headlines.png",    "News Headlines"),
-    ("assets/rep_cover.png",             "Cover — headline metrics & contents"),
+    ("assets/rep_dashboard.png",    "Dashboard — metrics, risk & sparklines"),
+    ("assets/rep_charts.png",       "Charts — price, volume, Bollinger & RSI"),
+    ("assets/rep_fundamentals.png", "Fundamentals — valuation, margins, growth & quality"),
+    ("assets/rep_monte_carlo.png",  "Monte Carlo — forecast summary & simulations"),
 ]
 
 @st.cache_data(show_spinner=False)
@@ -221,7 +215,7 @@ def _report_carousel_html():
 body{background:transparent}
 .wrap{display:flex;align-items:center;gap:12px}
 .frame{flex:1;text-align:center;min-width:0}
-.frame img{display:none;max-height:458px;max-width:100%;width:auto;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(15,39,71,.10)}
+.frame img{display:none;max-height:600px;max-width:100%;width:auto;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(15,39,71,.10)}
 .frame img.on{display:inline-block}
 .arrow{flex:0 0 auto;width:42px;height:60px;border:1px solid #e2e8f0;border-radius:8px;background:#eef2f7;color:#64748b;font-size:1.05rem;cursor:pointer}
 .arrow:hover{background:#dbe4ee;color:#0f2747}
@@ -382,7 +376,7 @@ if _page == "home":
     </div>
     """, unsafe_allow_html=True)
 
-    st.components.v1.html(_report_carousel_html(), height=580, scrolling=False)
+    st.components.v1.html(_report_carousel_html(), height=700, scrolling=False)
 
     _bc = st.columns([2, 1], vertical_alignment="center")
     with _bc[0]:
