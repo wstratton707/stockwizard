@@ -11,6 +11,8 @@ from openpyxl.formatting.rule import ColorScaleRule, CellIsRule
 from openpyxl.drawing.image import Image as XLImage
 from datetime import datetime
 from constants import get_risk_free_rate
+from disclaimers import SHORT as DISCLAIMER_SHORT
+from market_data import consensus_from_recommendation
 
 try:
     import matplotlib
@@ -148,8 +150,219 @@ def _build_cover(wb, ticker, period, sheetnames, df=None):
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
+def _narrative_box(ws, row, text, height=60, italic=True, bold=False, bg=None):
+    """Wrapped, full-width (A:D) text box on one tall row. Returns the next row.
+
+    Used for the plain-English blocks (takeaway, what-changed, disclaimers) that
+    answer the "dense numbers, little narrative guidance" critique."""
+    ws.merge_cells(f"A{row}:D{row}")
+    c = ws.cell(row=row, column=1, value=text)
+    c.font      = Font(name="Calibri", size=10, italic=italic, bold=bold)
+    c.alignment = Alignment(wrap_text=True, vertical="top")
+    c.border    = _border()
+    if bg:
+        c.fill = PatternFill("solid", fgColor=bg)
+    ws.row_dimensions[row].height = height
+    return row + 1
+
+
+def _relative_performance_rows(df):
+    """(name, ticker_ret, bench_ret, diff) per benchmark present in df.
+
+    Uses the *_Cumulative columns fetch_stock_data already merges in (indexed to
+    100 at the period start), so no extra data fetch is needed."""
+    rows = []
+    if "Cumulative_Index" not in df.columns:
+        return rows
+    tcum = df["Cumulative_Index"].dropna()
+    if len(tcum) < 2:
+        return rows
+    t_ret = tcum.iloc[-1] / tcum.iloc[0] - 1
+    for b, name in [("SPY", "S&P 500 (SPY)"), ("QQQ", "NASDAQ 100 (QQQ)")]:
+        col = f"{b}_Cumulative"
+        if col in df.columns:
+            bcum = df[col].dropna()
+            if len(bcum) >= 2:
+                b_ret = bcum.iloc[-1] / bcum.iloc[0] - 1
+                rows.append((name, t_ret, b_ret, t_ret - b_ret))
+    return rows
+
+
+def _technical_posture(df):
+    """Descriptive read of the current technical indicators — NOT a recommendation.
+
+    Returns {score:0-100, label, color, signals:[str,...]} or None. The label
+    ("Bullish/Mixed/Bearish technicals") describes what the indicators say today;
+    it is deliberately framed as a signal, not advice."""
+    if df is None or len(df) < 2:
+        return None
+    latest = df.iloc[-1]
+
+    def _num(col):
+        v = latest.get(col)
+        try:
+            return float(v) if v is not None and pd.notna(v) else None
+        except Exception:
+            return None
+
+    close, ma50, ma200 = _num("Close"), _num("MA50"), _num("MA200")
+    rsi, macd_h, pct_hi = _num("RSI14"), _num("MACD_Hist"), _num("Pct_From_52W_High")
+    comps = []   # (points 0..1, descriptive text)
+
+    if close is not None and ma50 is not None:
+        comps.append((1.0 if close > ma50 else 0.0,
+                      f"Price is {'above' if close > ma50 else 'below'} the 50-day moving average"))
+    if close is not None and ma200 is not None:
+        comps.append((1.0 if close > ma200 else 0.0,
+                      f"Price is {'above' if close > ma200 else 'below'} the 200-day moving average"))
+    if ma50 is not None and ma200 is not None:
+        up = ma50 > ma200
+        comps.append((1.0 if up else 0.0,
+                      f"50-day MA is {'above' if up else 'below'} the 200-day MA "
+                      f"({'uptrend' if up else 'downtrend'} structure)"))
+    if rsi is not None:
+        zone = ("overbought" if rsi > 70 else "oversold" if rsi < 30
+                else "positive momentum" if rsi >= 50 else "soft momentum")
+        comps.append((max(0.0, min(1.0, (rsi - 30) / 40.0)), f"RSI is {rsi:.0f} — {zone}"))
+    if macd_h is not None:
+        up = macd_h > 0
+        comps.append((1.0 if up else 0.0,
+                      f"MACD is {'above' if up else 'below'} its signal line "
+                      f"({'bullish' if up else 'bearish'} momentum)"))
+    if pct_hi is not None:
+        comps.append((max(0.0, min(1.0, 1.0 + pct_hi / 0.5)),
+                      f"Trading {abs(pct_hi)*100:.0f}% "
+                      f"{'below' if pct_hi < 0 else 'above'} the 52-week high"))
+    rel = _relative_performance_rows(df)
+    if rel:
+        name, _t, _b, diff = rel[0]
+        short = name.split(" (")[0]
+        comps.append((1.0 if diff >= 0 else 0.0,
+                      f"{'Outperforming' if diff >= 0 else 'Lagging'} {short} by "
+                      f"{abs(diff)*100:.1f} pts over the period"))
+
+    if not comps:
+        return None
+    score = round(sum(p for p, _ in comps) / len(comps) * 100)
+    label, color = (("Bullish technicals", GREEN_OK) if score >= 66 else
+                    ("Mixed technicals",   DARK_BLUE) if score >= 40 else
+                    ("Bearish technicals",  RED_BAD))
+    return {"score": score, "label": label, "color": color,
+            "signals": [t for _, t in comps]}
+
+
+def _recent_changes(df, ticker, lookback=5):
+    """Plain-English 'what changed recently' bullets from the last few sessions."""
+    if df is None or len(df) < 2:
+        return []
+    lookback = min(lookback, len(df) - 1)
+    latest   = df.iloc[-1]
+    bullets  = []
+
+    c_now, c_prev = float(latest["Close"]), float(df["Close"].iloc[-1 - lookback])
+    if c_prev:
+        bullets.append(f"Price {(c_now / c_prev - 1) * 100:+.1f}% over the last "
+                       f"{lookback} sessions (${c_prev:,.2f} -> ${c_now:,.2f}).")
+
+    last_rets = df["Daily_Return"].dropna().tail(lookback)
+    if len(last_rets):
+        bullets.append(f"Best day {last_rets.max() * 100:+.1f}%, worst day "
+                       f"{last_rets.min() * 100:+.1f}% in that window.")
+
+    vv = latest.get("Volume_vs_Avg")
+    if vv is not None and pd.notna(vv):
+        vv = float(vv)
+        if vv >= 1.15 or vv <= 0.85:
+            bullets.append(f"Latest volume ran {vv:.1f}x its 20-day average "
+                           f"({(vv - 1) * 100:+.0f}%) — {'heavier' if vv >= 1 else 'lighter'} trading.")
+
+    if "RSI14" in df.columns:
+        r = df["RSI14"].dropna()
+        if len(r) > lookback:
+            r_now, r_prev = float(r.iloc[-1]), float(r.iloc[-1 - lookback])
+            note = (" — now overbought" if r_now > 70 else
+                    " — now oversold" if r_now < 30 else "")
+            bullets.append(f"RSI moved {r_prev:.0f} -> {r_now:.0f}{note}.")
+
+    if "Close_vs_MA50" in df.columns:
+        cvm = df["Close_vs_MA50"].dropna()
+        if len(cvm) > lookback and (cvm.iloc[-1] > 0) != (cvm.iloc[-1 - lookback] > 0):
+            above = cvm.iloc[-1] > 0
+            bullets.append(f"Price crossed {'above' if above else 'below'} its 50-day "
+                           f"moving average in the last {lookback} sessions.")
+
+    if "52W_High" in df.columns:
+        hs = df["52W_High"].dropna()
+        if len(hs) > lookback and hs.iloc[-1] > hs.iloc[-1 - lookback]:
+            bullets.append("Notched a new 52-week high in the last week.")
+    if "52W_Low" in df.columns:
+        ls = df["52W_Low"].dropna()
+        if len(ls) > lookback and ls.iloc[-1] < ls.iloc[-1 - lookback]:
+            bullets.append("Made a new 52-week low in the last week.")
+
+    if "SPY_Cumulative" in df.columns:
+        s = df["SPY_Cumulative"].dropna()
+        t = df["Cumulative_Index"].dropna()
+        if len(s) > lookback and len(t) > lookback:
+            diff = (t.iloc[-1] / t.iloc[-1 - lookback] - 1) - (s.iloc[-1] / s.iloc[-1 - lookback] - 1)
+            bullets.append(f"{'Outpaced' if diff >= 0 else 'Trailed'} the S&P 500 by "
+                           f"{abs(diff) * 100:.1f} pts over the last {lookback} sessions.")
+
+    return bullets[:5]
+
+
+def _mc_plain_language(mc_summary):
+    """Turn the Monte Carlo summary into plain-English downside/upside lines."""
+    if not mc_summary:
+        return []
+    last    = mc_summary.get("Last Price")
+    horizon = mc_summary.get("Forecast Horizon (days)")
+    lines   = []
+    if last:
+        lines.append(f"From today's ${last:,.2f}"
+                     + (f" over ~{horizon} trading days:" if horizon else ":"))
+
+    def _line(label, key):
+        v = mc_summary.get(key)
+        if v is None:
+            return
+        chg = f" ({(v / last - 1) * 100:+.1f}% vs today)" if last else ""
+        lines.append(f"{label}: ${v:,.2f}{chg}")
+
+    _line("Median outcome (P50)",         "Median (P50)")
+    _line("Bear case (P5, ~5% chance)",   "Bear Case (P5)")
+    _line("Low case (P25, ~25% chance)",  "Low Case (P25)")
+    _line("Bull case (P75, ~25% chance)", "Bull Case (P75)")
+    _line("Best case (P95, ~5% chance)",  "Best Case (P95)")
+    prob = mc_summary.get("Prob. of Gain")
+    if prob is not None:
+        lines.append(f"Probability of finishing above today's price: {prob}.")
+    return lines
+
+
+def _humanize_company_value(key, value):
+    """Format company_details values for display instead of dumping raw floats.
+
+    Fixes the "Market Cap 3288094076962.04" issue flagged in review — large money
+    magnitudes render as $T/$B/$M and plain counts get thousands separators.
+    Non-numeric values (already-formatted strings) pass through untouched."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    k = key.lower()
+    if any(w in k for w in ("cap", "value", "revenue", "assets", "debt", "cash")):
+        a = abs(value)
+        if a >= 1e12: return f"${value / 1e12:,.2f}T"
+        if a >= 1e9:  return f"${value / 1e9:,.2f}B"
+        if a >= 1e6:  return f"${value / 1e6:,.2f}M"
+        return f"${value:,.0f}"
+    if float(value).is_integer():
+        return f"{int(value):,}"
+    return f"{value:,.2f}"
+
+
 def _build_dashboard(wb, ticker, df, company_details, mc_summary,
-                     resistance_levels, support_levels, summary_text):
+                     resistance_levels, support_levels, summary_text,
+                     analyst_data=None):
     ws = wb.create_sheet("Dashboard")
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 34
@@ -251,6 +464,102 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
 
     row_cursor = risk_start + 7
 
+    # ── Investor Takeaway — a plain-English lead so the page opens with a view,
+    #    not a wall of numbers (the "dense, little narrative guidance" critique).
+    posture   = _technical_posture(df)
+    consensus = consensus_from_recommendation((analyst_data or {}).get("recommendation"))
+    changes   = _recent_changes(df, ticker)
+
+    sec_hdr(row_cursor, "Investor Takeaway")
+    row_cursor += 1
+    takeaway = [f"{ticker} is {period_ret:+.1f}% over the period, last ${latest['Close']:,.2f}."]
+    if posture:
+        takeaway.append(f"Technical posture: {posture['label']} ({posture['score']}/100).")
+    if consensus:
+        takeaway.append(f"Wall-Street consensus: {consensus['verdict']} "
+                        f"({consensus['total']} analysts).")
+    row_cursor = _narrative_box(ws, row_cursor, "  ".join(takeaway),
+                                height=46, italic=False, bold=True, bg=TILE_BG)
+    if changes:
+        c = ws.cell(row=row_cursor, column=1, value="What changed recently")
+        c.font = Font(name="Calibri", size=10, bold=True, color=DARK_BLUE)
+        row_cursor += 1
+        bullet_text = "\n".join(f"•  {b}" for b in changes)
+        est_lines   = sum(max(1, math.ceil(len(b) / 82)) for b in changes)
+        row_cursor  = _narrative_box(ws, row_cursor, bullet_text,
+                                     height=16 * est_lines + 8, italic=False)
+    row_cursor += 1
+
+    # ── Relative Performance vs benchmarks (uses *_Cumulative already in df) ────
+    rel_rows = _relative_performance_rows(df)
+    if rel_rows:
+        sec_hdr(row_cursor, "Relative Performance")
+        row_cursor += 1
+        t_ret = rel_rows[0][1]
+        for name, _t, _b, diff in rel_rows:
+            kv(row_cursor, f"vs {name}", diff, fmt="+0.0%;-0.0%", rag=("gt", 0))
+            row_cursor += 1
+        abs_bits = [f"{ticker} {t_ret*100:+.1f}%"] + \
+                   [f"{n.split(' (')[0]} {b*100:+.1f}%" for n, _t, b, _d in rel_rows]
+        row_cursor = _narrative_box(ws, row_cursor, "Period return:    " + "      |      ".join(abs_bits),
+                                    height=26, italic=False)
+        row_cursor += 1
+
+    # ── Technical Posture — descriptive read of the indicators, NOT advice ──────
+    if posture:
+        sec_hdr(row_cursor, "Technical Posture")
+        row_cursor += 1
+        kv(row_cursor, "Technical Score (0–100)", posture["score"])
+        row_cursor += 1
+        lc = ws.cell(row=row_cursor, column=1, value="Reading")
+        vc = ws.cell(row=row_cursor, column=2, value=posture["label"])
+        lc.font = Font(name="Calibri", size=10)
+        vc.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
+        vc.fill = PatternFill("solid", fgColor=posture["color"])
+        vc.alignment = Alignment(horizontal="right")
+        lc.border = vc.border = _border()
+        row_cursor += 1
+        for sig in posture["signals"]:
+            sc = ws.cell(row=row_cursor, column=1, value=f"•  {sig}")
+            ws.merge_cells(f"A{row_cursor}:D{row_cursor}")
+            sc.font = Font(name="Calibri", size=9)
+            sc.alignment = Alignment(wrap_text=True, vertical="center")
+            row_cursor += 1
+        row_cursor = _narrative_box(
+            ws, row_cursor,
+            "Describes what the technical indicators say today — a signal, not a "
+            "recommendation. " + DISCLAIMER_SHORT,
+            height=40, italic=True, bg="FFF8E1")
+        row_cursor += 1
+
+    # ── Analyst Consensus — Wall Street's view, clearly attributed (not ours) ───
+    if consensus:
+        sec_hdr(row_cursor, "Analyst Consensus")
+        row_cursor += 1
+        lc = ws.cell(row=row_cursor, column=1, value="Wall-Street Rating")
+        vc = ws.cell(row=row_cursor, column=2, value=consensus["verdict"])
+        lc.font = Font(name="Calibri", size=10)
+        vc.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
+        vc.fill = PatternFill("solid", fgColor=consensus["color"].lstrip("#"))
+        vc.alignment = Alignment(horizontal="right")
+        lc.border = vc.border = _border()
+        row_cursor += 1
+        kv(row_cursor, "Buy (Strong Buy + Buy)", consensus["strong_buy"] + consensus["buy"])
+        row_cursor += 1
+        kv(row_cursor, "Hold", consensus["hold"])
+        row_cursor += 1
+        kv(row_cursor, "Sell (Sell + Strong Sell)", consensus["sell"] + consensus["strong_sell"])
+        row_cursor += 1
+        kv(row_cursor, "Analysts covering", consensus["total"])
+        row_cursor += 1
+        row_cursor = _narrative_box(
+            ws, row_cursor,
+            f"Source: {consensus['total']} Wall-Street analyst ratings aggregated by "
+            f"Finnhub (period {consensus['period']}). This is analysts' consensus, "
+            f"not QuantWizard's opinion. " + DISCLAIMER_SHORT,
+            height=40, italic=True, bg="FFF8E1")
+        row_cursor += 1
+
     if resistance_levels or support_levels:
         sec_hdr(row_cursor, "Support & Resistance Levels")
         row_cursor += 1
@@ -264,6 +573,14 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
         for k, v in mc_summary.items():
             kv(row_cursor, k, str(v))
             row_cursor += 1
+        mc_lines = _mc_plain_language(mc_summary)
+        if mc_lines:
+            body = ("Monte Carlo in plain English\n" + "\n".join(mc_lines)
+                    + "\nSimulated from the historical return distribution — outcomes "
+                      "are probabilities, not guarantees.")
+            row_cursor = _narrative_box(ws, row_cursor, body,
+                                        height=16 * (len(mc_lines) + 3) + 6,
+                                        italic=False, bg=TILE_BG)
         row_cursor += 1
 
     if company_details:
@@ -271,7 +588,7 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
         row_cursor += 1
         for k, v in company_details.items():
             if k != "Description":
-                kv(row_cursor, k, str(v))
+                kv(row_cursor, k, _humanize_company_value(k, v))
                 row_cursor += 1
         row_cursor += 1
 
@@ -816,13 +1133,15 @@ def build_excel(ticker, df, period,
                 news_list=None, peer_df=None,
                 corr_matrix=None,
                 resistance_levels=None, support_levels=None,
-                summary_text="", bar_size="day", fundamentals=None):
+                summary_text="", bar_size="day", fundamentals=None,
+                analyst_data=None):
 
     wb = Workbook()
     wb.remove(wb.active)
 
     ws_dash = _build_dashboard(wb, ticker, df, company_details, mc_summary,
-                                resistance_levels, support_levels, summary_text)
+                                resistance_levels, support_levels, summary_text,
+                                analyst_data=analyst_data)
     ws_p, export_df = _build_price_sheet(wb, df, bar_size=bar_size)
     _build_annual_summary(wb, df)
     _build_news_sheet(wb, news_list)

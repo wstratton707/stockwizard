@@ -1241,6 +1241,11 @@ elif _page == "analysis":
                     except Exception:
                         _fund_report = {"ok": False}
 
+                # Wall-Street consensus for the report (cached → the on-screen
+                # Analyst View below reuses the same call for free). {} for crypto
+                # or when no Finnhub key is configured.
+                _analyst_report = {} if is_crypto else cached_get_analyst_data(ticker_input)
+
                 progress.progress(90, text="Building Excel report...")
                 excel_buf = build_excel(
                     ticker_input, df, period_label,
@@ -1251,6 +1256,7 @@ elif _page == "analysis":
                     resistance_levels=resistance, support_levels=support,
                     summary_text=summary_text,
                     bar_size=bar_size, fundamentals=_fund_report,
+                    analyst_data=_analyst_report,
                 )
 
                 pptx_buf = None
@@ -1530,18 +1536,13 @@ elif _page == "analysis":
                         unsafe_allow_html=True)
                     _ac1, _ac2 = st.columns([3, 2])
                     with _ac1:
-                        _sb, _bb = int((_rec or {}).get("strongBuy", 0)), int((_rec or {}).get("buy", 0))
-                        _hh = int((_rec or {}).get("hold", 0))
-                        _sl, _ssl = int((_rec or {}).get("sell", 0)), int((_rec or {}).get("strongSell", 0))
-                        _tot = _sb + _bb + _hh + _sl + _ssl
-                        if _tot > 0:
-                            _score = (_sb * 2 + _bb - _sl - _ssl * 2) / _tot
-                            _verdict, _vcol = (
-                                ("Strong Buy", "#059669") if _score >= 1.0 else
-                                ("Buy",        "#16a34a") if _score >= 0.3 else
-                                ("Hold",       "#64748b") if _score > -0.3 else
-                                ("Sell",       "#dc2626") if _score > -1.0 else
-                                ("Strong Sell","#991b1b"))
+                        from market_data import consensus_from_recommendation
+                        _cons = consensus_from_recommendation(_rec)
+                        if _cons:
+                            _sb, _bb, _hh = _cons["strong_buy"], _cons["buy"], _cons["hold"]
+                            _sl, _ssl     = _cons["sell"], _cons["strong_sell"]
+                            _tot          = _cons["total"]
+                            _verdict, _vcol = _cons["verdict"], _cons["color"]
                             def _seg(_n, _c):
                                 return f'<div style="width:{_n / _tot * 100:.1f}%;background:{_c}"></div>' if _n else ""
                             _bar = (_seg(_sb, "#059669") + _seg(_bb, "#34d399") + _seg(_hh, "#cbd5e1")

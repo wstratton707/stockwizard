@@ -184,6 +184,38 @@ def get_analyst_data(ticker: str) -> dict:
     return out
 
 
+def consensus_from_recommendation(rec: dict | None) -> dict | None:
+    """Turn a Finnhub recommendation row into a single Wall-Street verdict.
+
+    Shared by the on-screen Analyst View and the Excel report so the Buy/Hold/Sell
+    label is computed identically in both places. Expects a dict shaped like
+    {strongBuy, buy, hold, sell, strongSell, period}; returns None when there are
+    no ratings to score. The verdict is analysts' consensus, not QuantWizard's view.
+    """
+    if not rec:
+        return None
+    sb = int(rec.get("strongBuy", 0) or 0)
+    b  = int(rec.get("buy", 0) or 0)
+    h  = int(rec.get("hold", 0) or 0)
+    s  = int(rec.get("sell", 0) or 0)
+    ss = int(rec.get("strongSell", 0) or 0)
+    total = sb + b + h + s + ss
+    if total == 0:
+        return None
+    score = (sb * 2 + b - s - ss * 2) / total
+    verdict, color = (
+        ("Strong Buy",   "#059669") if score >=  1.0 else
+        ("Buy",          "#16a34a") if score >=  0.3 else
+        ("Hold",         "#64748b") if score >  -0.3 else
+        ("Sell",         "#dc2626") if score >  -1.0 else
+        ("Strong Sell",  "#991b1b"))
+    return {
+        "verdict": verdict, "color": color, "score": score, "total": total,
+        "strong_buy": sb, "buy": b, "hold": h, "sell": s, "strong_sell": ss,
+        "period": str(rec.get("period", ""))[:7],
+    }
+
+
 _YF_INTERVAL = {"day": "1d", "1day": "1d", "week": "1wk", "month": "1mo",
                 "1min": "1m", "5min": "5m", "15min": "15m", "1hour": "1h",
                 "minute": "1m", "hour": "1h"}
