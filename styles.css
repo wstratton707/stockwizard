@@ -67,10 +67,10 @@
   --font-chart: 'DM Sans', 'Inter', sans-serif;
 
   /* ── Radius ── */
-  --r-sm:  6px;
-  --r-md:  10px;
-  --r-lg:  14px;
-  --r-xl:  18px;
+  --r-sm:  5px;
+  --r-md:  8px;
+  --r-lg:  10px;
+  --r-xl:  12px;
   --r-pill: 999px;
 }
 
@@ -136,13 +136,11 @@ footer { visibility: hidden; }
   font-size: 0.82rem !important;
   font-family: var(--font-sans) !important;
   letter-spacing: 0.3px !important;
-  box-shadow: var(--shadow-blue) !important;
-  transition: all 0.18s ease !important;
+  box-shadow: none !important;
+  transition: background 0.15s ease !important;
 }
 [data-testid="stSidebar"] .stButton button:hover {
   background: var(--accent-hover) !important;
-  box-shadow: 0 6px 18px rgba(29,78,216,0.45) !important;
-  transform: translateY(-1px) !important;
 }
 /* Sidebar buttons all have the blue fill, so their labels must be white. The
    inner <p> would otherwise inherit the sidebar's `* { color: --dim2 }` rule,
@@ -220,40 +218,24 @@ footer { visibility: hidden; }
 
 /* ── Main header ── */
 .main-header {
-  background: linear-gradient(135deg, var(--navy) 0%, var(--navy2) 55%, var(--navy3) 100%);
+  background: var(--navy);
   padding: 2.25rem 2.75rem;
-  border-radius: var(--r-xl);
+  border-radius: var(--r-lg);
   margin-bottom: 1.75rem;
-  border: 1px solid rgba(255,255,255,0.06);
-  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(0,0,0,0.04);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
   position: relative;
   overflow: hidden;
-}
-/* Ambient glow blobs */
-.main-header::before {
-  content: '';
-  position: absolute; top: -30%; right: -5%;
-  width: 480px; height: 480px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(59,130,246,0.13) 0%, transparent 65%);
-  pointer-events: none;
-}
-.main-header::after {
-  content: '';
-  position: absolute; bottom: -50%; left: 15%;
-  width: 340px; height: 340px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(125,211,252,0.07) 0%, transparent 68%);
-  pointer-events: none;
 }
 .main-header-logo { display: flex; align-items: center; gap: 0.85rem; margin-bottom: 0.65rem; }
 .main-header-logo-icon {
   width: 42px; height: 42px;
-  background: linear-gradient(135deg, var(--accent3) 0%, var(--accent) 100%);
+  background: var(--accent);
   border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-data);
   font-size: 1.05rem; font-weight: 700;
   color: #ffffff; flex-shrink: 0;
-  box-shadow: 0 4px 14px rgba(59,130,246,0.45);
   letter-spacing: -1px;
 }
 .main-header h1 {
@@ -319,21 +301,16 @@ footer { visibility: hidden; }
   width: 7px; height: 7px;
   background: var(--green); border-radius: 50%;
   display: inline-block; margin-right: 6px;
-  animation: pulse 2s ease-in-out infinite;
 }
 @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.35;transform:scale(0.85)} }
 
 /* ── Stock hero panel ── */
 .stock-hero {
-  background: linear-gradient(180deg, var(--surface) 0%, var(--surface2) 100%);
-  border: 1px solid var(--border); border-radius: var(--r-xl);
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r-lg);
   padding: 1.5rem 1.85rem; margin-bottom: 1.5rem;
   box-shadow: var(--shadow-sm);
   position: relative; overflow: hidden;
-}
-.stock-hero::before {
-  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-  background: linear-gradient(90deg, var(--accent) 0%, var(--accent3) 50%, var(--cyan) 100%);
 }
 .stock-hero-top {
   display: flex; justify-content: space-between; align-items: flex-start;
@@ -380,7 +357,7 @@ footer { visibility: hidden; }
 }
 .stock-hero-meta-dot {
   width: 6px; height: 6px; background: var(--green); border-radius: 50%;
-  display: inline-block; animation: pulse 2s ease-in-out infinite;
+  display: inline-block;
 }
 
 /* Stat ribbon */
@@ -421,7 +398,7 @@ footer { visibility: hidden; }
 }
 .range-bar-fill {
   position: absolute; top: 0; height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--accent3));
+  background: var(--accent);
   border-radius: 2px;
 }
 .range-bar-marker {
@@ -448,15 +425,8 @@ footer { visibility: hidden; }
   transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
   min-width: 0;
 }
-.metric-card::before {
-  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-  background: linear-gradient(90deg, var(--accent), var(--accent3));
-  border-radius: var(--r-lg) var(--r-lg) 0 0;
-}
 .metric-card:hover {
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-  border-color: #bfdbfe;
+  border-color: var(--border2);
 }
 .metric-label {
   font-family: var(--font-sans); font-size: 0.62rem; font-weight: 700;
@@ -495,8 +465,7 @@ footer { visibility: hidden; }
   transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
 }
 .feature-card:hover {
-  box-shadow: var(--shadow-md); transform: translateY(-2px);
-  border-color: #bfdbfe;
+  border-color: var(--border2);
 }
 .feature-card-icon { font-size: 1.6rem; margin-bottom: 0.85rem; display: block; }
 .feature-card-title {
@@ -521,7 +490,6 @@ footer { visibility: hidden; }
 }
 .quickstart-chip:hover {
   background: #eff6ff; border-color: #93c5fd; color: var(--accent);
-  box-shadow: 0 2px 8px rgba(29,78,216,0.1);
 }
 
 /* ── Mover cards ── */
@@ -554,12 +522,11 @@ footer { visibility: hidden; }
 
 /* ── Pro badge ── */
 .pro-badge {
-  background: linear-gradient(135deg, var(--accent), var(--accent3));
+  background: var(--accent);
   color: #ffffff;
   font-family: var(--font-sans); font-size: 0.58rem; font-weight: 700;
   padding: 3px 9px; border-radius: var(--r-pill); letter-spacing: 0.5px;
   margin-left: 8px; vertical-align: middle;
-  box-shadow: 0 1px 4px rgba(29,78,216,0.35);
 }
 
 /* ── Founder cards ── */
@@ -629,8 +596,7 @@ footer { visibility: hidden; }
   transition: all 0.18s ease !important;
 }
 .stDownloadButton button:hover {
-  transform: translateY(-1px) !important;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.12) !important;
+  border-color: var(--border2) !important;
 }
 
 /* ── Primary & download buttons (main area) ── */
@@ -658,14 +624,12 @@ button[kind="primary"],
   font-family: var(--font-sans) !important;
   font-weight: 600 !important;
   letter-spacing: 0.2px !important;
-  box-shadow: var(--shadow-blue) !important;
-  transition: all 0.18s ease !important;
+  box-shadow: none !important;
+  transition: background 0.15s ease !important;
 }
 button[kind="primary"]:hover,
 [data-testid="stBaseButton-primary"]:hover {
   background: var(--accent-hover) !important;
-  box-shadow: 0 6px 18px rgba(29,78,216,0.42) !important;
-  transform: translateY(-1px) !important;
 }
 button[kind="primary"]:active,
 [data-testid="stBaseButton-primary"]:active {
@@ -732,7 +696,8 @@ button[kind="primary"]:active,
   background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
   padding: 1.2rem 1.2rem 0.9rem; min-height: 172px;
 }
-.home-card-icon { font-size: 1.6rem; margin-bottom: 0.5rem; }
+.home-card-icon { font-size: 1.5rem; margin-bottom: 0.6rem; color: var(--accent); line-height: 1; }
+.home-card-icon .material-symbols-outlined { font-size: 1.55rem; }
 .home-card-title { font-weight: 700; font-size: 1.05rem; color: #0f2747; margin-bottom: 0.4rem; }
 .home-card-desc { font-size: 0.88rem; color: #64748b; line-height: 1.55; }
 .home-spotlight-lead h3 { font-size: 1.45rem; font-weight: 700; color: #0f2747; margin: 0 0 0.5rem; line-height: 1.25; }
@@ -774,7 +739,6 @@ button[kind="primary"]:active,
   overflow: hidden;
 }
 [data-testid="stPlotlyChart"]:hover {
-  box-shadow: var(--shadow-md);
   border-color: var(--border2);
 }
 [data-testid="stPlotlyChart"] .js-plotly-plot,
@@ -803,9 +767,7 @@ button[kind="primary"]:active,
 }
 .ticker-tape {
   display: inline-flex; white-space: nowrap;
-  animation: scroll-left 42s linear infinite;
 }
-.ticker-tape:hover { animation-play-state: paused; cursor: default; }
 @keyframes scroll-left {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }
@@ -855,8 +817,8 @@ button[kind="primary"]:active,
 .testimonial-role   { font-family: var(--font-sans); font-size: 0.73rem; color: var(--dim); margin-top: 2px; }
 .social-proof-bar {
   text-align: center; padding: 1.5rem;
-  background: linear-gradient(135deg, #eff6ff, #f0fdf4);
-  border-radius: var(--r-lg); border: 1px solid #dbeafe;
+  background: var(--surface2);
+  border-radius: var(--r-lg); border: 1px solid var(--border);
   margin-bottom: 1.75rem;
 }
 .social-proof-number {

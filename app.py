@@ -334,9 +334,9 @@ if _page == "home":
     </div>
     """, unsafe_allow_html=True)
     _hc = st.columns([1.1, 1.1, 2.8])
-    if _hc[0].button("📈  Analyze a stock", type="primary", use_container_width=True, key="cta_analyze"):
+    if _hc[0].button("Analyze a stock", type="primary", use_container_width=True, key="cta_analyze"):
         _goto("analysis")
-    if _hc[1].button("💼  Build a portfolio", use_container_width=True, key="cta_build"):
+    if _hc[1].button("Build a portfolio", use_container_width=True, key="cta_build"):
         _goto("builder")
 
     # ── Live ticker tape ──────────────────────────────────────────────────────
@@ -347,17 +347,17 @@ if _page == "home":
     # ── What you can do ───────────────────────────────────────────────────────
     st.markdown('<div class="home-section-title">What you can do</div>', unsafe_allow_html=True)
     _cards = [
-        ("📈", "Analysis", "Deep-dive any ticker — price action, technical signals, fundamentals, "
+        ("query_stats", "Analysis", "Deep-dive any ticker — price action, technical signals, fundamentals, "
                            "a Monte Carlo forecast, and peers.", "Open Analysis", "analysis"),
-        ("💼", "Portfolio Builder", "Build a risk-optimized portfolio (CAPM expected returns) from a "
+        ("pie_chart", "Portfolio Builder", "Build a risk-optimized portfolio (CAPM expected returns) from a "
                                     "ranked universe, backtested over 5 years.", "Open Builder", "builder"),
-        ("📁", "Your Portfolios", "Save a portfolio and track its real performance from day one — "
+        ("account_balance_wallet", "Your Portfolios", "Save a portfolio and track its real performance from day one — "
                                   "value vs the S&P 500, drawdown, and holdings.", "Open Portfolios", "portfolios"),
     ]
     for _col, (_ic, _ti, _desc, _btn, _pg) in zip(st.columns(3), _cards):
         with _col:
             st.markdown(f"""<div class="home-card">
-              <div class="home-card-icon">{_ic}</div>
+              <div class="home-card-icon"><span class="material-symbols-outlined">{_ic}</span></div>
               <div class="home-card-title">{_ti}</div>
               <div class="home-card-desc">{_desc}</div>
             </div>""", unsafe_allow_html=True)
@@ -365,7 +365,7 @@ if _page == "home":
                 _goto(_pg)
 
     # ── Excel-export spotlight (the hero feature) — carousel ──────────────────
-    st.markdown('<div class="home-section-title">★ The one-click professional report</div>',
+    st.markdown('<div class="home-section-title">The one-click professional report</div>',
                 unsafe_allow_html=True)
     st.markdown("""
     <div class="home-spotlight-lead">
@@ -397,7 +397,7 @@ if _page == "home":
 # ═════════════════════════════════════════════════════════════════════════════
 elif _page == "analysis":
 
-    with st.expander("⚙️  Analysis inputs", expanded=True):
+    with st.expander("Analysis inputs", expanded=True):
         # Day Trader Mode removed — Investor Mode is the only experience now.
         mode = "Investor Mode"
 
@@ -500,7 +500,7 @@ elif _page == "analysis":
             n_sims = 1000; n_horizon = 252
 
         st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
-        run_btn = st.button("▶  Run Analysis", type="primary", use_container_width=True)
+        run_btn = st.button("Run Analysis", type="primary", use_container_width=True)
 
 
     # ── Landing page (no ticker entered) ─────────────────────────────────────
