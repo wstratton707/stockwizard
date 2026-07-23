@@ -396,22 +396,68 @@ def fetch_sec_financials(ticker, years=10, log=print):
     }
 
 
-def fetch_news(ticker, api_key, log=print):
+_NAME_STOPWORDS = {"inc", "inc.", "corp", "corp.", "corporation", "company", "co",
+                   "holdings", "group", "ltd", "plc", "class", "the", "&", "and",
+                   "technologies", "technology", "international", "systems"}
+
+
+def fetch_news(ticker, api_key, company_name=None, log=print, limit=30):
+    """Ticker news from Polygon, scored for relevance and tagged with sentiment.
+
+    Polygon returns any article that *mentions* the ticker, so "top 10 stocks"
+    round-ups (that name the company only in a long ticker list) leak in and make
+    the feed look uncurated. We rank each article High/Medium/Low using Polygon's
+    per-ticker `insights` (the ticker being analysed = the article is about it),
+    a company-name/ticker match in the title, and how many tickers the article
+    spans; broad round-ups (Low) are dropped. The target ticker's Polygon
+    sentiment is surfaced so the report reads as curated, not a raw feed."""
     log(f"Fetching news for {ticker}...")
     data = _get("/v2/reference/news", api_key, params={
-        "ticker": ticker, "limit": 15, "order": "desc", "sort": "published_utc"
+        "ticker": ticker, "limit": limit, "order": "desc", "sort": "published_utc"
     })
-    news_list = []
-    if data and data.get("results"):
-        for item in data["results"]:
-            news_list.append({
-                "Date":      item.get("published_utc", "")[:16].replace("T", " "),
-                "Headline":  item.get("title", ""),
-                "Publisher": item.get("publisher", {}).get("name", ""),
-                "URL":       item.get("article_url", ""),
-            })
-        log(f"   {len(news_list)} news items")
-    return news_list
+    if not data or not data.get("results"):
+        return []
+
+    tkr = ticker.upper()
+    name_tokens = [w for w in (company_name or "").lower().replace(",", " ").split()
+                   if len(w) > 2 and w not in _NAME_STOPWORDS]
+
+    scored = []
+    for item in data["results"]:
+        tickers  = [t.upper() for t in (item.get("tickers") or [])]
+        insights = item.get("insights") or []
+        title    = item.get("title", "") or ""
+        hay      = (title + " " + (item.get("description", "") or "")).lower()
+
+        ins        = next((i for i in insights if i.get("ticker", "").upper() == tkr), None)
+        sentiment  = (ins.get("sentiment") if ins else None) or ""
+        name_hit   = tkr.lower() in title.lower() or any(tok in hay for tok in name_tokens)
+        n_tickers  = len(tickers)
+
+        if name_hit or ins is not None or n_tickers <= 3:
+            relevance = "High"
+        elif n_tickers <= 8:
+            relevance = "Medium"
+        else:
+            relevance = "Low"
+
+        scored.append({
+            "Date":          item.get("published_utc", "")[:16].replace("T", " "),
+            "Headline":      title,
+            "Publisher":     item.get("publisher", {}).get("name", ""),
+            "URL":           item.get("article_url", ""),
+            "Sentiment":     sentiment.capitalize(),
+            "Relevance":     relevance,
+            "Also_Mentions": max(0, n_tickers - 1),
+        })
+
+    # Drop broad round-ups; if that leaves nothing, fall back to the raw list so the
+    # section never disappears. Most-relevant first, recency preserved within a tier.
+    kept = [n for n in scored if n["Relevance"] != "Low"] or scored
+    rank = {"High": 0, "Medium": 1, "Low": 2}
+    kept.sort(key=lambda n: rank[n["Relevance"]])
+    log(f"   {len(kept)}/{len(scored)} relevant news items")
+    return kept[:15]
 
 
 def fetch_peer_comparison(ticker, peer_tickers, api_key, log=print):

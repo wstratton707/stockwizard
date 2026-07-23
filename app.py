@@ -1147,7 +1147,8 @@ elif _page == "analysis":
                 news_list = []
                 if do_news:
                     progress.progress(35, text="Fetching news...")
-                    news_list = cached_fetch_news(ticker_input, POLYGON_API_KEY)
+                    news_list = cached_fetch_news(ticker_input, POLYGON_API_KEY,
+                                                  company_details.get("Name", ""))
 
                 peer_df       = None
                 peer_price_dfs = {}   # {ticker: df} with Cumulative_Index + Close

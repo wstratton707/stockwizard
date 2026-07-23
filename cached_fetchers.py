@@ -103,8 +103,9 @@ def cached_fetch_sec_financials(ticker):
 
 
 @st.cache_data(ttl=_TTL_SHORT, max_entries=_MAX_ENTRIES, show_spinner=False)
-def cached_fetch_news(ticker, _api_key):
-    return _fetch_news(ticker, _api_key, log=lambda m: None)
+def cached_fetch_news(ticker, _api_key, company_name=""):
+    # company_name (cache-keyed) sharpens relevance scoring via title matching.
+    return _fetch_news(ticker, _api_key, company_name=company_name, log=lambda m: None)
 
 
 @st.cache_data(ttl=_TTL_MEDIUM, max_entries=_MAX_ENTRIES, show_spinner=False)

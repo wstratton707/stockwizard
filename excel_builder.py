@@ -864,21 +864,30 @@ def _build_news_sheet(wb, news_list):
     if not news_list:
         return
     ws_n = wb.create_sheet("News_Headlines")
-    ws_n.append(["Date","Headline","Publisher","URL"])
+    cols = ["Date", "Headline", "Publisher", "Sentiment", "Relevance", "URL"]
+    ws_n.append(cols)
     style_header_row(ws_n)
+    sent_fill = {"Positive": ("C6EFCE", "006100"), "Negative": ("FFC7CE", "9C0006"),
+                 "Neutral":  ("FFF2CC", "7F6000")}
     for ni, item in enumerate(news_list, 2):
-        for ci, key in enumerate(["Date","Headline","Publisher","URL"], 1):
-            c = ws_n.cell(row=ni, column=ci, value=item.get(key,""))
-            c.font = Font(name="Calibri", size=10)
+        for ci, key in enumerate(cols, 1):
+            c = ws_n.cell(row=ni, column=ci, value=item.get(key, ""))
+            c.font   = Font(name="Calibri", size=10)
             c.border = _border()
             if ni % 2 == 0:
                 c.fill = PatternFill("solid", fgColor=GREY_ROW)
-    ws_n.column_dimensions["A"].width = 18
-    ws_n.column_dimensions["B"].width = 80
-    ws_n.column_dimensions["C"].width = 22
-    ws_n.column_dimensions["D"].width = 60
+            # Colour the Sentiment cell so the feed reads as analysed, not raw.
+            if key == "Sentiment" and item.get("Sentiment") in sent_fill:
+                bg, fg = sent_fill[item["Sentiment"]]
+                c.fill = PatternFill("solid", fgColor=bg)
+                c.font = Font(name="Calibri", size=10, bold=True, color=fg)
+                c.alignment = Alignment(horizontal="center")
+            if key == "Relevance":
+                c.alignment = Alignment(horizontal="center")
+    for col, w in zip("ABCDEF", (18, 74, 20, 12, 11, 50)):
+        ws_n.column_dimensions[col].width = w
     ws_n.freeze_panes = "A2"
-    ws_n.auto_filter.ref = "A1:D1"
+    ws_n.auto_filter.ref = f"A1:{get_column_letter(len(cols))}1"
 
 
 # ── Peer comparison sheet ─────────────────────────────────────────────────────
@@ -1384,6 +1393,84 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
         height=52, italic=True, bg="FFF8E1")
 
 
+# ── Methodology & Definitions sheet (de-black-boxes every metric) ─────────────
+def _build_methodology_sheet(wb):
+    ws = wb.create_sheet("Methodology")
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 26
+    ws.column_dimensions["B"].width = 98
+
+    ws.merge_cells("A1:B1")
+    ws["A1"].value = "Methodology & Definitions"
+    ws["A1"].font  = Font(size=14, bold=True, color=DARK_BLUE, name="Calibri")
+    ws.merge_cells("A2:B2")
+    ws["A2"].value = ("Every metric in this report, in plain language and with its key "
+                      "assumptions — so nothing reads as a black box.")
+    ws["A2"].font      = Font(size=9, italic=True, color="888888", name="Calibri")
+    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+
+    row = 4
+    rfr = get_risk_free_rate()
+
+    def section(title, items):
+        nonlocal row
+        ws.merge_cells(f"A{row}:B{row}")
+        c = ws.cell(row=row, column=1, value=title)
+        c.font = Font(bold=True, color=WHITE, name="Calibri", size=11)
+        c.fill = PatternFill("solid", fgColor=DARK_BLUE)
+        ws.row_dimensions[row].height = 18
+        row += 1
+        for term, desc in items:
+            a = ws.cell(row=row, column=1, value=term)
+            b = ws.cell(row=row, column=2, value=desc)
+            a.font = Font(name="Calibri", size=10, bold=True)
+            a.alignment = Alignment(vertical="top", wrap_text=True)
+            b.font = Font(name="Calibri", size=9)
+            b.alignment = Alignment(vertical="top", wrap_text=True)
+            a.border = b.border = _border()
+            ws.row_dimensions[row].height = max(24, 12.5 * (len(desc) // 108 + 1) + 6)
+            row += 1
+        row += 1
+
+    section("Risk & Return", [
+        ("Annualised Volatility", "Standard deviation of daily returns × √252. How much the price swings; higher = riskier."),
+        ("Sharpe Ratio", f"(Annualised return − risk-free rate) ÷ annualised volatility — excess return per unit of total risk. Risk-free rate = current 3-month US Treasury yield via FRED ({rfr*100:.2f}% now). Above 1 is strong."),
+        ("Sortino Ratio", "Like Sharpe, but divides by downside deviation (negative-return days only), so it doesn't penalise upside volatility."),
+        ("Max Drawdown", "Largest peak-to-trough decline over the window — how deep the worst fall was."),
+    ])
+    section("Technical Indicators", [
+        ("Moving Average (20/50/200-day)", "Average close over the last N sessions; smooths the trend. Price above the average is bullish, below is cautionary."),
+        ("RSI (14)", "Relative Strength Index, 0–100. >70 overbought (stretched up), <30 oversold, 30–70 neutral."),
+        ("MACD", "12-day minus 26-day exponential moving average vs a 9-day signal line. MACD above signal = bullish momentum."),
+        ("Bollinger Bands (20, 2σ)", "20-day average ± 2 standard deviations. %B shows where price sits within the bands; near the upper band is relatively high."),
+        ("Support / Resistance", "Recent levels where the stock repeatedly stalled (resistance) or bounced (support), detected from local highs/lows."),
+    ])
+    section("Valuation", [
+        ("P/E · P/S · P/B", "Market cap ÷ net income / revenue / book equity — dollars paid per dollar of earnings, sales, or book value."),
+        ("EV / EBITDA", "Enterprise value (market cap + debt − cash) ÷ EBITDA — a capital-structure-neutral earnings multiple."),
+        ("FCF / Earnings Yield", "Free cash flow / net income ÷ market cap — the cash or earnings return at today's price; higher = cheaper."),
+        ("Reverse-DCF Implied Growth", "The earnings growth the current price implies, solved from a 2-stage DCF (10y explicit + terminal, 9% discount, 2.5% terminal growth)."),
+        ("DCF Fair Value", "Two-stage DCF on free cash flow: PV of 10y of projected FCF + PV of terminal value − net debt, ÷ shares (market cap ÷ price). 9% WACC, 2.5% terminal growth; base FCF normalised over recent years; stage-1 growth fades to terminal. Full workings + sensitivity on the Valuation sheet. A model, not a price target."),
+    ])
+    section("Quality Scores", [
+        ("Piotroski F-Score (0–9)", "Nine pass/fail fundamental-quality tests (profitability, leverage, efficiency) across the two latest fiscal years. Higher = higher quality."),
+        ("Altman Z-Score", "Bankruptcy-risk score from five ratios. >2.99 'safe', 1.81–2.99 'grey', <1.81 'distress'."),
+        ("Technical Posture (0–100)", "A blend of trend (vs 50/200-day MA), RSI, MACD, 52-week location and relative strength. Describes what the indicators say — not a recommendation."),
+        ("Stock Scorecard (0–100)", "Weighted composite of seven factors — valuation, growth, profitability, financial health, momentum, risk, sentiment. Describes the stock's profile; not a buy/sell call."),
+    ])
+    section("Forecasting", [
+        ("Monte Carlo Simulation", "Thousands of simulated 1-year price paths (geometric Brownian motion) with drift and volatility from the stock's own daily-return history. P5–P95 are percentiles of simulated ending prices (P5 = only 5% of paths ended lower) — NOT predictions. Assumes log-normal returns and constant volatility; real markets have fat tails and regime shifts. 'Probability of gain' = share of paths ending above today's price."),
+        ("Custom Forecast (GARCH + ML)", "Optional variant modelling time-varying volatility (GARCH) and a machine-learned drift before simulating; same percentile interpretation."),
+    ])
+    section("Sentiment & Data Sources", [
+        ("Analyst Consensus", "Wall-Street Buy/Hold/Sell counts aggregated by Finnhub, scored into one verdict. Analysts' view, not QuantWizard's."),
+        ("News Relevance & Sentiment", "Headlines are ranked High/Medium/Low for how directly they concern the company (broad round-ups are dropped) and tagged with Polygon's per-article sentiment."),
+        ("Data Sources", "Prices: Yahoo Finance (Polygon fallback), split/dividend-adjusted. Fundamentals: SEC EDGAR (Polygon fallback). News & analyst data: Finnhub / Polygon. Risk-free rate: US Treasury via FRED."),
+        ("Disclaimer", DISCLAIMER_SHORT + " Figures are generated programmatically for information and education only."),
+    ])
+    ws.freeze_panes = "A3"
+
+
 def build_excel(ticker, df, period,
                 company_details=None, sector_df=None,
                 mc_sim_df=None, mc_summary=None,
@@ -1409,13 +1496,15 @@ def build_excel(ticker, df, period,
     _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=df)
     _build_valuation_sheet(wb, ticker, dcf, fundamentals)
     _build_fundamentals_sheet(wb, fundamentals)
+    _build_methodology_sheet(wb)
 
     # Final tab order (Cover first, then Dashboard, then the rest). Valuation sits
     # right after the Dashboard — "what is it worth?" follows "what's the answer?".
-    # The TOC is built from this same order so the cover links match the tab strip.
+    # Methodology is the reference appendix at the end. The TOC is built from this
+    # same order so the cover links match the tab strip.
     desired = ["Cover","Dashboard","Valuation","Fundamentals","Annual_Summary","Price_Indicators","News_Headlines",
                "Peer_Comparison","Sector_Comparison","Correlation_Matrix",
-               "Monte_Carlo","Charts"]
+               "Monte_Carlo","Charts","Methodology"]
     built     = wb.sheetnames                                   # everything except Cover
     toc_order = [s for s in desired if s in built and s != "Cover"]
     extras    = [s for s in built if s not in desired]
