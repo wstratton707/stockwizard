@@ -13,6 +13,7 @@ from datetime import datetime
 from constants import get_risk_free_rate
 from disclaimers import SHORT as DISCLAIMER_SHORT
 from market_data import consensus_from_recommendation
+from analysis import compute_scorecard
 
 try:
     import matplotlib
@@ -362,7 +363,7 @@ def _humanize_company_value(key, value):
 
 def _build_dashboard(wb, ticker, df, company_details, mc_summary,
                      resistance_levels, support_levels, summary_text,
-                     analyst_data=None, dcf=None):
+                     analyst_data=None, dcf=None, fundamentals=None):
     ws = wb.create_sheet("Dashboard")
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 34
@@ -483,6 +484,68 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
                         f"({dcf['upside']*100:+.0f}% vs price).")
     row_cursor = _narrative_box(ws, row_cursor, "  ".join(takeaway),
                                 height=58, italic=False, bold=True, bg=TILE_BG)
+
+    # ── Stock Scorecard — the "investment snapshot" that turns a dozen metrics
+    #    into a graded profile. Descriptive (quality/attractiveness), not buy/sell.
+    _sc_risk = {
+        "sharpe": float(sharpe)  if pd.notna(sharpe)  else None,
+        "vol":    float(ann_std) if pd.notna(ann_std) else None,
+        "max_dd": (float(df["Drawdown_60d"].min())
+                   if pd.notna(df["Drawdown_60d"].min()) else None),
+    }
+    scorecard = compute_scorecard(
+        fundamentals=fundamentals, dcf=dcf,
+        momentum_score=(posture["score"] if posture else None),
+        risk=_sc_risk, consensus=consensus)
+    if scorecard and scorecard.get("ok"):
+        _grade_bg = {"Strong": "548235", "Above-avg": GREEN_OK, "Average": "BF8F00",
+                     "Below-avg": "C55A11", "Weak": RED_BAD}
+        sec_hdr(row_cursor, "Stock Scorecard")
+        row_cursor += 1
+        comp  = scorecard["composite"]
+        ccolor = GREEN_OK if comp >= 65 else "BF8F00" if comp >= 45 else RED_BAD
+        cl = ws.cell(row=row_cursor, column=1, value="Composite Score (0–100)")
+        cv = ws.cell(row=row_cursor, column=2, value=comp)
+        cl.font = Font(name="Calibri", size=10, bold=True)
+        cv.font = Font(name="Calibri", size=12, bold=True, color=WHITE)
+        cv.fill = PatternFill("solid", fgColor=ccolor)
+        cv.alignment = Alignment(horizontal="right")
+        cl.border = cv.border = _border()
+        row_cursor += 1
+        ll = ws.cell(row=row_cursor, column=1, value="Overall Profile")
+        ws.merge_cells(f"B{row_cursor}:C{row_cursor}")
+        lv = ws.cell(row=row_cursor, column=2, value=scorecard["label"])
+        ll.font = Font(name="Calibri", size=10)
+        lv.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
+        lv.fill = PatternFill("solid", fgColor=ccolor)
+        lv.alignment = Alignment(horizontal="right")
+        ll.border = lv.border = _border()
+        row_cursor += 1
+        for ci, h in enumerate(["Factor", "Score", "Grade"], 1):
+            _hdr_cell(ws.cell(row=row_cursor, column=ci, value=h), bg=MID_BLUE)
+        row_cursor += 1
+        for fac in scorecard["factors"]:
+            a = ws.cell(row=row_cursor, column=1, value=fac["name"])
+            b = ws.cell(row=row_cursor, column=2, value=fac["score"])
+            c = ws.cell(row=row_cursor, column=3, value=fac["grade"])
+            a.font = Font(name="Calibri", size=10)
+            b.font = Font(name="Calibri", size=10, bold=True)
+            b.alignment = Alignment(horizontal="right")
+            c.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
+            c.fill = PatternFill("solid", fgColor=_grade_bg.get(fac["grade"], MID_BLUE))
+            c.alignment = Alignment(horizontal="center")
+            a.border = b.border = c.border = _border()
+            row_cursor += 1
+        _details = "   ·   ".join(f"{fac['name']}: {fac['detail']}"
+                                   for fac in scorecard["factors"] if fac["detail"])
+        row_cursor = _narrative_box(
+            ws, row_cursor,
+            "Weighted blend of valuation, growth, profitability, financial health, "
+            "momentum, risk and sentiment — a descriptive profile of the stock's "
+            f"characteristics, not a recommendation.\n{_details}\n" + DISCLAIMER_SHORT,
+            height=96, italic=True, bg="FFF8E1")
+        row_cursor += 1
+
     if changes:
         c = ws.cell(row=row_cursor, column=1, value="What changed recently")
         c.font = Font(name="Calibri", size=10, bold=True, color=DARK_BLUE)
@@ -1335,7 +1398,7 @@ def build_excel(ticker, df, period,
 
     ws_dash = _build_dashboard(wb, ticker, df, company_details, mc_summary,
                                 resistance_levels, support_levels, summary_text,
-                                analyst_data=analyst_data, dcf=dcf)
+                                analyst_data=analyst_data, dcf=dcf, fundamentals=fundamentals)
     ws_p, export_df = _build_price_sheet(wb, df, bar_size=bar_size)
     _build_annual_summary(wb, df)
     _build_news_sheet(wb, news_list)

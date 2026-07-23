@@ -379,6 +379,141 @@ def dcf_valuation(fundamentals, price, wacc=0.09, terminal_growth=0.025, years=1
     }
 
 
+def _score_band(value, bands, higher_better=True):
+    """Map a metric to a 0-100 sub-score via ordered (cutoff, score) bands.
+
+    bands run best→worst. higher_better: value earns a band's score when it is
+    >= that cutoff (cutoffs descending). Otherwise when value <= cutoff (cutoffs
+    ascending). The final band acts as the floor. None-in → None-out."""
+    if value is None:
+        return None
+    for cutoff, score in bands:
+        if (higher_better and value >= cutoff) or (not higher_better and value <= cutoff):
+            return score
+    return bands[-1][1]
+
+
+def compute_scorecard(fundamentals=None, dcf=None, momentum_score=None,
+                      risk=None, consensus=None):
+    """Blend factor sub-scores into a 0-100 composite quality/attractiveness score.
+
+    Descriptive by design — it characterises the stock's *profile* (valuation,
+    growth, profitability, financial health, momentum, risk, sentiment); it is not
+    a buy/sell recommendation (the sourced analyst verdict is surfaced separately).
+    Every factor is None-safe and the composite averages only what it can compute.
+
+    Inputs are already-derived pieces so this stays a pure, testable function:
+      fundamentals  → compute_fundamentals() dict
+      dcf           → dcf_valuation() dict (for the valuation factor's upside)
+      momentum_score→ 0-100 technical-posture score
+      risk          → {"sharpe","vol","max_dd"} (vol/max_dd as decimals)
+      consensus     → consensus_from_recommendation() dict
+    Returns {"ok", "composite", "label", "factors":[{name,score,grade,detail}...]}"""
+    f = fundamentals if (fundamentals and fundamentals.get("ok")) else {}
+    val_, marg, ret_, lev, grw, q, fcf = (
+        f.get("valuation", {}), f.get("margins", {}), f.get("returns", {}),
+        f.get("leverage", {}), f.get("growth", {}), f.get("quality", {}), f.get("fcf", {}))
+
+    def _avg(vals):
+        xs = [v for v in vals if v is not None]
+        return sum(xs) / len(xs) if xs else None
+
+    factors = []   # (name, score, detail, weight)
+
+    # ── Valuation — DCF upside first, free-cash-flow yield as support ──────────
+    val_parts, val_bits = [], []
+    if dcf and dcf.get("ok") and dcf.get("upside") is not None:
+        u = dcf["upside"]
+        val_parts.append(_score_band(u, [(0.30, 92), (0.15, 80), (0.0, 62),
+                                          (-0.15, 45), (-0.30, 32), (-0.60, 18), (-1e9, 8)]))
+        val_bits.append(f"DCF {u * 100:+.0f}%")
+    if fcf.get("fcf_yield") is not None:
+        val_parts.append(_score_band(fcf["fcf_yield"], [(6, 90), (4, 75), (2.5, 60),
+                                                        (1, 45), (0, 30), (-1e9, 15)]))
+        val_bits.append(f"FCF yield {fcf['fcf_yield']:.1f}%")
+    v_score = _avg(val_parts)
+    if v_score is not None:
+        factors.append(("Valuation", v_score, ", ".join(val_bits), 0.20))
+
+    # ── Growth ────────────────────────────────────────────────────────────────
+    g_band = lambda x: _score_band(x, [(20, 95), (15, 85), (10, 72), (5, 55), (0, 38), (-1e9, 15)])
+    g_score = _avg([g_band(grw.get("revenue_cagr")), g_band(grw.get("eps_cagr")),
+                    g_band(grw.get("revenue_yoy"))])
+    if g_score is not None:
+        gb = [f"Rev CAGR {grw['revenue_cagr']:.0f}%"] if grw.get("revenue_cagr") is not None else []
+        if grw.get("eps_cagr") is not None: gb.append(f"EPS CAGR {grw['eps_cagr']:.0f}%")
+        factors.append(("Growth", g_score, ", ".join(gb), 0.15))
+
+    # ── Profitability ─────────────────────────────────────────────────────────
+    p_score = _avg([
+        _score_band(marg.get("net"),   [(20, 90), (15, 80), (10, 66), (5, 48), (0, 28), (-1e9, 12)]),
+        _score_band(ret_.get("roe"),   [(20, 90), (15, 80), (10, 65), (5, 48), (0, 28), (-1e9, 12)]),
+        _score_band(marg.get("gross"), [(50, 88), (40, 78), (30, 66), (20, 52), (10, 38), (-1e9, 20)]),
+    ])
+    if p_score is not None:
+        pb = [f"Net margin {marg['net']:.0f}%"] if marg.get("net") is not None else []
+        if ret_.get("roe") is not None: pb.append(f"ROE {ret_['roe']:.0f}%")
+        factors.append(("Profitability", p_score, ", ".join(pb), 0.15))
+
+    # ── Financial health ──────────────────────────────────────────────────────
+    h_score = _avg([
+        _score_band(lev.get("current_ratio"),  [(2, 88), (1.5, 74), (1.2, 62), (1.0, 50), (-1e9, 30)]),
+        _score_band(lev.get("debt_to_equity"), [(0.3, 88), (0.6, 76), (1.0, 62), (2.0, 42), (1e9, 20)],
+                    higher_better=False),
+        _score_band(q.get("z_score"),          [(3.0, 88), (1.8, 55), (-1e9, 25)]),
+        (q["f_score"] / 9 * 100 if q.get("f_score") is not None else None),
+    ])
+    if h_score is not None:
+        hb = []
+        if q.get("f_score") is not None: hb.append(f"F-Score {q['f_score']}/9")
+        if lev.get("debt_to_equity") is not None: hb.append(f"D/E {lev['debt_to_equity']:.2f}")
+        factors.append(("Financial Health", h_score, ", ".join(hb), 0.15))
+
+    # ── Momentum (technical posture) ──────────────────────────────────────────
+    if momentum_score is not None:
+        factors.append(("Momentum", float(momentum_score),
+                        f"Technical posture {int(momentum_score)}/100", 0.12))
+
+    # ── Risk (higher score = safer / better risk-adjusted) ────────────────────
+    r = risk or {}
+    r_score = _avg([
+        _score_band(r.get("sharpe"),  [(2, 92), (1.5, 82), (1.0, 72), (0.5, 58), (0, 40), (-1e9, 20)]),
+        _score_band(r.get("vol"),     [(0.15, 85), (0.25, 70), (0.35, 55), (0.50, 38), (1e9, 20)],
+                    higher_better=False),
+        _score_band(r.get("max_dd"),  [(-0.10, 85), (-0.20, 68), (-0.35, 48), (-0.50, 30), (-1e9, 15)]),
+    ])
+    if r_score is not None:
+        rb = []
+        if r.get("sharpe") is not None: rb.append(f"Sharpe {r['sharpe']:.2f}")
+        if r.get("max_dd") is not None: rb.append(f"Max DD {r['max_dd'] * 100:.0f}%")
+        factors.append(("Risk", r_score, ", ".join(rb), 0.12))
+
+    # ── Sentiment (Wall-Street consensus) ─────────────────────────────────────
+    if consensus and consensus.get("score") is not None:
+        s_score = max(5.0, min(95.0, 50 + consensus["score"] * 22))
+        factors.append(("Sentiment", s_score,
+                        f"Analysts: {consensus['verdict']} ({consensus['total']})", 0.11))
+
+    if not factors:
+        return {"ok": False}
+
+    tw = sum(w for _, _, _, w in factors)
+    composite = round(sum(sc * w for _, sc, _, w in factors) / tw)
+    label = next(l for c, l in [(75, "Strong overall profile"), (60, "Above-average profile"),
+                                (45, "Mixed profile"), (30, "Below-average profile"),
+                                (-1, "Weak profile")] if composite >= c)
+
+    def _grade(sc):
+        return ("Strong" if sc >= 80 else "Above-avg" if sc >= 65 else
+                "Average" if sc >= 50 else "Below-avg" if sc >= 35 else "Weak")
+
+    return {
+        "ok": True, "composite": composite, "label": label,
+        "factors": [{"name": n, "score": round(sc), "grade": _grade(sc), "detail": d}
+                    for n, sc, d, _ in factors],
+    }
+
+
 def detect_support_resistance(df, window=20, num_levels=5):
     highs = df["High"].values
     lows  = df["Low"].values
