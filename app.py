@@ -45,7 +45,7 @@ from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP
 from analysis import (
     detect_support_resistance, build_correlation_matrix,
     run_monte_carlo, run_custom_forecast, generate_summary_paragraph,
-    compute_fundamentals
+    compute_fundamentals, dcf_valuation
 )
 from excel_builder import build_excel
 from pptx_builder import build_stock_pptx, build_portfolio_pptx, PPTX_AVAILABLE
@@ -1246,6 +1246,16 @@ elif _page == "analysis":
                 # or when no Finnhub key is configured.
                 _analyst_report = {} if is_crypto else cached_get_analyst_data(ticker_input)
 
+                # Forward DCF fair value (FCF-based) for the report. Reuses the
+                # fundamentals already computed above; degrades to {"ok": False}
+                # for crypto or names without positive free cash flow.
+                _dcf_report = {"ok": False}
+                if not is_crypto and _fund_report.get("ok"):
+                    try:
+                        _dcf_report = dcf_valuation(_fund_report, float(df["Close"].iloc[-1]))
+                    except Exception:
+                        _dcf_report = {"ok": False}
+
                 progress.progress(90, text="Building Excel report...")
                 excel_buf = build_excel(
                     ticker_input, df, period_label,
@@ -1256,7 +1266,7 @@ elif _page == "analysis":
                     resistance_levels=resistance, support_levels=support,
                     summary_text=summary_text,
                     bar_size=bar_size, fundamentals=_fund_report,
-                    analyst_data=_analyst_report,
+                    analyst_data=_analyst_report, dcf=_dcf_report,
                 )
 
                 pptx_buf = None

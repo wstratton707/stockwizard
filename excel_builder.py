@@ -362,7 +362,7 @@ def _humanize_company_value(key, value):
 
 def _build_dashboard(wb, ticker, df, company_details, mc_summary,
                      resistance_levels, support_levels, summary_text,
-                     analyst_data=None):
+                     analyst_data=None, dcf=None):
     ws = wb.create_sheet("Dashboard")
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 34
@@ -478,8 +478,11 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
     if consensus:
         takeaway.append(f"Wall-Street consensus: {consensus['verdict']} "
                         f"({consensus['total']} analysts).")
+    if dcf and dcf.get("ok") and dcf.get("upside") is not None:
+        takeaway.append(f"DCF fair value ${dcf['fair_value']:,.0f} "
+                        f"({dcf['upside']*100:+.0f}% vs price).")
     row_cursor = _narrative_box(ws, row_cursor, "  ".join(takeaway),
-                                height=46, italic=False, bold=True, bg=TILE_BG)
+                                height=58, italic=False, bold=True, bg=TILE_BG)
     if changes:
         c = ws.cell(row=row_cursor, column=1, value="What changed recently")
         c.font = Font(name="Calibri", size=10, bold=True, color=DARK_BLUE)
@@ -558,6 +561,41 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
             f"Finnhub (period {consensus['period']}). This is analysts' consensus, "
             f"not QuantWizard's opinion. " + DISCLAIMER_SHORT,
             height=40, italic=True, bg="FFF8E1")
+        row_cursor += 1
+
+    # ── Fair Value (DCF) — a valuation conclusion, honestly assumption-driven ───
+    if dcf and dcf.get("ok"):
+        sec_hdr(row_cursor, "Fair Value (DCF)")
+        row_cursor += 1
+        up = dcf.get("upside")
+        verdict, vcolor = (("Undervalued vs DCF", GREEN_OK) if up is not None and up > 0.15 else
+                           ("Overvalued vs DCF",  RED_BAD)  if up is not None and up < -0.15 else
+                           ("Fairly valued vs DCF", DARK_BLUE))
+        kv(row_cursor, "DCF Fair Value / Share", dcf["fair_value"], fmt='_($* #,##0.00_)')
+        row_cursor += 1
+        if up is not None:
+            kv(row_cursor, "Upside / Downside", up, fmt="+0.0%;-0.0%", rag=("gt", 0))
+            row_cursor += 1
+        lc = ws.cell(row=row_cursor, column=1, value="DCF Verdict")
+        vc = ws.cell(row=row_cursor, column=2, value=verdict)
+        lc.font = Font(name="Calibri", size=10)
+        vc.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
+        vc.fill = PatternFill("solid", fgColor=vcolor)
+        vc.alignment = Alignment(horizontal="right")
+        lc.border = vc.border = _border()
+        row_cursor += 1
+        scn  = dcf.get("scenarios", {})
+        bear, bull = scn.get("bear", {}), scn.get("bull", {})
+        imp  = dcf.get("market_implied_growth")
+        note = (f"2-stage FCF DCF: {dcf['wacc']*100:.0f}% WACC, "
+                f"{dcf['terminal_growth']*100:.1f}% terminal growth, {dcf['years']}y, "
+                f"base FCF growth {dcf['base_growth']*100:.1f}%. ")
+        if bear.get("fair_value") and bull.get("fair_value"):
+            note += f"Bear ${bear['fair_value']:,.0f} / Bull ${bull['fair_value']:,.0f}. "
+        if imp is not None:
+            note += f"Today's price implies ~{imp*100:.0f}% FCF growth for a decade. "
+        note += "Full workings on the Valuation sheet. " + DISCLAIMER_SHORT
+        row_cursor = _narrative_box(ws, row_cursor, note, height=56, italic=True, bg="FFF8E1")
         row_cursor += 1
 
     if resistance_levels or support_levels:
@@ -1127,6 +1165,162 @@ def _build_fundamentals_sheet(wb, fundamentals):
         ws.column_dimensions[col].width = 12
 
 
+# ── Valuation sheet (transparent DCF: conclusion, scenarios, projection, sensitivity)
+def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
+    if not dcf or not dcf.get("ok"):
+        return
+    ws = wb.create_sheet("Valuation")
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 32
+    for col in ("B", "C", "D", "E", "F"):
+        ws.column_dimensions[col].width = 15
+
+    def _bn(x):
+        return f"${x / 1e9:,.1f}B" if isinstance(x, (int, float)) else "—"
+
+    ws.merge_cells("A1:F1")
+    t = ws["A1"]
+    t.value = f"{ticker} — Discounted Cash Flow Valuation"
+    t.font  = Font(size=14, bold=True, color=DARK_BLUE, name="Calibri")
+    ws.merge_cells("A2:F2")
+    sub = ws["A2"]
+    sub.value = ("Two-stage unlevered DCF on free cash flow.  Fair value = "
+                 "(PV of projected FCF + PV of terminal value − net debt) ÷ shares.  "
+                 "Assumption-driven — a valuation lens, not a price target.")
+    sub.font      = Font(size=9, italic=True, color="888888", name="Calibri")
+    sub.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.row_dimensions[2].height = 26
+
+    def sec(row, label, span="F"):
+        ws.merge_cells(f"A{row}:{span}{row}")
+        c = ws.cell(row=row, column=1, value=label)
+        c.font = Font(bold=True, color=WHITE, name="Calibri", size=11)
+        c.fill = PatternFill("solid", fgColor=DARK_BLUE)
+        ws.row_dimensions[row].height = 18
+
+    def kv2(row, label, value, bold=True):
+        cl = ws.cell(row=row, column=1, value=label)
+        cv = ws.cell(row=row, column=2, value=value)
+        cl.font = Font(name="Calibri", size=10)
+        cv.font = Font(name="Calibri", size=10, bold=bold)
+        cv.alignment = Alignment(horizontal="right")
+        cl.border = cv.border = _border()
+
+    row = 4
+    # ── Conclusion ────────────────────────────────────────────────────────────
+    sec(row, "Conclusion"); row += 1
+    up = dcf.get("upside")
+    verdict, vcol = (("Undervalued vs DCF", GREEN_OK) if up is not None and up > 0.15 else
+                     ("Overvalued vs DCF",  RED_BAD)  if up is not None and up < -0.15 else
+                     ("Fairly valued vs DCF", DARK_BLUE))
+    kv2(row, "Base-case Fair Value / Share", f"${dcf['fair_value']:,.2f}"); row += 1
+    kv2(row, "Current Price",                f"${dcf['price']:,.2f}");      row += 1
+    kv2(row, "Upside / Downside", f"{up * 100:+.1f}%" if up is not None else "—"); row += 1
+    ws.cell(row=row, column=1, value="Verdict").font = Font(name="Calibri", size=10)
+    vc = ws.cell(row=row, column=2, value=verdict)
+    vc.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
+    vc.fill = PatternFill("solid", fgColor=vcol)
+    vc.alignment = Alignment(horizontal="right")
+    ws.cell(row=row, column=1).border = vc.border = _border()
+    row += 2
+
+    # ── Scenarios ─────────────────────────────────────────────────────────────
+    sec(row, "Scenarios"); row += 1
+    for ci, h in enumerate(["Scenario", "Stage-1 FCF Growth", "Fair Value / Share",
+                            "Upside / Downside"], 1):
+        _hdr_cell(ws.cell(row=row, column=ci, value=h), bg=MID_BLUE)
+    row += 1
+    for name, key in [("Bear", "bear"), ("Base", "base"), ("Bull", "bull")]:
+        s = dcf["scenarios"].get(key, {})
+        vals = [name,
+                f"{s.get('growth', 0) * 100:.1f}%",
+                f"${s['fair_value']:,.2f}" if s.get("fair_value") else "—",
+                f"{s['upside'] * 100:+.1f}%" if s.get("upside") is not None else "—"]
+        for ci, v in enumerate(vals, 1):
+            c = ws.cell(row=row, column=ci, value=v)
+            c.font   = Font(name="Calibri", size=10, bold=(name == "Base"))
+            c.border = _border()
+            if name == "Base":
+                c.fill = PatternFill("solid", fgColor="D6E4F0")
+        row += 1
+    row += 1
+
+    # ── Key assumptions ───────────────────────────────────────────────────────
+    sec(row, "Key Assumptions"); row += 1
+    imp = dcf.get("market_implied_growth")
+    for lbl, val in [
+        ("Discount rate (WACC)",                f"{dcf['wacc'] * 100:.1f}%"),
+        ("Terminal growth rate",                f"{dcf['terminal_growth'] * 100:.1f}%"),
+        ("Explicit forecast horizon",           f"{dcf['years']} years"),
+        ("Normalised base FCF",                 _bn(dcf['base_fcf'])),
+        ("Base-case stage-1 growth",            f"{dcf['base_growth'] * 100:.1f}%"),
+        ("Net debt (total debt − cash)",        _bn(dcf['net_debt'])),
+        ("Shares (market cap ÷ price)",         f"{dcf['shares'] / 1e9:,.2f}B"),
+        ("Market-implied FCF growth (at today's price)",
+         f"{imp * 100:.1f}%" if imp is not None else "—"),
+    ]:
+        kv2(row, lbl, val); row += 1
+    row += 1
+
+    # ── Base-case projection + EV→equity bridge ───────────────────────────────
+    sec(row, "Base-Case Projection & Value Bridge"); row += 1
+    for ci, h in enumerate(["Year", "Growth", "Projected FCF", "PV of FCF"], 1):
+        _hdr_cell(ws.cell(row=row, column=ci, value=h), bg=MID_BLUE)
+    row += 1
+    for p in dcf["projection"]:
+        vals = [p["year"], f"{p['growth'] * 100:.1f}%", _bn(p["fcf"]), _bn(p["pv"])]
+        for ci, v in enumerate(vals, 1):
+            c = ws.cell(row=row, column=ci, value=v)
+            c.font   = Font(name="Calibri", size=10)
+            c.border = _border()
+            if row % 2 == 0:
+                c.fill = PatternFill("solid", fgColor=GREY_ROW)
+        row += 1
+    for lbl, val in [("PV of explicit FCF",   _bn(dcf["pv_explicit"])),
+                     ("Terminal value",        _bn(dcf["terminal_value"])),
+                     ("PV of terminal value",  _bn(dcf["pv_terminal"])),
+                     ("Enterprise value",      _bn(dcf["enterprise_value"])),
+                     ("Less: net debt",        _bn(dcf["net_debt"])),
+                     ("Equity value",          _bn(dcf["equity_value"]))]:
+        kv2(row, lbl, val); row += 1
+    row += 1
+
+    # ── Sensitivity grid (WACC × terminal growth) ─────────────────────────────
+    sec(row, "Sensitivity — Fair Value / Share  (WACC × Terminal Growth)"); row += 1
+    sens = dcf["sensitivity"]
+    corner = ws.cell(row=row, column=1, value="WACC ╲ Term. g")
+    corner.font   = Font(bold=True, size=9, name="Calibri")
+    corner.border = _border()
+    for cj, tg in enumerate(sens["tg_axis"], 2):
+        _hdr_cell(ws.cell(row=row, column=cj, value=f"{tg * 100:.1f}%"), bg=MID_BLUE)
+    row += 1
+    grid_top = row
+    for ri, w in enumerate(sens["wacc_axis"]):
+        _hdr_cell(ws.cell(row=row, column=1, value=f"{w * 100:.1f}%"), bg=MID_BLUE)
+        for cj, fv in enumerate(sens["grid"][ri], 2):
+            c = ws.cell(row=row, column=cj, value=(round(fv, 2) if fv else None))
+            c.number_format = '_($* #,##0.00_)'
+            c.font          = Font(name="Calibri", size=10)
+            c.border        = _border()
+            c.alignment     = Alignment(horizontal="right")
+        row += 1
+    last_col = get_column_letter(1 + len(sens["tg_axis"]))
+    ws.conditional_formatting.add(
+        f"B{grid_top}:{last_col}{row - 1}",
+        ColorScaleRule(start_type="min",        start_color="FFC7CE",
+                       mid_type="percentile",   mid_value=50, mid_color="FFEB9C",
+                       end_type="max",          end_color="C6EFCE"))
+    row += 1
+
+    _narrative_box(
+        ws, row,
+        "A DCF is a model, not a forecast. Small changes in WACC, terminal growth, or "
+        "the FCF growth path move fair value materially — see the sensitivity grid. Base "
+        "FCF is normalised over recent years; shares are derived from market cap ÷ price. "
+        + DISCLAIMER_SHORT,
+        height=52, italic=True, bg="FFF8E1")
+
+
 def build_excel(ticker, df, period,
                 company_details=None, sector_df=None,
                 mc_sim_df=None, mc_summary=None,
@@ -1134,14 +1328,14 @@ def build_excel(ticker, df, period,
                 corr_matrix=None,
                 resistance_levels=None, support_levels=None,
                 summary_text="", bar_size="day", fundamentals=None,
-                analyst_data=None):
+                analyst_data=None, dcf=None):
 
     wb = Workbook()
     wb.remove(wb.active)
 
     ws_dash = _build_dashboard(wb, ticker, df, company_details, mc_summary,
                                 resistance_levels, support_levels, summary_text,
-                                analyst_data=analyst_data)
+                                analyst_data=analyst_data, dcf=dcf)
     ws_p, export_df = _build_price_sheet(wb, df, bar_size=bar_size)
     _build_annual_summary(wb, df)
     _build_news_sheet(wb, news_list)
@@ -1150,11 +1344,13 @@ def build_excel(ticker, df, period,
     _build_correlation_sheet(wb, corr_matrix)
     ws_mc_data = _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary)
     _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=df)
+    _build_valuation_sheet(wb, ticker, dcf, fundamentals)
     _build_fundamentals_sheet(wb, fundamentals)
 
-    # Final tab order (Cover first, then Dashboard, then the rest). The TOC is
-    # built from this same order so the cover links match the tab strip.
-    desired = ["Cover","Dashboard","Fundamentals","Annual_Summary","Price_Indicators","News_Headlines",
+    # Final tab order (Cover first, then Dashboard, then the rest). Valuation sits
+    # right after the Dashboard — "what is it worth?" follows "what's the answer?".
+    # The TOC is built from this same order so the cover links match the tab strip.
+    desired = ["Cover","Dashboard","Valuation","Fundamentals","Annual_Summary","Price_Indicators","News_Headlines",
                "Peer_Comparison","Sector_Comparison","Correlation_Matrix",
                "Monte_Carlo","Charts"]
     built     = wb.sheetnames                                   # everything except Cover

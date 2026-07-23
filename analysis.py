@@ -242,8 +242,140 @@ def compute_fundamentals(financials, market_cap=None, price=None):
         "growth": growth, "valuation": valuation,
         "fcf": fcf_block, "ev_ebitda": ev_ebitda, "quality": quality,
         "implied_growth": implied_growth,
+        # Net debt (total debt − cash) and enterprise value power the DCF's
+        # EV→equity bridge; None when the balance-sheet fields are unavailable.
+        "net_debt": (((total_debt or 0) - (cash_bal or 0))
+                     if (total_debt is not None or cash_bal is not None) else None),
+        "ev": ev,
         "trend": trend,
         "source": financials.get("source", "Polygon") if isinstance(financials, dict) else "Polygon",
+    }
+
+
+def dcf_valuation(fundamentals, price, wacc=0.09, terminal_growth=0.025, years=10):
+    """Two-stage unlevered DCF (FCFF) → fair value per share + upside/downside.
+
+    Transparent by construction: returns every assumption, the year-by-year
+    projection, the enterprise-value→equity bridge, bull/base/bear scenarios, a
+    WACC × terminal-growth sensitivity grid, and the FCF growth the market is
+    implying at today's price. Shares are derived from market cap ÷ price so no
+    separate share count is needed and the result ties out to the quoted price.
+
+    Assumptions mirror the reverse-DCF (_reverse_dcf_growth): 9% WACC, 2.5%
+    terminal growth, 10-year horizon. Base FCF is the mean of up to the last 3
+    positive annual FCF values (normalises a single noisy capex year). Stage-1
+    growth fades linearly to the terminal rate over the horizon.
+
+    Returns {"ok": False, "reason": ...} when a credible DCF can't be built
+    (missing price/market cap, or no positive free cash flow to project)."""
+    if not fundamentals or not fundamentals.get("ok"):
+        return {"ok": False, "reason": "fundamentals unavailable"}
+    if not price or price <= 0:
+        return {"ok": False, "reason": "no price"}
+    mcap = fundamentals.get("market_cap")
+    if not mcap or mcap <= 0:
+        return {"ok": False, "reason": "no market cap"}
+    if wacc <= terminal_growth:
+        return {"ok": False, "reason": "WACC must exceed terminal growth"}
+
+    # Base FCF: average of up to the last 3 positive annual FCF values (the trend
+    # array is oldest→newest); fall back to the single latest FCF.
+    fcf_hist = [x for x in (fundamentals.get("trend", {}).get("fcf") or [])
+                if isinstance(x, (int, float)) and x > 0]
+    base_fcf = (sum(fcf_hist[-3:]) / len(fcf_hist[-3:])) if fcf_hist else None
+    if base_fcf is None:
+        latest = fundamentals.get("fcf", {}).get("fcf")
+        base_fcf = latest if (isinstance(latest, (int, float)) and latest > 0) else None
+    if not base_fcf or base_fcf <= 0:
+        return {"ok": False, "reason": "no positive free cash flow to project"}
+
+    net_debt = fundamentals.get("net_debt") or 0.0
+    shares   = mcap / price
+
+    # Base-case stage-1 growth: FCF CAGR if it's sane, else revenue CAGR, else 8%.
+    # Clamped so the model can't assume implausible decade-long hyper-growth.
+    fcf_cagr = None
+    if len(fcf_hist) >= 2 and fcf_hist[0] > 0:
+        n = len(fcf_hist) - 1
+        fcf_cagr = (fcf_hist[-1] / fcf_hist[0]) ** (1 / n) - 1
+    rev_cagr = fundamentals.get("growth", {}).get("revenue_cagr")
+    g_base = (fcf_cagr if fcf_cagr is not None
+              else (rev_cagr / 100.0 if isinstance(rev_cagr, (int, float)) else 0.08))
+    g_base = max(terminal_growth + 0.005, min(g_base, 0.20))
+
+    def _fair_value(g1, w=wacc, tg=terminal_growth):
+        """Enterprise value → equity → per-share for a given stage-1 growth."""
+        if w <= tg:
+            return None, None
+        proj, fcf, pv_sum = [], base_fcf, 0.0
+        for t in range(1, years + 1):
+            g_t = g1 + (tg - g1) * (t - 1) / (years - 1) if years > 1 else tg
+            fcf = fcf * (1 + g_t)
+            pv  = fcf / (1 + w) ** t
+            pv_sum += pv
+            proj.append({"year": t, "growth": g_t, "fcf": fcf, "pv": pv})
+        term_val = proj[-1]["fcf"] * (1 + tg) / (w - tg)
+        pv_term  = term_val / (1 + w) ** years
+        ev       = pv_sum + pv_term
+        equity   = ev - net_debt
+        fv       = equity / shares if shares else None
+        return fv, {"projection": proj, "pv_explicit": pv_sum, "terminal_value": term_val,
+                    "pv_terminal": pv_term, "enterprise_value": ev, "equity_value": equity}
+
+    fv_base, detail = _fair_value(g_base)
+
+    def _scn(g1):
+        fv, _ = _fair_value(g1)
+        return {"growth": g1, "fair_value": fv,
+                "upside": (fv / price - 1) if fv else None}
+
+    scenarios = {
+        "bear": _scn(max(terminal_growth + 0.005, g_base - 0.03)),
+        "base": _scn(g_base),
+        "bull": _scn(min(0.25, g_base + 0.03)),
+    }
+
+    # WACC × terminal-growth sensitivity of the base-case fair value per share.
+    wacc_axis = [round(wacc + d, 4) for d in (-0.02, -0.01, 0.0, 0.01, 0.02)]
+    tg_axis   = [round(terminal_growth + d, 4) for d in (-0.01, -0.005, 0.0, 0.005, 0.01)]
+    sensitivity = []
+    for w in wacc_axis:
+        row = []
+        for tg in tg_axis:
+            fv, _ = _fair_value(g_base, w=w, tg=tg)
+            row.append(fv)
+        sensitivity.append(row)
+
+    # Reverse-solve the stage-1 FCF growth the market is pricing in at today's price.
+    implied_growth = None
+    lo, hi = -0.20, 0.50
+    fv_lo, _ = _fair_value(lo)
+    fv_hi, _ = _fair_value(hi)
+    if fv_lo is not None and fv_hi is not None and fv_lo <= price <= fv_hi:
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            fv_mid, _ = _fair_value(mid)
+            if fv_mid < price:
+                lo = mid
+            else:
+                hi = mid
+        implied_growth = (lo + hi) / 2
+
+    return {
+        "ok": True,
+        "price": price, "fair_value": fv_base,
+        "upside": (fv_base / price - 1) if fv_base else None,
+        "wacc": wacc, "terminal_growth": terminal_growth, "years": years,
+        "base_fcf": base_fcf, "base_growth": g_base, "net_debt": net_debt,
+        "shares": shares, "market_implied_growth": implied_growth,
+        "enterprise_value": detail["enterprise_value"],
+        "equity_value": detail["equity_value"],
+        "pv_explicit": detail["pv_explicit"],
+        "terminal_value": detail["terminal_value"],
+        "pv_terminal": detail["pv_terminal"],
+        "projection": detail["projection"],
+        "scenarios": scenarios,
+        "sensitivity": {"wacc_axis": wacc_axis, "tg_axis": tg_axis, "grid": sensitivity},
     }
 
 
