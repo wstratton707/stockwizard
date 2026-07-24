@@ -661,21 +661,48 @@ button[kind^="primary"]:active,
 
 .st-key-topnav {
   position: sticky; top: 0; z-index: 1000;
-  background: #0b1220; border-bottom: 1px solid rgba(255,255,255,0.08);
-  padding: 0.15rem 1rem; margin-bottom: 1.1rem; border-radius: 0 0 10px 10px;
+  background: #0b1220;
+  border-bottom: 1px solid rgba(255,255,255,0.09);
+  box-shadow: 0 6px 18px rgba(4,10,20,0.28);
+  padding: 0.4rem 1.35rem; margin-bottom: 1.4rem; border-radius: 0 0 12px 12px;
 }
-.st-key-topnav [data-testid="stHorizontalBlock"] { align-items: center; gap: 0.25rem; }
+.st-key-topnav [data-testid="stHorizontalBlock"] { align-items: center; gap: 0.3rem; }
+
+/* Brand lockup — a solid accent mark tile + a clean wordmark (replaces the bare ◈). */
 .topnav-brand {
-  font-weight: 800; font-size: 1.15rem; color: #38bdf8; letter-spacing: 0.3px;
-  padding: 0.55rem 0; white-space: nowrap;
+  display: flex; align-items: center; gap: 0.6rem;
+  white-space: nowrap; padding: 0.28rem 0;
 }
+.topnav-mark {
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.topnav-mark .material-symbols-outlined { font-size: 19px; color: #ffffff; }
+.topnav-word {
+  font-family: var(--font-sans); font-weight: 700; font-size: 1.16rem;
+  color: #eaf1ff; letter-spacing: 0.2px; line-height: 1;
+}
+.topnav-word b { color: var(--cyan-bright); font-weight: 700; }
+
+/* Nav links — quiet by default, crisp pill when active. */
 .st-key-topnav button {
-  background: transparent !important; border: none !important; box-shadow: none !important;
-  color: #a9b6c6 !important; font-weight: 600 !important; border-radius: 7px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  color: #9fb0c6 !important;
+  font-weight: 600 !important; font-size: 0.9rem !important;
+  border-radius: 8px !important;
+  transition: color 0.15s ease, background 0.15s ease !important;
 }
-.st-key-topnav button:hover { color: #fff !important; background: rgba(255,255,255,0.07) !important; }
+.st-key-topnav button:not([data-testid*="primary"]):hover {
+  color: #ffffff !important; background: rgba(255,255,255,0.06) !important;
+}
+.st-key-topnav [data-testid="stBaseButton-primary"],
+.st-key-topnav [data-testid="stBaseButton-primary"] * { color: #ffffff !important; }
 .st-key-topnav [data-testid="stBaseButton-primary"] {
-  color: #fff !important; background: rgba(56,189,240,0.18) !important;
+  background: rgba(56,189,248,0.16) !important;
+  border: 1px solid rgba(56,189,248,0.32) !important;
 }
 
 /* ── Home page ── */

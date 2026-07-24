@@ -143,11 +143,17 @@ def _goto(pg):
     st.rerun()
 
 with st.container(key="topnav"):
-    _nc = st.columns([2.3, 1, 1.1, 1.9, 1.7], vertical_alignment="center")
-    _nc[0].markdown('<div class="topnav-brand">◈ QuantWizard</div>', unsafe_allow_html=True)
+    # Brand (left) · flexible spacer · nav links clustered to the right.
+    _nc = st.columns([2.4, 2.2, 1.0, 1.3, 2.1, 1.9], vertical_alignment="center")
+    _nc[0].markdown(
+        '<div class="topnav-brand">'
+        '<span class="topnav-mark">'
+        '<span class="material-symbols-outlined">candlestick_chart</span></span>'
+        '<span class="topnav-word">Quant<b>Wizard</b></span>'
+        '</div>', unsafe_allow_html=True)
     for _i, (_lbl, _pg) in enumerate(
             [("Home", "home"), ("Analysis", "analysis"),
-             ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=1):
+             ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=2):
         if _nc[_i].button(_lbl, key=f"nav_{_pg}", use_container_width=True,
                           type="primary" if _page == _pg else "tertiary"):
             _goto(_pg)
