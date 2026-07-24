@@ -679,6 +679,8 @@ button[kind^="primary"]:active,
   display: flex; align-items: center; justify-content: center;
 }
 .topnav-mark .material-symbols-outlined { font-size: 19px; color: #ffffff; }
+/* Crystal-gem logo mark — light line-art reads directly on the dark bar (no tile). */
+.topnav-mark-img { height: 30px; width: auto; display: block; flex-shrink: 0; }
 .topnav-word {
   font-family: var(--font-sans); font-weight: 700; font-size: 1.16rem;
   color: #eaf1ff; letter-spacing: 0.2px; line-height: 1;

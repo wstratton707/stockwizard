@@ -4,6 +4,7 @@ Generates a polished stock analysis or portfolio deck using python-pptx + matplo
 """
 
 import io
+import os
 import math
 import re
 import numpy as np
@@ -47,6 +48,9 @@ C_GREY_TEXT = RGBColor(0x64, 0x74, 0x8B)
 
 SLIDE_W = Inches(13.33)
 SLIDE_H = Inches(7.5)
+
+# Full logo (light line-art on transparent) — shows on the dark cover slide.
+_ASSET_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_full.png")
 
 MPL_COLORS = {
     "navy":   "#1F4E79",
@@ -505,8 +509,17 @@ def build_stock_pptx(ticker, df, period_label,
     _rect(sl, 0.6, 1.35, 0.09, 2.45, fill_rgb=C_ACCENT)                  # left accent bar
 
     company_name = cd.get("Name", ticker)
-    _text_box(sl, "QUANTWIZARD", 0.9, 0.85, 12, 0.5,
-              font_size=14, bold=True, color=C_ACCENT, align=PP_ALIGN.LEFT)
+    # Full logo top-right on the dark cover (replaces the plain "QUANTWIZARD"
+    # wordmark — the logo carries the name). Falls back to the wordmark text.
+    if os.path.exists(_ASSET_LOGO):
+        try:
+            sl.shapes.add_picture(_ASSET_LOGO, Inches(10.05), Inches(0.55), height=Inches(2.05))
+        except Exception:
+            _text_box(sl, "QUANTWIZARD", 0.9, 0.85, 12, 0.5,
+                      font_size=14, bold=True, color=C_ACCENT, align=PP_ALIGN.LEFT)
+    else:
+        _text_box(sl, "QUANTWIZARD", 0.9, 0.85, 12, 0.5,
+                  font_size=14, bold=True, color=C_ACCENT, align=PP_ALIGN.LEFT)
     _text_box(sl, ticker, 0.86, 1.3, 12, 1.2,
               font_size=66, bold=True, color=C_WHITE, align=PP_ALIGN.LEFT)
     _text_box(sl, company_name, 0.9, 2.65, 12, 0.6,

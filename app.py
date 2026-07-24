@@ -58,9 +58,26 @@ from disclaimers import render_inline, render_section, render_footer
 import disclaimers as _disc
 
 # ── Page config ───────────────────────────────────────────────────────────────
-# Page icon falls back to the diamond glyph if the logo file isn't present yet.
-_LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo.png")
-_page_icon = _LOGO_PATH if os.path.exists(_LOGO_PATH) else "◈"
+# Brand assets: a bold gem-on-blue favicon (browser tab), the crystal-gem nav
+# mark, and the full logo for big/dark placements. Each degrades gracefully.
+_ASSETS    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+_LOGO_PATH = os.path.join(_ASSETS, "logo_full.png")   # cleaned full logo (dark placements)
+_FAVICON   = os.path.join(_ASSETS, "favicon.png")     # tab icon
+_MARK_PATH = os.path.join(_ASSETS, "mark.png")        # crystal-gem nav mark
+
+
+def _b64_img(path):
+    """Read an image file as a base64 string (for inline data: URIs). '' on miss."""
+    try:
+        import base64
+        with open(path, "rb") as _f:
+            return base64.b64encode(_f.read()).decode("ascii")
+    except Exception:
+        return ""
+
+
+_MARK_B64  = _b64_img(_MARK_PATH)
+_page_icon = _FAVICON if os.path.exists(_FAVICON) else "◈"
 st.set_page_config(
     page_title="QuantWizard",
     page_icon=_page_icon,
@@ -145,12 +162,15 @@ def _goto(pg):
 with st.container(key="topnav"):
     # Brand (left) · flexible spacer · nav links clustered to the right.
     _nc = st.columns([2.4, 2.2, 1.0, 1.3, 2.1, 1.9], vertical_alignment="center")
-    _nc[0].markdown(
-        '<div class="topnav-brand">'
+    _brand_mark = (
+        f'<img class="topnav-mark-img" src="data:image/png;base64,{_MARK_B64}" alt="QuantWizard">'
+        if _MARK_B64 else
         '<span class="topnav-mark">'
-        '<span class="material-symbols-outlined">candlestick_chart</span></span>'
-        '<span class="topnav-word">Quant<b>Wizard</b></span>'
-        '</div>', unsafe_allow_html=True)
+        '<span class="material-symbols-outlined">candlestick_chart</span></span>')
+    _nc[0].markdown(
+        '<div class="topnav-brand">' + _brand_mark +
+        '<span class="topnav-word">Quant<b>Wizard</b></span></div>',
+        unsafe_allow_html=True)
     for _i, (_lbl, _pg) in enumerate(
             [("Home", "home"), ("Analysis", "analysis"),
              ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=2):

@@ -1,4 +1,5 @@
 import io
+import os
 import math
 import numpy as np
 import pandas as pd
@@ -36,6 +37,9 @@ BAD_TEXT   = "9C0006"   # Excel-classic dark red
 
 # Kept in sync with the PowerPoint deck's data-source line (pptx_builder.py).
 DATA_SOURCE_LINE = "Polygon · Yahoo Finance · Finnhub · SEC EDGAR"
+
+# Full logo (light line-art on transparent) — shows on the navy cover band.
+_ASSET_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_full.png")
 
 
 def _border():
@@ -90,6 +94,21 @@ def _build_cover(wb, ticker, period, sheetnames, df=None):
     ws.column_dimensions["A"].width = 4
     for col in ("B", "C", "D", "E"):
         ws.column_dimensions[col].width = 21
+
+    # Letterhead — the logo on a navy band directly above the title, so the two
+    # navy bands read as one continuous branded header.
+    ws.merge_cells("B1:E1")
+    ws["B1"].fill = PatternFill("solid", fgColor=DARK_BLUE)
+    ws.row_dimensions[1].height = 54
+    if os.path.exists(_ASSET_LOGO):
+        try:
+            _logo = XLImage(_ASSET_LOGO)
+            _asp  = (_logo.width / _logo.height) if _logo.height else 1.47
+            _logo.height = 48
+            _logo.width  = int(48 * _asp)
+            ws.add_image(_logo, "B1")
+        except Exception:
+            pass
 
     # Title band — solid navy with white text, matching the deck cover.
     ws.merge_cells("B2:E3")
