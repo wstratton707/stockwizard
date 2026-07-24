@@ -798,7 +798,9 @@ button[kind^="primary"]:active,
 }
 .ticker-tape {
   display: inline-flex; white-space: nowrap;
+  animation: scroll-left 48s linear infinite;   /* smooth, unhurried market ticker */
 }
+.ticker-tape:hover { animation-play-state: paused; }   /* pause on hover to read */
 @keyframes scroll-left {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }
