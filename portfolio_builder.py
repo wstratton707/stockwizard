@@ -668,16 +668,23 @@ concentration penalty for any single position above 25%.
         if not _ct2:
             continue
         _cwa = np.array([_cw[t] for t in _ct2]); _cwa /= _cwa.sum()
-        _car  = returns_df[_ct2].mean().values @ _cwa * 252 * 100
+        _car  = returns_df[_ct2].mean().values @ _cwa * 252 * 100   # historical (fallback)
         _ccov = returns_df[_ct2].cov().values * 252
         _cvol = np.sqrt(_cwa @ _ccov @ _cwa) * 100
-        # True Sharpe (excess return basis) — same formula as Portfolio Overview
-        _csh  = (_car - _rfr_pct) / _cvol if _cvol > 0 else 0
+        # Headline return + Sharpe use CAPM expected returns — the SAME basis the
+        # optimizer maximises. On a historical basis the "Max Sharpe" card could show
+        # a *lower* Sharpe than "Min Volatility" (it maximises *expected*, not past,
+        # risk-adjusted return), which reads like a bug. Fall back to the historical
+        # mean only if a CAPM number is missing for any holding.
+        _capm_vec = [stock_metrics.get(t, {}).get("capm_return") for t in _ct2]
+        _cer = (float(np.array([stock_metrics[t]["capm_return"] for t in _ct2]) @ _cwa)
+                if all(v is not None for v in _capm_vec) else _car)
+        _csh  = (_cer - _rfr_pct) / _cvol if _cvol > 0 else 0
         _ccum = (1 + (returns_df[_ct2] @ _cwa)).cumprod()
         _cdd  = ((_ccum - _ccum.cummax()) / _ccum.cummax()).min() * 100
         _top_t = max(_cw, key=_cw.get)
         _cmp_rows.append({"key": _ck, "label": _clabel,
-            "ann_ret": _car, "vol": _cvol, "sharpe": _csh,
+            "exp_ret": _cer, "vol": _cvol, "sharpe": _csh,
             "max_dd": _cdd, "holdings": len(_cw),
             "top": f"{_top_t} ({_cw[_top_t]*100:.0f}%)"})
 
@@ -696,9 +703,9 @@ concentration penalty for any single position above 25%.
                                 color:{BLUE if _is_sel else "#64748b"};text-transform:uppercase;
                                 margin-bottom:0.75rem">{_clbl}</div>
                     <div style="font-size:1.5rem;font-weight:700;
-                                color:{GREEN if _crow['ann_ret']>0 else RED}">
-                        {_crow['ann_ret']:+.1f}%</div>
-                    <div style="font-size:0.68rem;color:#64748b;margin-bottom:0.6rem">Ann. Return</div>
+                                color:{GREEN if _crow['exp_ret']>0 else RED}">
+                        {_crow['exp_ret']:+.1f}%</div>
+                    <div style="font-size:0.68rem;color:#64748b;margin-bottom:0.6rem">Exp. Return · CAPM</div>
                     <div style="font-size:0.82rem;color:#0f172a;margin-bottom:2px">
                         {_crow['sharpe']:.2f} Sharpe</div>
                     <div style="font-size:0.82rem;color:#0f172a;margin-bottom:2px">
@@ -708,6 +715,9 @@ concentration penalty for any single position above 25%.
                     <div style="font-size:0.7rem;color:#64748b">{_crow['holdings']} holdings</div>
                     <div style="font-size:0.68rem;color:#64748b">{_crow['top']}</div>
                 </div>""", unsafe_allow_html=True)
+        st.caption("Expected return & Sharpe are forward-looking (CAPM: Rf + β·ERP) — the "
+                   "same basis the optimizer maximizes. Volatility and max drawdown are "
+                   "historical (2-yr).")
 
     # Holdings table
     _section_header("Suggested Holdings")
