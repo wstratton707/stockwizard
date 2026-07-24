@@ -397,7 +397,8 @@ if _page == "home":
 # ═════════════════════════════════════════════════════════════════════════════
 elif _page == "analysis":
 
-    with st.expander("Analysis inputs", expanded=True):
+    with st.expander("Analysis inputs",
+                     expanded=not st.session_state.get("analysis_ran", False)):
         # Day Trader Mode removed — Investor Mode is the only experience now.
         mode = "Investor Mode"
 
@@ -500,7 +501,12 @@ elif _page == "analysis":
             n_sims = 1000; n_horizon = 252
 
         st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
-        run_btn = st.button("Run Analysis", type="primary", use_container_width=True)
+        # Collapse this form once an analysis has run so results aren't buried
+        # below a full-height input panel (the flag is set before the rerun, so
+        # the form is already collapsed when results render). Re-open to re-run.
+        run_btn = st.button(
+            "Run Analysis", type="primary", use_container_width=True,
+            on_click=lambda: st.session_state.update(analysis_ran=True))
 
 
     # ── Landing page (no ticker entered) ─────────────────────────────────────
@@ -1362,9 +1368,26 @@ elif _page == "analysis":
                 _tags.append('<span class="stock-hero-tag crypto">Crypto</span>')
             elif is_etf:
                 _tags.append('<span class="stock-hero-tag etf">ETF</span>')
+            # "Live" only when the US market is actually open (or a 24/7 crypto
+            # market). After the close, Finnhub returns the last-trade (16:00)
+            # price — that's the close, not a live tick, so labelling it "Live"
+            # overclaims. Show "At close" instead.
+            def _us_market_open():
+                try:
+                    from zoneinfo import ZoneInfo
+                    from datetime import time as _t
+                    now_et = datetime.now(ZoneInfo("America/New_York"))
+                    return now_et.weekday() < 5 and _t(9, 30) <= now_et.time() <= _t(16, 0)
+                except Exception:
+                    return False
+            _mkt_open = bool(is_crypto) or _us_market_open()
             if live:
-                _is_live = live.get("source") == "finnhub"
-                _tags.append(f'<span class="stock-hero-tag live">{"● Live" if _is_live else "Delayed quote"}</span>')
+                if live.get("source") == "finnhub" and _mkt_open:
+                    _tags.append('<span class="stock-hero-tag live">● Live</span>')
+                elif live.get("source") == "finnhub":
+                    _tags.append('<span class="stock-hero-tag">At close</span>')
+                else:
+                    _tags.append('<span class="stock-hero-tag">Delayed</span>')
 
             # Price + change — prefer live tick, fall back to last close
             _price_now    = float(live["price"]) if live else float(latest["Close"])
@@ -1381,7 +1404,12 @@ elif _page == "analysis":
             except Exception:
                 _close_dt = ""
             if live:
-                _fresh     = "Live" if live.get("source") == "finnhub" else "Delayed (~15 min)"
+                if live.get("source") == "finnhub" and _mkt_open:
+                    _fresh = "Live"
+                elif live.get("source") == "finnhub":
+                    _fresh = "At close"
+                else:
+                    _fresh = "Delayed (~15 min)"
                 _live_meta = f'<div class="stock-hero-meta">{_fresh} · as of {live["time"]}</div>'
             elif _close_dt:
                 _live_meta = f'<div class="stock-hero-meta">Last close · {_close_dt}</div>'
@@ -2090,8 +2118,10 @@ elif _page == "analysis":
             fig.update_layout(
                 height=480, template=None,
                 plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-                # Tighter margins; right side reserved for axis labels + price tag
-                margin=dict(l=10, r=95, t=70, b=30),
+                # Right margin holds both the y-axis labels and the S/R + price
+                # tags (anchored just past the plot); keep it wide enough that the
+                # widest "Resist $000" / price box isn't clipped by the card edge.
+                margin=dict(l=10, r=124, t=70, b=30),
                 hovermode="x unified",
                 font=dict(family="Inter, system-ui, sans-serif"),
                 hoverlabel=dict(
@@ -2309,7 +2339,9 @@ elif _page == "analysis":
                     fig_mc.update_layout(
                         height=370, template=None,
                         plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-                        margin=dict(l=10, r=60, t=30, b=40),
+                        # r wide enough that the right-side "$000" y labels aren't
+                        # clipped by the chart card's edge.
+                        margin=dict(l=10, r=78, t=30, b=40),
                         hovermode="x unified",
                         font=dict(family="DM Sans, system-ui, sans-serif"),
                         hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",

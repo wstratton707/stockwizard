@@ -427,16 +427,23 @@ def fetch_news(ticker, api_key, company_name=None, log=print, limit=30):
         tickers  = [t.upper() for t in (item.get("tickers") or [])]
         insights = item.get("insights") or []
         title    = item.get("title", "") or ""
-        hay      = (title + " " + (item.get("description", "") or "")).lower()
 
         ins        = next((i for i in insights if i.get("ticker", "").upper() == tkr), None)
         sentiment  = (ins.get("sentiment") if ins else None) or ""
-        name_hit   = tkr.lower() in title.lower() or any(tok in hay for tok in name_tokens)
         n_tickers  = len(tickers)
 
-        if name_hit or ins is not None or n_tickers <= 3:
+        # Relevance is title-primary: an article is "about" the company when the
+        # ticker or a company-name token is in the TITLE (not just the body — a
+        # passing mention in the description is why round-ups leaked through
+        # before). A Polygon-analysed article that spans very few tickers also
+        # counts as focused. Everything else (multi-name round-ups, comparisons,
+        # tangential mentions) is Low and dropped.
+        title_l   = title.lower()
+        title_hit = tkr.lower() in title_l or any(tok in title_l for tok in name_tokens)
+        focused   = ins is not None and n_tickers <= 2
+        if title_hit or focused:
             relevance = "High"
-        elif n_tickers <= 8:
+        elif ins is not None and n_tickers <= 4:
             relevance = "Medium"
         else:
             relevance = "Low"
@@ -451,13 +458,18 @@ def fetch_news(ticker, api_key, company_name=None, log=print, limit=30):
             "Also_Mentions": max(0, n_tickers - 1),
         })
 
-    # Drop broad round-ups; if that leaves nothing, fall back to the raw list so the
-    # section never disappears. Most-relevant first, recency preserved within a tier.
-    kept = [n for n in scored if n["Relevance"] != "Low"] or scored
+    # Prefer title-relevant (High) articles; only top up with Medium when there
+    # are too few Highs to fill the section, and fall back to the raw list if
+    # nothing scored (so the section never disappears). Most-relevant first,
+    # recency preserved within a tier.
+    high = [n for n in scored if n["Relevance"] == "High"]
+    med  = [n for n in scored if n["Relevance"] == "Medium"]
+    kept = high if len(high) >= 3 else (high + med)
+    kept = kept or scored
     rank = {"High": 0, "Medium": 1, "Low": 2}
     kept.sort(key=lambda n: rank[n["Relevance"]])
     log(f"   {len(kept)}/{len(scored)} relevant news items")
-    return kept[:15]
+    return kept[:12]
 
 
 def fetch_peer_comparison(ticker, peer_tickers, api_key, log=print):

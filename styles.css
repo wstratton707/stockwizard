@@ -605,19 +605,21 @@ footer { visibility: hidden; }
    labels — the same root cause as the invisible selected-tab text — leaving
    dark-on-blue with almost no contrast. Force white and add brand polish.
    Scoped to kind="primary" so light secondary buttons are untouched. */
-button[kind="primary"],
-button[kind="primary"] *,
-[data-testid="stBaseButton-primary"],
-[data-testid="stBaseButton-primary"] *,
-/* Higher-specificity selectors so these beat the global
+button[kind^="primary"],
+button[kind^="primary"] *,
+[data-testid^="stBaseButton-primary"],
+[data-testid^="stBaseButton-primary"] *,
+/* Prefix (^=) so this also covers kind="primaryFormSubmit" — the form-submit
+   button (e.g. Your Portfolios "Continue") whose label was rendering dark slate
+   on blue. Higher-specificity selectors so these beat the global
    [data-testid="stMarkdownContainer"] p rule, which otherwise wins the
    specificity tie (it appears later in the file) and paints labels dark. */
-button[kind="primary"] [data-testid="stMarkdownContainer"] p,
-[data-testid="stBaseButton-primary"] [data-testid="stMarkdownContainer"] p {
+button[kind^="primary"] [data-testid="stMarkdownContainer"] p,
+[data-testid^="stBaseButton-primary"] [data-testid="stMarkdownContainer"] p {
   color: #ffffff !important;
 }
-button[kind="primary"],
-[data-testid="stBaseButton-primary"] {
+button[kind^="primary"],
+[data-testid^="stBaseButton-primary"] {
   background: var(--accent) !important;
   border: 1px solid transparent !important;
   border-radius: var(--r-md) !important;
@@ -627,12 +629,12 @@ button[kind="primary"],
   box-shadow: none !important;
   transition: background 0.15s ease !important;
 }
-button[kind="primary"]:hover,
-[data-testid="stBaseButton-primary"]:hover {
+button[kind^="primary"]:hover,
+[data-testid^="stBaseButton-primary"]:hover {
   background: var(--accent-hover) !important;
 }
-button[kind="primary"]:active,
-[data-testid="stBaseButton-primary"]:active {
+button[kind^="primary"]:active,
+[data-testid^="stBaseButton-primary"]:active {
   transform: translateY(0) !important;
   box-shadow: var(--shadow-blue) !important;
 }

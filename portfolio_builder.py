@@ -118,10 +118,10 @@ def _render_step_0():
         help="1 = Very conservative (capital preservation) · 10 = Very aggressive (maximum growth)"
     )
     risk_labels = {
-        (1,3): ("🛡 Conservative","Capital preservation. Heavy bonds and defensive ETFs."),
-        (4,6): ("⚖ Moderate",    "Balanced growth. Mix of growth stocks and stability."),
-        (7,9): ("🚀 Aggressive",  "Maximum growth. Heavy equities, higher volatility."),
-        (10,10):("⚡ Ultra Aggressive","All-in on high-growth equities. Significant risk."),
+        (1,3): ("Conservative","Capital preservation. Heavy bonds and defensive ETFs."),
+        (4,6): ("Moderate",    "Balanced growth. Mix of growth stocks and stability."),
+        (7,9): ("Aggressive",  "Maximum growth. Heavy equities, higher volatility."),
+        (10,10):("Ultra Aggressive","All-in on high-growth equities. Significant risk."),
     }
     for (lo,hi),(label,desc) in risk_labels.items():
         if lo <= risk <= hi:
