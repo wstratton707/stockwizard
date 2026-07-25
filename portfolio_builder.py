@@ -133,58 +133,38 @@ def _render_step_0():
             </div>""", unsafe_allow_html=True)
 
     _section_header("Investment Parameters")
-    col1, col2 = st.columns(2)
-    with col1:
-        horizon = st.selectbox("Investment Horizon",
-            ["1 year","3 years","5 years","10 years","20+ years"], index=2)
-        starting_capital = st.number_input("Starting Capital ($)",
-            min_value=1000, max_value=10_000_000, value=10000, step=1000,
-            format="%d")
-    with col2:
-        monthly_contribution = st.number_input("Monthly Contribution ($)",
-            min_value=0, max_value=100_000, value=500, step=100, format="%d")
-        target_value = st.number_input("Target Goal ($) — optional",
+    c1, c2, c3 = st.columns(3)
+    horizon = c1.selectbox("Investment Horizon",
+        ["1 year", "3 years", "5 years", "10 years", "20+ years"], index=2)
+    starting_capital = c2.number_input("Starting Capital ($)",
+        min_value=1000, max_value=10_000_000, value=10000, step=1000, format="%d")
+    monthly_contribution = c3.number_input("Monthly Contribution ($)",
+        min_value=0, max_value=100_000, value=500, step=100, format="%d")
+
+    # Advanced — smart defaults mean most people can skip all of this. Collapsed by
+    # default so the primary flow is just risk + capital + contribution. Replaces
+    # the ~20 always-on sector/bond checkboxes (which did nothing unless toggled)
+    # with a few multiselects that default to sensible behaviour.
+    with st.expander("Advanced options  ·  sectors, bonds, exclusions, goal", expanded=False):
+        st.caption("Sensible defaults are already applied — most people can skip this.")
+        target_value = st.number_input("Target goal ($) — optional",
             min_value=0, max_value=100_000_000, value=0, step=5000, format="%d",
-            help="Leave at 0 if you don't have a specific goal")
+            help="Leave at 0 if you don't have a specific goal.")
+        exclude_sector_names = st.multiselect(
+            "Exclude sectors", ALL_SECTORS, default=[],
+            help="Leave empty to consider every sector (the default).")
+        _default_bonds = ALL_BOND_CATEGORIES if risk <= 6 else []
+        included_bond_categories = st.multiselect(
+            "Bond categories to include", ALL_BOND_CATEGORIES, default=_default_bonds,
+            help="Bonds add stability; included by default at lower risk levels.")
+        excl_industries = st.multiselect(
+            "Exclude industries (values-based)",
+            ["Tobacco", "Defense", "Fossil Fuels", "Gambling"], default=[])
 
-    _section_header("Sector Preferences")
-    st.markdown("<div style='font-size:0.85rem;color:#64748b;margin-bottom:0.75rem'>"
-                "Select sectors to include in your portfolio:</div>",
-                unsafe_allow_html=True)
-
-    sector_grid = st.columns(3)
-    included_sectors = []
-    for i, sector in enumerate(ALL_SECTORS):
-        with sector_grid[i % 3]:
-            if st.checkbox(sector, value=True, key=f"sector_{sector}"):
-                included_sectors.append(sector)
-
-    _section_header("Bond Preferences")
-    st.markdown("<div style='font-size:0.85rem;color:#64748b;margin-bottom:0.75rem'>"
-                "Select bond categories to include in your portfolio:</div>",
-                unsafe_allow_html=True)
-
-    # Default to including bonds for conservative/moderate risk profiles
-    default_bond = risk <= 6
-    bond_grid = st.columns(3)
-    included_bond_categories = []
-    for i, category in enumerate(ALL_BOND_CATEGORIES):
-        with bond_grid[i % 3]:
-            if st.checkbox(category, value=default_bond, key=f"bond_{category}"):
-                included_bond_categories.append(category)
-
-    _section_header("Exclusions")
-    col1, col2 = st.columns(2)
-    with col1:
-        exclude_tobacco  = st.checkbox("Exclude Tobacco stocks")
-        exclude_defense  = st.checkbox("Exclude Defense stocks")
-    with col2:
-        exclude_fossil   = st.checkbox("Exclude Fossil Fuel stocks")
-        exclude_gambling = st.checkbox("Exclude Gambling stocks")
-
+    included_sectors = [s for s in ALL_SECTORS if s not in exclude_sector_names]
     excluded_sectors = []
-    if exclude_fossil:   excluded_sectors.append("Energy")
-    if exclude_defense:  excluded_sectors.append("Industrials")
+    if "Fossil Fuels" in excl_industries: excluded_sectors.append("Energy")
+    if "Defense" in excl_industries:      excluded_sectors.append("Industrials")
 
     st.markdown("---")
     if st.button("Next → Build Universe", type="primary", key="step0_next"):
