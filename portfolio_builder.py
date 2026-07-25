@@ -1209,8 +1209,7 @@ def _render_step_3():
         else:
             st.success("Portfolio is balanced — no rebalancing needed.")
 
-    # ── Fee Drag Analysis ─────────────────────────────────────────────────
-    _section_header("Fee Drag Analysis")
+    # ── Fee drag (compact callout) ─────────────────────────────────────────
     _ETF_FEES = {
         "SPY":0.0945,"QQQ":0.20,"XLK":0.10,"XLV":0.10,"XLF":0.10,
         "XLY":0.10,"XLP":0.10,"XLI":0.10,"XLE":0.10,"XLB":0.10,
@@ -1235,42 +1234,19 @@ def _render_step_3():
         _vals_f.append(_vwf); _vals_nf.append(_vwof)
     _fee_drag = _vwof - _vwf
 
-    # Plot the drag itself — cumulative $ lost to fees over time — rather than two
-    # near-identical value curves. At typical ETF fees (~0.1%) the "with/without"
-    # lines sit within a fraction of a percent of each other and visually overlap,
-    # so the drag was invisible. A single cost curve reads clearly at any fee level.
-    _gap = [nf - f for nf, f in zip(_vals_nf, _vals_f)]
-    _years_axis = [i / 12 for i in range(len(_gap))]
-    fig_fee = go.Figure()
-    fig_fee.add_trace(go.Scatter(
-        x=_years_axis, y=_gap, name="Cost of fees",
-        line=dict(color="#dc2626", width=2.5),
-        fill="tozeroy", fillcolor="rgba(220,38,38,0.10)",
-        hovertemplate="Year %{x:.1f} — $%{y:,.0f} lost to fees<extra></extra>"))
-    fig_fee.update_layout(
-        title=dict(text=f"Cumulative cost of fees over {_fee_yrs} years",
-                   font=dict(size=13, color="#0f172a", family="DM Sans"),
-                   x=0, xanchor="left"),
-        height=280, template="plotly_white",
-        margin=dict(l=10, r=20, t=44, b=38),
-        yaxis=dict(tickprefix="$", title=None, gridcolor="#f1f5f9", zeroline=False),
-        xaxis=dict(title="Years", gridcolor="#f1f5f9", zeroline=False,
-                   dtick=1 if _fee_yrs <= 10 else 5),
-        showlegend=False, hovermode="x unified",
-        hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                        font=dict(color="white", family="DM Sans")),
-        font=dict(family="DM Sans"),
-    )
-    st.plotly_chart(fig_fee, use_container_width=True)
-    _fc1, _fc2, _fc3 = st.columns(3)
-    with _fc1:
-        st.markdown(_metric_card("Weighted Expense Ratio", f"{_wt_fee*100:.3f}%", DARK), unsafe_allow_html=True)
-    with _fc2:
-        _fee_pct = (_fee_drag / _vwof * 100) if _vwof else 0
-        st.markdown(_metric_card("Total Fee Drag", f"${_fee_drag:,.0f}  ·  {_fee_pct:.1f}%", RED),
-                    unsafe_allow_html=True)
-    with _fc3:
-        st.markdown(_metric_card("Value After Fees", f"${_vwf:,.0f}", BLUE), unsafe_allow_html=True)
+    # A single compact callout instead of a chart + card row: for a low-cost ETF
+    # mix the drag is tiny and doesn't warrant a chart; this still surfaces cost
+    # awareness, and the numbers scale up honestly for pricier funds / longer horizons.
+    _fee_pct = (_fee_drag / _vwof * 100) if _vwof else 0
+    st.markdown(f"""
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-left:3px solid #94a3b8;
+                border-radius:8px;padding:0.7rem 1.05rem;margin-top:0.75rem;
+                font-size:0.9rem;color:#334155;line-height:1.5">
+      <span style="font-weight:700;color:#0f172a">Fee drag</span>
+      &nbsp;·&nbsp; {_wt_fee*100:.2f}% weighted expense ratio
+      &nbsp;·&nbsp; <span style="color:#dc2626;font-weight:600">${_fee_drag:,.0f} ({_fee_pct:.1f}%)</span>
+      estimated cost over {_fee_yrs} years
+    </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
     col1, col2 = st.columns(2)
