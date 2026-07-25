@@ -631,7 +631,10 @@ concentration penalty for any single position above 25%.
 - All metrics are based on historical data and will not perfectly predict future returns
 - Survivorship bias: the universe only includes stocks that still exist today
 - Maximum weight per stock is capped at 40% to prevent over-concentration
-- Stock selection uses a multi-factor score: Sharpe (50%) + 6-month momentum (30%) + 3-month momentum (20%)
+- Stock selection uses a diversified multi-factor score — Momentum (30%) + Quality (30%,
+  fundamentals: margins/ROE/growth/Piotroski) + Low-volatility (20%) + risk-adjusted return (20%).
+  It's a factor *tilt*, not a prediction — no method reliably forecasts returns, and a
+  low-cost index fund is the benchmark to beat.
         """)
 
     # ── Side-by-Side Portfolio Strategy Comparison ───────────────────────

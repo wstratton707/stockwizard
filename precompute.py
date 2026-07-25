@@ -107,25 +107,68 @@ def _compute_factors(prices: pd.Series) -> dict | None:
              if len(prices) >= 132 else 0.0
     mom_3m = float((prices.iloc[-1] / prices.iloc[max(0, len(prices)-69)]  - 1) * 100) \
              if len(prices) >= 69  else 0.0
+    # 12-1 momentum: return from ~12 months ago to ~1 month ago. Skipping the most
+    # recent month is the academic momentum construction (avoids short-term reversal).
+    mom_12m = float((prices.iloc[-21] / prices.iloc[-252] - 1) * 100) \
+              if len(prices) >= 252 else mom_6m
 
     return {
         "sharpe":     round(sharpe,  4),
         "ann_return": round(ann_ret * 100, 2),
         "ann_vol":    round(ann_vol * 100, 2),
+        "mom_12m":    round(mom_12m, 2),
         "mom_6m":     round(mom_6m, 2),
         "mom_3m":     round(mom_3m, 2),
     }
 
 
+def _fetch_quality(ticker: str):
+    """A 0-1 fundamental-quality sub-score (market-cap-free, so no extra price/cap
+    fetch): blends net margin, ROE, revenue growth, and the Piotroski F-Score.
+    Returns None on any miss so the caller can treat quality as neutral — this
+    factor is purely additive and never breaks or penalises a name for missing data.
+    """
+    try:
+        from data import fetch_sec_financials
+        from analysis import compute_fundamentals
+        fin = fetch_sec_financials(ticker, log=lambda *a, **k: None)
+        if not fin:
+            return None
+        f = compute_fundamentals(fin)          # market_cap omitted — quality only
+        if not f.get("ok"):
+            return None
+        marg, ret_, grw, q = (f.get("margins", {}), f.get("returns", {}),
+                              f.get("growth", {}), f.get("quality", {}))
+        bits = []
+        if marg.get("net") is not None:
+            bits.append(max(0.0, min(1.0, marg["net"] / 25.0)))          # 25%+ net margin -> 1
+        if ret_.get("roe") is not None:
+            bits.append(max(0.0, min(1.0, ret_["roe"] / 25.0)))          # 25%+ ROE -> 1
+        if grw.get("revenue_cagr") is not None:
+            bits.append(max(0.0, min(1.0, (grw["revenue_cagr"] + 5) / 25.0)))  # -5%..20%
+        if q.get("f_score") is not None:
+            bits.append(q["f_score"] / 9.0)                               # Piotroski 0-9
+        return round(sum(bits) / len(bits), 4) if bits else None
+    except Exception:
+        return None
+
+
 def _add_combined_scores(rankings: dict) -> dict:
     """
-    Normalise each factor to [0,1] across the universe then compute a
-    weighted combined score per ticker.
+    Diversified multi-factor score, normalised to [0,1] across the universe.
 
-    Weights:
-      50%  Sharpe ratio      (risk-adjusted return — most important)
-      30%  6-month momentum  (trend confirmation)
-      20%  3-month momentum  (recent acceleration)
+    A single backward metric (the old 50% trailing-Sharpe weight) is a weak
+    predictor of future returns, so the score spreads across four evidence-based
+    factors instead of leaning on "what already went up":
+
+      30%  Momentum        (12-1 / 6m / 3m composite — a real, documented factor)
+      30%  Quality         (fundamentals: margins, ROE, growth, Piotroski — the
+                            forward-persistent signal; neutral when unavailable)
+      20%  Low volatility   (the low-vol anomaly — steadier names)
+      20%  Risk-adjusted    (Sharpe — kept, but no longer dominant)
+
+    This is a factor *tilt*, not a prediction — no method reliably forecasts
+    returns; a low-cost index is the benchmark to beat.
     """
     if not rankings:
         return rankings
@@ -135,17 +178,20 @@ def _add_combined_scores(rankings: dict) -> dict:
         rng = hi - lo
         return [(v - lo) / rng if rng > 0 else 0.5 for v in values]
 
-    tickers  = list(rankings.keys())
-    sharpes  = [rankings[t]["sharpe"]  for t in tickers]
-    mom_6ms  = [rankings[t]["mom_6m"]  for t in tickers]
-    mom_3ms  = [rankings[t]["mom_3m"]  for t in tickers]
-
-    n_sharpe = _norm(sharpes)
-    n_6m     = _norm(mom_6ms)
-    n_3m     = _norm(mom_3ms)
+    tickers = list(rankings.keys())
+    n_sharpe = _norm([rankings[t].get("sharpe", 0)  for t in tickers])
+    n_vol    = _norm([rankings[t].get("ann_vol", 0) for t in tickers])
+    n_12m    = _norm([rankings[t].get("mom_12m", rankings[t].get("mom_6m", 0)) for t in tickers])
+    n_6m     = _norm([rankings[t].get("mom_6m", 0)  for t in tickers])
+    n_3m     = _norm([rankings[t].get("mom_3m", 0)  for t in tickers])
 
     for i, t in enumerate(tickers):
-        score = 0.50 * n_sharpe[i] + 0.30 * n_6m[i] + 0.20 * n_3m[i]
+        momentum = (n_12m[i] + n_6m[i] + n_3m[i]) / 3.0
+        low_vol  = 1.0 - n_vol[i]                       # lower volatility → higher
+        quality  = rankings[t].get("quality")
+        quality  = 0.5 if quality is None else float(quality)   # neutral if missing
+        score = (0.30 * momentum + 0.30 * quality +
+                 0.20 * low_vol  + 0.20 * n_sharpe[i])
         rankings[t]["score"] = round(score, 4)
 
     return rankings
@@ -200,7 +246,7 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
         return _add_combined_scores(raw)
 
     print(f"Computing multi-factor rankings for {len(run_tickers)} tickers...")
-    print(f"Factors: Sharpe (50%) · 6M Momentum (30%) · 3M Momentum (20%)\n")
+    print(f"Factors: Momentum (30%) · Quality (30%) · Low-Vol (20%) · Sharpe (20%)\n")
 
     done = 0
     CHECKPOINT_EVERY = 50  # write partial results to Supabase every N tickers
@@ -215,11 +261,15 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
                 if prices is not None:
                     factors = _compute_factors(prices)
                     if factors:
+                        # Additive fundamental-quality factor; None (neutral) for
+                        # ETFs/non-filers or any fetch miss — never blocks the batch.
+                        factors["quality"] = _fetch_quality(ticker)
                         raw[ticker] = {"ticker": ticker, "sector": universe[ticker], **factors}
+                        _q = factors["quality"]
                         print(f"  [{done:>3}/{len(run_tickers)}] ✓ {ticker:<6}  "
                               f"Sharpe={factors['sharpe']:+.2f}  "
-                              f"6M={factors['mom_6m']:+.1f}%  "
-                              f"3M={factors['mom_3m']:+.1f}%")
+                              f"12M={factors['mom_12m']:+.1f}%  "
+                              f"Q={('%.2f' % _q) if _q is not None else '—'}")
                     else:
                         print(f"  [{done:>3}/{len(run_tickers)}] ⚠ {ticker} — insufficient data")
                 else:
@@ -302,12 +352,14 @@ def main():
 
     # Top 15 by combined score
     top = sorted(rankings.values(), key=lambda x: x.get("score", 0), reverse=True)[:15]
-    print(f"\nTop 15 by combined score (Sharpe + Momentum):")
+    print(f"\nTop 15 by combined multi-factor score:")
     for r in top:
+        _q = r.get("quality")
         print(f"  {r['ticker']:<6}  {r['sector']:<28}  "
               f"Score={r.get('score',0):.3f}  "
               f"Sharpe={r['sharpe']:+.2f}  "
-              f"6M={r['mom_6m']:+.1f}%")
+              f"12M={r.get('mom_12m', 0):+.1f}%  "
+              f"Q={('%.2f' % _q) if _q is not None else '—'}")
 
 
 def warm_portfolio_cache(rankings: dict):
