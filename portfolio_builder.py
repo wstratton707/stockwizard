@@ -1235,21 +1235,30 @@ def _render_step_3():
         _vals_f.append(_vwf); _vals_nf.append(_vwof)
     _fee_drag = _vwof - _vwf
 
-    _fx = list(range(len(_vals_f)))
+    # Plot the drag itself — cumulative $ lost to fees over time — rather than two
+    # near-identical value curves. At typical ETF fees (~0.1%) the "with/without"
+    # lines sit within a fraction of a percent of each other and visually overlap,
+    # so the drag was invisible. A single cost curve reads clearly at any fee level.
+    _gap = [nf - f for nf, f in zip(_vals_nf, _vals_f)]
+    _years_axis = [i / 12 for i in range(len(_gap))]
     fig_fee = go.Figure()
-    fig_fee.add_trace(go.Scatter(x=_fx, y=_vals_nf, name="Without Fees",
-        line=dict(color=BLUE, width=2.5)))
-    fig_fee.add_trace(go.Scatter(x=_fx, y=_vals_f, name="With Fees",
-        line=dict(color=AMBER, width=2, dash="dot"),
-        fill="tonexty", fillcolor="rgba(220,38,38,0.06)"))
+    fig_fee.add_trace(go.Scatter(
+        x=_years_axis, y=_gap, name="Cost of fees",
+        line=dict(color="#dc2626", width=2.5),
+        fill="tozeroy", fillcolor="rgba(220,38,38,0.10)",
+        hovertemplate="Year %{x:.1f} — $%{y:,.0f} lost to fees<extra></extra>"))
     fig_fee.update_layout(
-        title=dict(
-            text=f"Fee Drag Over {_fee_yrs}Y  ·  Weighted Expense: {_wt_fee*100:.3f}%  ·  Cost: ${_fee_drag:,.0f}",
-            font=dict(size=11)),
+        title=dict(text=f"Cumulative cost of fees over {_fee_yrs} years",
+                   font=dict(size=13, color="#0f172a", family="DM Sans"),
+                   x=0, xanchor="left"),
         height=280, template="plotly_white",
-        margin=dict(l=0, r=0, t=44, b=0),
-        yaxis=dict(tickprefix="$"),
-        legend=dict(orientation="h", y=1.12),
+        margin=dict(l=10, r=20, t=44, b=38),
+        yaxis=dict(tickprefix="$", title=None, gridcolor="#f1f5f9", zeroline=False),
+        xaxis=dict(title="Years", gridcolor="#f1f5f9", zeroline=False,
+                   dtick=1 if _fee_yrs <= 10 else 5),
+        showlegend=False, hovermode="x unified",
+        hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
+                        font=dict(color="white", family="DM Sans")),
         font=dict(family="DM Sans"),
     )
     st.plotly_chart(fig_fee, use_container_width=True)
@@ -1257,7 +1266,9 @@ def _render_step_3():
     with _fc1:
         st.markdown(_metric_card("Weighted Expense Ratio", f"{_wt_fee*100:.3f}%", DARK), unsafe_allow_html=True)
     with _fc2:
-        st.markdown(_metric_card("Total Fee Drag", f"${_fee_drag:,.0f}", RED), unsafe_allow_html=True)
+        _fee_pct = (_fee_drag / _vwof * 100) if _vwof else 0
+        st.markdown(_metric_card("Total Fee Drag", f"${_fee_drag:,.0f}  ·  {_fee_pct:.1f}%", RED),
+                    unsafe_allow_html=True)
     with _fc3:
         st.markdown(_metric_card("Value After Fees", f"${_vwf:,.0f}", BLUE), unsafe_allow_html=True)
 
