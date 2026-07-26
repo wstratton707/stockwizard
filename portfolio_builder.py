@@ -406,6 +406,15 @@ def _render_step_2(api_key):
                 best_tickers = select_by_sharpe(returns_df, sector_map,
                                                 max_total=_MAX_PORTFOLIO_TICKERS, top_n_per_sector=_TOP_N_PER_SECTOR)
                 log(f"   Final portfolio: {len(best_tickers)} stocks — {', '.join(best_tickers)}")
+            # Floor guard: mean-variance optimisation, the frontier and the
+            # correlation matrix all need a real multi-asset set. If a fetch
+            # failure left us with almost nothing, stop cleanly instead of
+            # building a degenerate 1-stock "portfolio" or crashing downstream.
+            if len(best_tickers) < 3:
+                raise ValueError(
+                    f"insufficient tickers: only {len(best_tickers)} stock(s) had "
+                    f"usable price history — need at least 3 to build a portfolio")
+
             returns_df = returns_df[best_tickers]
             close_df   = close_df[[t for t in best_tickers if t in close_df.columns]]
             price_dict = {t: v for t, v in price_dict.items() if t in best_tickers}
@@ -510,6 +519,12 @@ def _render_step_2(api_key):
                 st.error(
                     "❌ Could not fetch price data for the selected tickers. "
                     "Check that your tickers are valid US stock symbols."
+                )
+            elif "insufficient tickers" in err_str:
+                st.error(
+                    "❌ Not enough of the selected stocks had usable price history "
+                    "to build a diversified portfolio. Add a few more well-known "
+                    "tickers (or remove some exclusions) and try again."
                 )
             else:
                 st.error(f"❌ Something went wrong building your portfolio: {e}")

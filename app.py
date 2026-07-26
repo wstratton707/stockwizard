@@ -2149,7 +2149,7 @@ elif _page == "analysis":
                 # widest "Resist $000" / price box isn't clipped by the card edge.
                 margin=dict(l=10, r=124, t=70, b=30),
                 hovermode="x unified",
-                font=dict(family="Inter, system-ui, sans-serif"),
+                font=dict(family="DM Sans, system-ui, sans-serif"),
                 hoverlabel=dict(
                     bgcolor="#0f172a", bordercolor="#334155",
                     font=dict(color="white", size=12, family="DM Sans"),
@@ -2240,7 +2240,7 @@ elif _page == "analysis":
                     margin=dict(l=10, r=95, t=20, b=30),
                     hovermode="x unified",
                     showlegend=False,
-                    font=dict(family="Inter, system-ui, sans-serif"),
+                    font=dict(family="DM Sans, system-ui, sans-serif"),
                     hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
                                     font=dict(color="white", size=12, family="DM Sans")),
                     xaxis=dict(
@@ -2278,7 +2278,7 @@ elif _page == "analysis":
                     plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
                     margin=dict(l=10, r=95, t=40, b=30),
                     hovermode="x unified",
-                    font=dict(family="Inter, system-ui, sans-serif"),
+                    font=dict(family="DM Sans, system-ui, sans-serif"),
                     hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
                                     font=dict(color="white", size=12, family="DM Sans")),
                     # Legend OUTSIDE the plot — top-right strip, transparent
