@@ -1289,34 +1289,9 @@ elif _page == "analysis":
                     except Exception:
                         _dcf_report = {"ok": False}
 
-                progress.progress(90, text="Building Excel report...")
-                excel_buf = build_excel(
-                    ticker_input, df, period_label,
-                    company_details=company_details, sector_df=sector_df,
-                    mc_sim_df=mc_sim_df, mc_summary=mc_summary,
-                    news_list=news_list, peer_df=peer_df,
-                    corr_matrix=corr_matrix,
-                    resistance_levels=resistance, support_levels=support,
-                    summary_text=summary_text,
-                    bar_size=bar_size, fundamentals=_fund_report,
-                    analyst_data=_analyst_report, dcf=_dcf_report,
-                )
-
-                pptx_buf = None
-                if PPTX_AVAILABLE:
-                    progress.progress(96, text="Building PowerPoint report...")
-                    try:
-                        pptx_buf = build_stock_pptx(
-                            ticker_input, df, period_label,
-                            company_details=company_details,
-                            mc_sim_df=mc_sim_df, mc_summary=mc_summary,
-                            news_list=news_list,
-                            summary_text=summary_text,
-                            fundamentals=_fund_report,
-                        )
-                    except Exception:
-                        pptx_buf = None
-
+                # Reports (Excel / PowerPoint) build on demand when the user
+                # clicks Export below — not on every analysis — so results appear
+                # immediately instead of waiting on openpyxl + python-pptx each run.
                 progress.progress(100, text="Complete!")
                 time.sleep(0.3)
                 progress.empty()
@@ -1349,24 +1324,76 @@ elif _page == "analysis":
             period_ret = (latest["Close"] / first["Close"] - 1) * 100
             pos_neg    = lambda v: "positive" if v > 0 else ("negative" if v < 0 else "neutral")
 
-            _dl_col1, _dl_col2 = st.columns(2)
-            with _dl_col1:
-                st.download_button(
-                    label="⬇  Export to Excel",
-                    data=excel_buf,
-                    file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True, type="primary", key="download_top",
-                )
-            with _dl_col2:
-                if pptx_buf:
-                    st.download_button(
-                        label="⬇  Export to PowerPoint",
-                        data=pptx_buf,
-                        file_name=f"{ticker_input}_{period_label}_Analysis.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        use_container_width=True, type="primary", key="download_pptx_top",
-                    )
+            # Reports build on demand: a click builds the file (with a spinner),
+            # caches it in session for this exact ticker+period, then swaps in a
+            # download button. The mirrored buttons lower on the page share the
+            # same cached file, so building once serves both.
+            _report_id = f"{ticker_input}|{period_label}|{bar_size}"
+
+            def _stock_exports(suffix):
+                c1, c2 = st.columns(2)
+                with c1:
+                    _ready = st.session_state.get("_excel_id") == _report_id
+                    if not _ready and st.button("⬇  Export to Excel",
+                                                use_container_width=True,
+                                                key=f"gen_excel_{suffix}"):
+                        with st.spinner("Building your Excel workbook…"):
+                            st.session_state["_excel_buf"] = build_excel(
+                                ticker_input, df, period_label,
+                                company_details=company_details, sector_df=sector_df,
+                                mc_sim_df=mc_sim_df, mc_summary=mc_summary,
+                                news_list=news_list, peer_df=peer_df,
+                                corr_matrix=corr_matrix,
+                                resistance_levels=resistance, support_levels=support,
+                                summary_text=summary_text,
+                                bar_size=bar_size, fundamentals=_fund_report,
+                                analyst_data=_analyst_report, dcf=_dcf_report,
+                            )
+                            st.session_state["_excel_id"] = _report_id
+                        _ready = True
+                    if _ready:
+                        st.session_state["_excel_buf"].seek(0)
+                        st.download_button(
+                            "⬇  Download Excel (.xlsx)",
+                            data=st.session_state["_excel_buf"],
+                            file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True, key=f"dl_excel_{suffix}",
+                        )
+                with c2:
+                    if not PPTX_AVAILABLE:
+                        return
+                    _readyp = st.session_state.get("_pptx_id") == _report_id
+                    if not _readyp and st.button("⬇  Export to PowerPoint",
+                                                 use_container_width=True,
+                                                 key=f"gen_pptx_{suffix}"):
+                        with st.spinner("Building your PowerPoint deck…"):
+                            try:
+                                st.session_state["_pptx_buf"] = build_stock_pptx(
+                                    ticker_input, df, period_label,
+                                    company_details=company_details,
+                                    mc_sim_df=mc_sim_df, mc_summary=mc_summary,
+                                    news_list=news_list, summary_text=summary_text,
+                                    fundamentals=_fund_report,
+                                )
+                            except Exception:
+                                st.session_state["_pptx_buf"] = None
+                            st.session_state["_pptx_id"] = _report_id
+                        _readyp = True
+                    if _readyp:
+                        _pb = st.session_state.get("_pptx_buf")
+                        if _pb is not None:
+                            _pb.seek(0)
+                            st.download_button(
+                                "⬇  Download PowerPoint (.pptx)", data=_pb,
+                                file_name=f"{ticker_input}_{period_label}_Analysis.pptx",
+                                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                use_container_width=True, key=f"dl_pptx_{suffix}",
+                            )
+                        else:
+                            st.caption("PowerPoint export isn't available for this report.")
+
+            _stock_exports("top")
             st.markdown("---")
 
             # ── Stock Hero Panel ──────────────────────────────────────────────
@@ -2786,26 +2813,7 @@ elif _page == "analysis":
             # (The plain-English summary is now surfaced as "The Bottom Line" up
             # top, right under the key metrics — no need to repeat it here.)
             st.markdown("---")
-            excel_buf.seek(0)
-            _dl2_col1, _dl2_col2 = st.columns(2)
-            with _dl2_col1:
-                st.download_button(
-                    label="⬇  Export to Excel",
-                    data=excel_buf,
-                    file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True, type="primary", key="download_bottom",
-                )
-            with _dl2_col2:
-                if pptx_buf:
-                    pptx_buf.seek(0)
-                    st.download_button(
-                        label="⬇  Export to PowerPoint",
-                        data=pptx_buf,
-                        file_name=f"{ticker_input}_{period_label}_Analysis.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        use_container_width=True, type="primary", key="download_pptx_bottom",
-                    )
+            _stock_exports("bottom")
 
         st.markdown(render_section("Data & Methodology", _disc.DIVIDENDS), unsafe_allow_html=True)
         st.markdown(render_inline(_disc.SHORT), unsafe_allow_html=True)

@@ -639,6 +639,37 @@ button[kind^="primary"]:active,
   box-shadow: var(--shadow-blue) !important;
 }
 
+/* ── Office-branded export buttons ──
+   Excel export in Excel green, PowerPoint export in PowerPoint orange. Keyed on
+   the widget keys (gen_/dl_ + excel/pptx, top & bottom), so both the "Export"
+   and "Download" states, in both page locations, pick up the brand colour. */
+[class*="st-key-gen_excel"] button,
+[class*="st-key-dl_excel"] button {
+  background: #217346 !important;
+  border: 1px solid #217346 !important;
+  box-shadow: none !important;
+}
+[class*="st-key-gen_excel"] button *,
+[class*="st-key-dl_excel"] button * { color: #ffffff !important; }
+[class*="st-key-gen_excel"] button:hover,
+[class*="st-key-dl_excel"] button:hover {
+  background: #1a5c38 !important;
+  border-color: #1a5c38 !important;
+}
+[class*="st-key-gen_pptx"] button,
+[class*="st-key-dl_pptx"] button {
+  background: #c43e1c !important;
+  border: 1px solid #c43e1c !important;
+  box-shadow: none !important;
+}
+[class*="st-key-gen_pptx"] button *,
+[class*="st-key-dl_pptx"] button * { color: #ffffff !important; }
+[class*="st-key-gen_pptx"] button:hover,
+[class*="st-key-dl_pptx"] button:hover {
+  background: #a83417 !important;
+  border-color: #a83417 !important;
+}
+
 /* ── Sidebar group label ── */
 .sidebar-group {
   font-family: var(--font-sans); font-size: 0.63rem; font-weight: 700;
