@@ -225,11 +225,14 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
         "recommended": w_to_dict(blended_w, cols),
         "target_met":  True,
     }
-    # Check whether the target return constraint was actually satisfied
+    # Check whether the target return constraint was actually satisfied.
+    # Measure achievement on the SAME basis the target constraint used (_mu —
+    # CAPM when supplied), not the raw historical mean; otherwise the optimiser
+    # can hit the target in expectation yet be reported as "not met" (or vice
+    # versa) purely because trailing returns differ from the CAPM estimate.
     if target_return is not None:
-        achieved = portfolio_metrics(
-            np.array([result["recommended"][c] for c in cols]), returns_df
-        )[0]
+        _rec_w   = np.array([result["recommended"][c] for c in cols])
+        achieved = float(_mu @ _rec_w)
         if achieved < target_return * 0.95:   # 5% tolerance
             result["target_met"]    = False
             result["target_achieved"] = round(achieved * 100, 1)

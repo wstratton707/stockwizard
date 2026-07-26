@@ -11,7 +11,7 @@ import disclaimers as _disc
 
 from portfolio_data import (
     fetch_portfolio_prices, fetch_portfolio_prices_cached,
-    build_candidate_universe, select_by_sharpe,
+    build_candidate_universe, select_by_factors,
     get_ticker_info, get_sharpe_rankings,
     SECTOR_UNIVERSE, SECTOR_ETFS,
     BOND_UNIVERSE, BOND_ETFS,
@@ -403,9 +403,9 @@ def _render_step_2(api_key):
                 )[:_MAX_PORTFOLIO_TICKERS]
                 log(f"   Final portfolio: {len(best_tickers)} stocks (precompute-ranked) — {', '.join(best_tickers)}")
             else:
-                best_tickers = select_by_sharpe(returns_df, sector_map,
-                                                max_total=_MAX_PORTFOLIO_TICKERS, top_n_per_sector=_TOP_N_PER_SECTOR)
-                log(f"   Final portfolio: {len(best_tickers)} stocks — {', '.join(best_tickers)}")
+                best_tickers = select_by_factors(returns_df, sector_map,
+                                                 max_total=_MAX_PORTFOLIO_TICKERS, top_n_per_sector=_TOP_N_PER_SECTOR)
+                log(f"   Final portfolio: {len(best_tickers)} stocks (multi-factor) — {', '.join(best_tickers)}")
             # Floor guard: mean-variance optimisation, the frontier and the
             # correlation matrix all need a real multi-asset set. If a fetch
             # failure left us with almost nothing, stop cleanly instead of

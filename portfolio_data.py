@@ -405,36 +405,71 @@ def build_candidate_universe(preferences, api_key, log=print):
     return result, sector_map, skipped_sectors
 
 
-def select_by_sharpe(returns_df, sector_map, always_keep=None, max_total=18,
-                     top_n_per_sector=2):
+def select_by_factors(returns_df, sector_map, always_keep=None, max_total=18,
+                      top_n_per_sector=2):
     """
-    Rank candidates by Sharpe ratio (excess return) within each sector.
-    Keeps the best `top_n_per_sector` stocks per sector.
-    Tickers in always_keep (SPY, QQQ, etc.) are pinned regardless of Sharpe.
+    Rank candidates by the SAME multi-factor score the precompute path uses, so
+    the fallback (when the precompute cache is unavailable) selects stocks on the
+    same basis as the primary path — momentum + low-volatility + risk-adjusted
+    return — rather than trailing Sharpe alone. Quality (fundamentals) can't be
+    derived from price history here, so it's left neutral, matching precompute's
+    neutral-when-missing rule (a constant term that doesn't affect ranking).
+
+    Keeps the best `top_n_per_sector` per sector; always_keep tickers
+    (SPY, QQQ, ...) are pinned regardless of score.
     """
     from collections import defaultdict
 
     if always_keep is None:
         always_keep = {"SPY", "QQQ", "GLD", "TLT"}
 
-    def sharpe(ticker):
+    ann = 252
+
+    def _factors(ticker):
         r = returns_df[ticker].dropna()
-        ann_ret = r.mean() * 252
-        ann_std = r.std() * np.sqrt(252)
-        return (ann_ret - get_risk_free_rate()) / ann_std if ann_std > 0 else -999.0
+        if len(r) < 30:
+            return None
+        ann_vol = float(r.std() * np.sqrt(ann))
+        sharpe  = ((r.mean() * ann) - get_risk_free_rate()) / ann_vol if ann_vol > 0 else 0.0
+        # 12-1 momentum: compound return over the trailing year excluding the most
+        # recent ~month (short-term reversal). The slice auto-clamps for shorter
+        # histories; fall back to the full window when there's very little data.
+        window   = r.iloc[-ann:-21] if len(r) > 63 else r
+        momentum = float((1 + window).prod() - 1)
+        return {"sharpe": sharpe, "ann_vol": ann_vol, "momentum": momentum}
 
-    sector_groups = defaultdict(list)
-    pinned = []
-
+    pinned, cand, facts = [], [], {}
     for ticker in returns_df.columns:
         if ticker in always_keep:
             pinned.append(ticker)
-        else:
-            sector_groups[sector_map.get(ticker, "Unknown")].append(ticker)
+            continue
+        f = _factors(ticker)
+        if f is not None:
+            facts[ticker] = f
+            cand.append(ticker)
+
+    def _norm(vals):
+        lo, hi = min(vals), max(vals)
+        rng = hi - lo
+        return {t: ((v - lo) / rng if rng > 0 else 0.5) for t, v in zip(cand, vals)}
+
+    if cand:
+        n_sharpe = _norm([facts[t]["sharpe"]   for t in cand])
+        n_vol    = _norm([facts[t]["ann_vol"]  for t in cand])
+        n_mom    = _norm([facts[t]["momentum"] for t in cand])
+        score = {t: (0.30 * n_mom[t] + 0.30 * 0.5 +            # quality neutral
+                     0.20 * (1 - n_vol[t]) + 0.20 * n_sharpe[t])
+                 for t in cand}
+    else:
+        score = {}
+
+    sector_groups = defaultdict(list)
+    for ticker in cand:
+        sector_groups[sector_map.get(ticker, "Unknown")].append(ticker)
 
     selected = list(pinned)
     for sector, tickers in sector_groups.items():
-        ranked = sorted(tickers, key=sharpe, reverse=True)
+        ranked = sorted(tickers, key=lambda t: score.get(t, 0.0), reverse=True)
         selected.extend(ranked[:top_n_per_sector])
 
     return selected[:max_total]
