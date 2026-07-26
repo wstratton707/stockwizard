@@ -849,17 +849,18 @@ def _build_price_sheet(wb, df, bar_size="day"):
     col_map    = {c[0].column_letter: c[0].value
                   for c in ws_p.iter_cols(1, ws_p.max_column, hdr_row, hdr_row)}
     price_hdrs = {"MA20","MA50","MA200","BB_Upper","BB_Middle","BB_Lower","52W_High","52W_Low"}
-    pct_hdrs   = {"Daily_Return","Cumulative_Index","Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
+    pct_hdrs   = {"Daily_Return","Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
                   "Volatility_20d","Drawdown_20d","Drawdown_60d","BB_Pct","Volume_vs_Avg",
                   "Pct_From_52W_High","Pct_From_52W_Low"}
 
     for row in ws_p.iter_rows(min_row=data_start):
         for cell in row:
             h = col_map.get(cell.column_letter)
-            if   h == "Date":         cell.number_format = "yyyy-mm-dd"
+            if   h == "Date":              cell.number_format = "yyyy-mm-dd"
             elif h in ("Volume", "Vol_MA20"):  cell.number_format = "#,##0"
-            elif h in price_hdrs:     cell.number_format = '_($* #,##0.00_)'
-            elif h in pct_hdrs:       cell.number_format = "0.00%"
+            elif h == "Cumulative_Index":  cell.number_format = "#,##0.00"  # base-100 index, not a %
+            elif h in price_hdrs:          cell.number_format = '_($* #,##0.00_)'
+            elif h in pct_hdrs:            cell.number_format = "0.00%"
 
     dr_col = next((l for l, h in col_map.items() if h == "Daily_Return"), None)
     if dr_col:
