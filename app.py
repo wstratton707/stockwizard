@@ -55,7 +55,8 @@ try:
 except Exception:
     DOCX_AVAILABLE = False
 try:
-    from valuation import get_valuation_data as _get_valuation_data, build_valuation_figure
+    from valuation import (get_valuation_data as _get_valuation_data,
+                           build_valuation_figure, build_eps_figure, build_dividend_figure)
     VALUATION_AVAILABLE = True
 except Exception:
     VALUATION_AVAILABLE = False
@@ -1679,37 +1680,70 @@ elif _page == "analysis":
                         '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
                         'text-transform:none;font-size:0.7rem">· price vs. earnings-justified fair value</span></div>',
                         unsafe_allow_html=True)
+                    # ── facts ──
                     _core      = _vdata.get("eps_core") or _vdata.get("eps") or [None]
                     _core_last = _core[-1] if _core else None
                     _fair_last = _core_last * _vdata["normal_pe"] if _core_last else None
                     _cur       = _vdata.get("current_price")
+                    _bpe       = _vdata.get("blended_pe")
+                    _npe       = _vdata["normal_pe"]
                     _disc      = ((_cur / _fair_last - 1) * 100) if (_fair_last and _cur) else None
+                    _div_last  = next((v for v in reversed(_vdata.get("div") or []) if v), None)
+                    _dyield    = (_div_last / _cur * 100) if (_div_last and _cur) else None
+                    _epsyield  = (100.0 / _bpe) if _bpe else None
                     if _disc is None:
-                        _verd, _vcol = "—", "#64748b"
+                        _verd, _vcol, _vbg = "—", "#475569", "#f1f5f9"
                     elif _disc > 15:
-                        _verd, _vcol = "Overvalued", "#dc2626"
+                        _verd, _vcol, _vbg = "Overvalued", "#b91c1c", "#fee2e2"
                     elif _disc < -15:
-                        _verd, _vcol = "Undervalued", "#059669"
+                        _verd, _vcol, _vbg = "Undervalued", "#15803d", "#dcfce7"
                     else:
-                        _verd, _vcol = "Near fair value", "#64748b"
-                    _vc = st.columns(5)
-                    for _col, _lbl, _val, _c in [
-                        (_vc[0], "Current Price", f"${_cur:,.2f}" if _cur else "—", "#0f172a"),
-                        (_vc[1], "Fair Value",    f"${_fair_last:,.2f}" if _fair_last else "—", "#e0871a"),
-                        (_vc[2], "Normal P/E",    f"{_vdata['normal_pe']:g}x", "#1d4ed8"),
-                        (_vc[3], "Blended P/E",   f"{_vdata['blended_pe']:g}x" if _vdata.get('blended_pe') else "—", "#0f172a"),
-                        (_vc[4], "Assessment",    _verd, _vcol),
-                    ]:
-                        with _col:
-                            st.markdown(
-                                f'<div class="metric-card"><div class="metric-label">{_lbl}</div>'
-                                f'<div class="metric-value" style="color:{_c}">{_val}</div></div>',
-                                unsafe_allow_html=True)
-                    _vfig = build_valuation_figure(_vdata)
-                    if _vfig is not None:
-                        st.plotly_chart(_vfig, use_container_width=True)
+                        _verd, _vcol, _vbg = "Near fair value", "#475569", "#f1f5f9"
+                    _mcap   = company_details.get("Market Cap")
+                    _mcap_s = (f"${_mcap/1e12:.2f}T" if _mcap and _mcap >= 1e12 else
+                               f"${_mcap/1e9:.1f}B"  if _mcap and _mcap >= 1e9  else
+                               f"${_mcap/1e6:.0f}M"  if _mcap else "—")
+                    _cur_s  = f"${_cur:,.2f}"      if _cur else "—"
+                    _bpe_s  = f"{_bpe:g}x"         if _bpe else "—"
+                    _eps_s  = f"{_epsyield:.1f}%"  if _epsyield else "—"
+                    _dy_s   = f"{_dyield:.1f}%"    if _dyield else "—"
+                    _fair_s = f"${_fair_last:,.2f}" if _fair_last else "—"
+                    _sector = company_details.get("Sector") or "—"
+
+                    _fcol, _mcol = st.columns([1, 3.2])
+                    with _fcol:
+                        st.markdown(f"""<div class="val-facts">
+                          <div class="vf-group">Fast facts</div>
+                          <div class="vf-row"><span>Current price</span><b>{_cur_s}</b></div>
+                          <div class="vf-row"><span>Blended P/E</span><b>{_bpe_s}</b></div>
+                          <div class="vf-row"><span>EPS yield</span><b>{_eps_s}</b></div>
+                          <div class="vf-row"><span>Dividend yield</span><b>{_dy_s}</b></div>
+                          <div class="vf-group">Valuation</div>
+                          <div class="vf-row"><span>Normal P/E</span><b>{_npe:g}x</b></div>
+                          <div class="vf-row"><span>Fair value</span><b style="color:#f28e1c">{_fair_s}</b></div>
+                          <div class="vf-row"><span>Assessment</span><span class="vf-badge" style="color:{_vcol};background:{_vbg}">{_verd}</span></div>
+                          <div class="vf-group">Company</div>
+                          <div class="vf-row"><span>Sector</span><b>{_sector}</b></div>
+                          <div class="vf-row"><span>Market cap</span><b>{_mcap_s}</b></div>
+                        </div>""", unsafe_allow_html=True)
+                    with _mcol:
+                        _tab_v, _tab_e, _tab_d = st.tabs(["Valuation", "Earnings", "Dividends"])
+                        with _tab_v:
+                            _vfig = build_valuation_figure(_vdata)
+                            if _vfig is not None:
+                                st.plotly_chart(_vfig, use_container_width=True)
+                        with _tab_e:
+                            _efig = build_eps_figure(_vdata)
+                            if _efig is not None:
+                                st.plotly_chart(_efig, use_container_width=True)
+                        with _tab_d:
+                            _dfig = build_dividend_figure(_vdata)
+                            if _dfig is not None:
+                                st.plotly_chart(_dfig, use_container_width=True)
+                            else:
+                                st.caption("This company doesn't pay a dividend.")
                     st.caption(
-                        "Fair value = core (3-yr median) EPS x the stock's own historical "
+                        "Fair value = core (3-yr median) EPS × the stock's own historical "
                         "normal P/E, from SEC-filed earnings. A valuation lens, not a price "
                         "target — always do your own research.")
                     st.markdown("---")

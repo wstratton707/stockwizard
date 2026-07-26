@@ -19,13 +19,16 @@ from data import _sec_load_cik_map, SEC_HEADERS, _sec_fy_series, _SEC_TAGS_EPS
 _DIV_TAGS = ["CommonStockDividendsPerShareDeclared",
              "CommonStockDividendsPerShareCashPaid"]
 
-# House palette (kept consistent with the app's Plotly charts)
-INK   = "#0f172a"
-FAIR  = "#e0871a"     # earnings-justified value line
-GREEN = "#4ca66a"     # earnings value fill
-GOLD  = "#caa11e"     # dividend-implied line
-GRID  = "#e2e8f0"
-MUTED = "#94a3b8"
+# Palette tuned close to the FAST Graphs reference: vivid orange fair-value line,
+# a solid green earnings wedge with a lighter premium band, black price, gold divs.
+INK        = "#0f172a"
+FAIR       = "#f28e1c"                 # earnings-justified value line (orange)
+GREEN_DARK = "rgba(82,168,110,.55)"    # earnings-justified value fill
+GREEN_LITE = "rgba(150,206,170,.42)"   # premium band
+GREEN_BAR  = "#4ca66a"                 # solid green for the earnings bars
+GOLD       = "#d9a520"                 # dividend line / bars
+GRID       = "#e2e8f0"
+MUTED      = "#94a3b8"
 
 
 def _cum_split_factor(splits, when):
@@ -159,21 +162,21 @@ def build_valuation_figure(data):
 
     fig = go.Figure()
 
-    # Earnings-justified value (dark green area under the fair-value line)
+    # Earnings-justified value (green wedge under the fair-value line)
     fig.add_trace(go.Scatter(
         x=xyr, y=fair, mode="lines", line=dict(width=0),
-        fill="tozeroy", fillcolor="rgba(76,166,106,.34)",
+        fill="tozeroy", fillcolor=GREEN_DARK,
         name="Earnings value", hoverinfo="skip", showlegend=False))
     # Premium band (lighter green between fair and 1.4x fair)
     fig.add_trace(go.Scatter(
         x=xyr, y=over, mode="lines", line=dict(width=0),
-        fill="tonexty", fillcolor="rgba(146,206,166,.22)",
+        fill="tonexty", fillcolor=GREEN_LITE,
         name="Premium band", hoverinfo="skip", showlegend=False))
 
     # Monthly price (black)
     fig.add_trace(go.Scatter(
         x=data["price_dates"], y=data["price_vals"], mode="lines",
-        line=dict(color=INK, width=1.4), name="Price",
+        line=dict(color=INK, width=1.6), name="Price",
         hovertemplate="%{x|%b %Y}<br>$%{y:,.2f}<extra>Price</extra>"))
 
     # Dividend-implied value (gold)
@@ -216,4 +219,63 @@ def build_valuation_figure(data):
                    tickfont=dict(size=11, color=MUTED, family="DM Sans"),
                    gridcolor=GRID, showline=False, zeroline=False, rangemode="tozero"),
     )
+    return fig
+
+
+def _bar_layout(title_suffix=""):
+    return dict(
+        height=440, template=None,
+        plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=10, r=16, t=30, b=30),
+        hovermode="x unified",
+        font=dict(family="DM Sans, system-ui, sans-serif"),
+        hoverlabel=dict(bgcolor=INK, bordercolor="#334155",
+                        font=dict(color="white", size=12, family="DM Sans")),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                    font=dict(size=11, family="DM Sans", color="#64748b"),
+                    bgcolor="rgba(0,0,0,0)"),
+        xaxis=dict(type="category", tickfont=dict(size=11, color=MUTED, family="DM Sans"),
+                   gridcolor="rgba(0,0,0,0)", showline=True, linecolor=GRID),
+        yaxis=dict(tickprefix="$", side="right",
+                   tickfont=dict(size=11, color=MUTED, family="DM Sans"),
+                   gridcolor=GRID, showline=False, zeroline=True, zerolinecolor=GRID),
+    )
+
+
+def build_eps_figure(data):
+    """Annual EPS bars (reported) with the core-EPS trend line."""
+    if not data or not data.get("years"):
+        return None
+    import plotly.graph_objects as go
+    yrs  = [str(y) for y in data["years"]]
+    eps  = data["eps"]
+    core = data.get("eps_core") or eps
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=yrs, y=eps, name="Reported EPS", marker_color=GREEN_BAR, opacity=0.85,
+        hovertemplate="%{x}<br>EPS $%{y:.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(
+        x=yrs, y=core, name="Core EPS (3-yr median)", mode="lines+markers",
+        line=dict(color=FAIR, width=2.4),
+        marker=dict(size=6, color="#ffffff", line=dict(color=FAIR, width=1.4)),
+        hovertemplate="%{x}<br>Core EPS $%{y:.2f}<extra></extra>"))
+    fig.update_layout(**_bar_layout())
+    return fig
+
+
+def build_dividend_figure(data):
+    """Annual dividends-per-share bars. Returns None if the name pays no dividend."""
+    if not data or not data.get("years"):
+        return None
+    div = data.get("div") or []
+    if not any(v for v in div):
+        return None
+    import plotly.graph_objects as go
+    yrs = [str(y) for y in data["years"]]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=yrs, y=[v or 0 for v in div], name="Dividends / share",
+        marker_color=GOLD, opacity=0.9,
+        hovertemplate="%{x}<br>Dividend $%{y:.2f}<extra></extra>"))
+    fig.update_layout(**_bar_layout())
     return fig

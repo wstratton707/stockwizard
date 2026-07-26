@@ -694,6 +694,25 @@ button[kind^="primary"]:active,
   fill:  #ffffff !important;
 }
 
+/* ── Valuation Lens facts sidebar ── */
+.val-facts{
+  border:1px solid #e2e8f0; border-radius:8px; padding:4px 13px 12px;
+  background:#ffffff;
+}
+.vf-group{
+  font-size:0.62rem; text-transform:uppercase; letter-spacing:0.07em;
+  color:#94a3b8; font-weight:700; margin:14px 0 3px;
+}
+.vf-group:first-child{ margin-top:6px; }
+.vf-row{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:4px 0; font-size:0.82rem; border-bottom:1px solid #f1f5f9;
+}
+.vf-row:last-child{ border-bottom:none; }
+.vf-row span{ color:#64748b; }
+.vf-row b{ color:#0f172a; font-weight:700; font-variant-numeric:tabular-nums; }
+.vf-badge{ padding:2px 9px; border-radius:20px; font-weight:700; font-size:0.74rem; }
+
 /* ── Sidebar group label ── */
 .sidebar-group {
   font-family: var(--font-sans); font-size: 0.63rem; font-weight: 700;
