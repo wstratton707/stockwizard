@@ -54,6 +54,23 @@ try:
     DOCX_AVAILABLE = True
 except Exception:
     DOCX_AVAILABLE = False
+try:
+    from valuation import get_valuation_data as _get_valuation_data, build_valuation_figure
+    VALUATION_AVAILABLE = True
+except Exception:
+    VALUATION_AVAILABLE = False
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_valuation(_ticker):
+    """~15yr price-vs-earnings valuation series (EDGAR + yfinance). Cached 1h; the
+    underlying fetch is slow, so this keeps repeat views instant."""
+    if not VALUATION_AVAILABLE:
+        return None
+    try:
+        return _get_valuation_data(_ticker)
+    except Exception:
+        return None
 from live_data import get_live_price, get_intraday_data, get_top_movers, get_tape_prices
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
@@ -1651,6 +1668,51 @@ elif _page == "analysis":
                     f'<div style="color:#cbd5e1;font-size:0.9rem;line-height:1.75;'
                     f'font-family:Inter,sans-serif">{summary_text}</div></div>',
                     unsafe_allow_html=True)
+
+            # ── Valuation Lens — price vs. earnings-justified fair value ──────
+            if not is_crypto and VALUATION_AVAILABLE:
+                with st.spinner("Building the valuation view…"):
+                    _vdata = _cached_valuation(ticker_input)
+                if _vdata:
+                    st.markdown(
+                        '<div class="section-header">Valuation Lens '
+                        '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                        'text-transform:none;font-size:0.7rem">· price vs. earnings-justified fair value</span></div>',
+                        unsafe_allow_html=True)
+                    _core      = _vdata.get("eps_core") or _vdata.get("eps") or [None]
+                    _core_last = _core[-1] if _core else None
+                    _fair_last = _core_last * _vdata["normal_pe"] if _core_last else None
+                    _cur       = _vdata.get("current_price")
+                    _disc      = ((_cur / _fair_last - 1) * 100) if (_fair_last and _cur) else None
+                    if _disc is None:
+                        _verd, _vcol = "—", "#64748b"
+                    elif _disc > 15:
+                        _verd, _vcol = "Overvalued", "#dc2626"
+                    elif _disc < -15:
+                        _verd, _vcol = "Undervalued", "#059669"
+                    else:
+                        _verd, _vcol = "Near fair value", "#64748b"
+                    _vc = st.columns(5)
+                    for _col, _lbl, _val, _c in [
+                        (_vc[0], "Current Price", f"${_cur:,.2f}" if _cur else "—", "#0f172a"),
+                        (_vc[1], "Fair Value",    f"${_fair_last:,.2f}" if _fair_last else "—", "#e0871a"),
+                        (_vc[2], "Normal P/E",    f"{_vdata['normal_pe']:g}x", "#1d4ed8"),
+                        (_vc[3], "Blended P/E",   f"{_vdata['blended_pe']:g}x" if _vdata.get('blended_pe') else "—", "#0f172a"),
+                        (_vc[4], "Assessment",    _verd, _vcol),
+                    ]:
+                        with _col:
+                            st.markdown(
+                                f'<div class="metric-card"><div class="metric-label">{_lbl}</div>'
+                                f'<div class="metric-value" style="color:{_c}">{_val}</div></div>',
+                                unsafe_allow_html=True)
+                    _vfig = build_valuation_figure(_vdata)
+                    if _vfig is not None:
+                        st.plotly_chart(_vfig, use_container_width=True)
+                    st.caption(
+                        "Fair value = core (3-yr median) EPS x the stock's own historical "
+                        "normal P/E, from SEC-filed earnings. A valuation lens, not a price "
+                        "target — always do your own research.")
+                    st.markdown("---")
 
             # ── Analyst View (Finnhub: consensus + earnings surprises) ────────
             if not is_crypto:
