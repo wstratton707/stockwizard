@@ -2072,7 +2072,9 @@ elif _page == "analysis":
             with _ctrl5:
                 _show_vol   = st.checkbox("Volume", value=False, key="main_show_volume")
             with _ctrl6:
-                _show_sr    = st.checkbox("S/R",    value=bool(do_sr), key="main_show_sr")
+                # Support/Resistance is an opt-in overlay now (off by default) —
+                # it cluttered the default chart and most investors don't use it.
+                _show_sr    = st.checkbox("S/R",    value=False, key="main_show_sr")
             with _ctrl7:
                 _show_tag   = st.checkbox("Marker", value=True, key="main_show_tag")
 
@@ -2274,7 +2276,22 @@ elif _page == "analysis":
                 "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
             })
 
-            if "RSI14" in df.columns:
+            # ── One switchable indicator below the price chart ────────────────
+            # Replaces the old always-on stack of RSI + Bollinger (+ MACD) charts
+            # with a single view the user flips between — less scrolling, less
+            # clutter. "None" hides it entirely.
+            _ind_opts = ["None"]
+            if "RSI14" in df.columns:    _ind_opts.append("RSI")
+            if "MACD" in df.columns:     _ind_opts.append("MACD")
+            if "BB_Upper" in df.columns: _ind_opts.append("Bollinger")
+            _ind_view = "None"
+            if len(_ind_opts) > 1:
+                st.markdown('<div class="field-label" style="margin-top:0.5rem">Indicator</div>',
+                            unsafe_allow_html=True)
+                _ind_view = st.radio("Indicator", _ind_opts, horizontal=True,
+                                     key="tech_indicator", label_visibility="collapsed")
+
+            if _ind_view == "RSI" and "RSI14" in df.columns:
                 st.markdown('<div class="section-header">RSI (14)</div>', unsafe_allow_html=True)
                 fig_rsi = go.Figure()
                 fig_rsi.add_trace(go.Scatter(x=df["Date"], y=df["RSI14"],
@@ -2323,7 +2340,7 @@ elif _page == "analysis":
                 )
                 st.plotly_chart(fig_rsi, use_container_width=True)
 
-            if "BB_Upper" in df.columns:
+            if _ind_view == "Bollinger" and "BB_Upper" in df.columns:
                 st.markdown('<div class="section-header">Bollinger Bands</div>', unsafe_allow_html=True)
                 fig_bb = go.Figure()
                 fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["BB_Upper"],
@@ -2365,6 +2382,46 @@ elif _page == "analysis":
                     ),
                 )
                 st.plotly_chart(fig_bb, use_container_width=True)
+
+            if _ind_view == "MACD" and "MACD" in df.columns:
+                st.markdown('<div class="section-header">MACD</div>', unsafe_allow_html=True)
+                fig_macd = go.Figure()
+                fig_macd.add_trace(go.Scatter(
+                    x=df["Date"], y=df["MACD"], name="MACD",
+                    line=dict(color="#4a9eff", width=1.5),
+                    hovertemplate="MACD: %{y:.3f}<extra></extra>"))
+                fig_macd.add_trace(go.Scatter(
+                    x=df["Date"], y=df["MACD_Signal"], name="Signal",
+                    line=dict(color="#1d4ed8", width=1.5),
+                    hovertemplate="Signal: %{y:.3f}<extra></extra>"))
+                _hist_colors = ["#059669" if (v or 0) >= 0 else "#dc2626"
+                                for v in df["MACD_Hist"].fillna(0)]
+                fig_macd.add_trace(go.Bar(
+                    x=df["Date"], y=df["MACD_Hist"], name="Histogram",
+                    marker_color=_hist_colors, opacity=0.5,
+                    hovertemplate="Hist: %{y:.3f}<extra></extra>"))
+                fig_macd.update_layout(
+                    height=240, template=None,
+                    plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(l=10, r=95, t=20, b=30),
+                    hovermode="x unified",
+                    font=dict(family="DM Sans, system-ui, sans-serif"),
+                    hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
+                                    font=dict(color="white", size=12, family="DM Sans")),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                xanchor="right", x=1.0,
+                                font=dict(size=11, family="DM Sans", color="#64748b"),
+                                bgcolor="rgba(0,0,0,0)"),
+                    xaxis=dict(type="date", tickformat="%b '%y", title=None,
+                               tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                               gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
+                               zeroline=False),
+                    yaxis=dict(title=None, side="right",
+                               tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                               gridcolor="#e2e8f0", showline=False,
+                               zeroline=True, zerolinecolor="#e2e8f0"),
+                )
+                st.plotly_chart(fig_macd, use_container_width=True)
 
             if mc_summary:
                 _is_custom = forecast_method == "Custom Forecast"
