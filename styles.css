@@ -649,8 +649,6 @@ button[kind^="primary"]:active,
   border: 1px solid #217346 !important;
   box-shadow: none !important;
 }
-[class*="st-key-gen_excel"] button *,
-[class*="st-key-dl_excel"] button * { color: #ffffff !important; }
 [class*="st-key-gen_excel"] button:hover,
 [class*="st-key-dl_excel"] button:hover {
   background: #1a5c38 !important;
@@ -662,12 +660,23 @@ button[kind^="primary"]:active,
   border: 1px solid #c43e1c !important;
   box-shadow: none !important;
 }
-[class*="st-key-gen_pptx"] button *,
-[class*="st-key-dl_pptx"] button * { color: #ffffff !important; }
 [class*="st-key-gen_pptx"] button:hover,
 [class*="st-key-dl_pptx"] button:hover {
   background: #a83417 !important;
   border-color: #a83417 !important;
+}
+/* White label — high specificity (incl. the markdown container) so it beats the
+   global slate text rule that otherwise bleeds dark onto the button labels. */
+[class*="st-key-gen_excel"] button, [class*="st-key-gen_excel"] button *,
+[class*="st-key-dl_excel"]  button, [class*="st-key-dl_excel"]  button *,
+[class*="st-key-gen_pptx"]  button, [class*="st-key-gen_pptx"]  button *,
+[class*="st-key-dl_pptx"]   button, [class*="st-key-dl_pptx"]   button *,
+[class*="st-key-gen_excel"] button [data-testid="stMarkdownContainer"] p,
+[class*="st-key-dl_excel"]  button [data-testid="stMarkdownContainer"] p,
+[class*="st-key-gen_pptx"]  button [data-testid="stMarkdownContainer"] p,
+[class*="st-key-dl_pptx"]   button [data-testid="stMarkdownContainer"] p {
+  color: #ffffff !important;
+  fill:  #ffffff !important;
 }
 
 /* ── Sidebar group label ── */
