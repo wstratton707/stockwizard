@@ -665,16 +665,31 @@ button[kind^="primary"]:active,
   background: #a83417 !important;
   border-color: #a83417 !important;
 }
+[class*="st-key-gen_word"] button,
+[class*="st-key-dl_word"] button {
+  background: #2b579a !important;
+  border: 1px solid #2b579a !important;
+  box-shadow: none !important;
+}
+[class*="st-key-gen_word"] button:hover,
+[class*="st-key-dl_word"] button:hover {
+  background: #22467d !important;
+  border-color: #22467d !important;
+}
 /* White label — high specificity (incl. the markdown container) so it beats the
    global slate text rule that otherwise bleeds dark onto the button labels. */
 [class*="st-key-gen_excel"] button, [class*="st-key-gen_excel"] button *,
 [class*="st-key-dl_excel"]  button, [class*="st-key-dl_excel"]  button *,
 [class*="st-key-gen_pptx"]  button, [class*="st-key-gen_pptx"]  button *,
 [class*="st-key-dl_pptx"]   button, [class*="st-key-dl_pptx"]   button *,
+[class*="st-key-gen_word"]  button, [class*="st-key-gen_word"]  button *,
+[class*="st-key-dl_word"]   button, [class*="st-key-dl_word"]   button *,
 [class*="st-key-gen_excel"] button [data-testid="stMarkdownContainer"] p,
 [class*="st-key-dl_excel"]  button [data-testid="stMarkdownContainer"] p,
 [class*="st-key-gen_pptx"]  button [data-testid="stMarkdownContainer"] p,
-[class*="st-key-dl_pptx"]   button [data-testid="stMarkdownContainer"] p {
+[class*="st-key-dl_pptx"]   button [data-testid="stMarkdownContainer"] p,
+[class*="st-key-gen_word"]  button [data-testid="stMarkdownContainer"] p,
+[class*="st-key-dl_word"]   button [data-testid="stMarkdownContainer"] p {
   color: #ffffff !important;
   fill:  #ffffff !important;
 }
