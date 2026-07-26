@@ -2100,7 +2100,7 @@ elif _page == "analysis":
                         x=1.005, xref="paper", y=r, yref="y",
                         text=f"Resist ${r:,.0f}",
                         showarrow=False, xanchor="left",
-                        font=dict(color="#ef4444", size=10, family="Inter"),
+                        font=dict(color="#ef4444", size=10, family="DM Sans"),
                         bgcolor="rgba(255,255,255,0.9)",
                         bordercolor="#fecaca", borderwidth=1,
                         borderpad=3,
@@ -2119,7 +2119,7 @@ elif _page == "analysis":
                         x=1.005, xref="paper", y=s, yref="y",
                         text=f"Support ${s:,.0f}",
                         showarrow=False, xanchor="left",
-                        font=dict(color="#16a34a", size=10, family="Inter"),
+                        font=dict(color="#16a34a", size=10, family="DM Sans"),
                         bgcolor="rgba(255,255,255,0.9)",
                         bordercolor="#bbf7d0", borderwidth=1,
                         borderpad=3,
@@ -2136,7 +2136,7 @@ elif _page == "analysis":
                     x=1.005, xref="paper", y=_last, yref="y",
                     text=f"<b>${_last:,.2f}</b>",
                     showarrow=False, xanchor="left",
-                    font=dict(color="white", size=11, family="Inter"),
+                    font=dict(color="white", size=11, family="DM Sans"),
                     bgcolor="#2563eb",
                     borderpad=4,
                 )
@@ -2152,13 +2152,13 @@ elif _page == "analysis":
                 font=dict(family="Inter, system-ui, sans-serif"),
                 hoverlabel=dict(
                     bgcolor="#0f172a", bordercolor="#334155",
-                    font=dict(color="white", size=12, family="Inter"),
+                    font=dict(color="white", size=12, family="DM Sans"),
                     namelength=-1,
                 ),
                 # Legend: horizontal strip ABOVE the plot area, transparent
                 legend=dict(
                     orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0,
-                    font=dict(size=11, family="Inter", color="#64748b"),
+                    font=dict(size=11, family="DM Sans", color="#64748b"),
                     bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
                     itemsizing="constant",
                 ),
@@ -2166,8 +2166,8 @@ elif _page == "analysis":
                     title=None,
                     type="date",
                     tickformat="%b '%y",
-                    tickfont=dict(size=11, color="#94a3b8", family="Inter"),
-                    gridcolor="#f1f5f9",
+                    tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                    gridcolor="#e2e8f0",
                     showline=True, linecolor="#e2e8f0", linewidth=1,
                     zeroline=False,
                     rangeslider=dict(visible=False),
@@ -2181,7 +2181,7 @@ elif _page == "analysis":
                             dict(step="all", label="All"),
                         ],
                         bgcolor="#f8fafc", bordercolor="#e2e8f0", borderwidth=1,
-                        font=dict(family="Inter", size=11, color="#475569"),
+                        font=dict(family="DM Sans", size=11, color="#475569"),
                         activecolor="#2563eb",
                         x=0.0, xanchor="left", y=1.02, yanchor="bottom",
                     ),
@@ -2190,8 +2190,8 @@ elif _page == "analysis":
                     title=None,
                     side="right",
                     tickformat="$,.2f",
-                    tickfont=dict(size=11, color="#94a3b8", family="Inter"),
-                    gridcolor="#f1f5f9",
+                    tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                    gridcolor="#e2e8f0",
                     showline=False,
                     zeroline=False,
                     autorange=True,
@@ -2227,12 +2227,12 @@ elif _page == "analysis":
                 fig_rsi.add_annotation(
                     xref="paper", x=0.005, y=85, text="Overbought",
                     showarrow=False, xanchor="left",
-                    font=dict(size=10, color="#ef4444", family="Inter"),
+                    font=dict(size=10, color="#ef4444", family="DM Sans"),
                 )
                 fig_rsi.add_annotation(
                     xref="paper", x=0.005, y=15, text="Oversold",
                     showarrow=False, xanchor="left",
-                    font=dict(size=10, color="#16a34a", family="Inter"),
+                    font=dict(size=10, color="#16a34a", family="DM Sans"),
                 )
                 fig_rsi.update_layout(
                     height=200, template=None,
@@ -2242,19 +2242,19 @@ elif _page == "analysis":
                     showlegend=False,
                     font=dict(family="Inter, system-ui, sans-serif"),
                     hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                    font=dict(color="white", size=12, family="Inter")),
+                                    font=dict(color="white", size=12, family="DM Sans")),
                     xaxis=dict(
                         type="date", tickformat="%b '%y", title=None,
-                        tickfont=dict(size=11, color="#94a3b8", family="Inter"),
-                        gridcolor="#f1f5f9", showline=True, linecolor="#e2e8f0",
+                        tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                        gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
                         zeroline=False,
                     ),
                     yaxis=dict(
                         range=[0, 100], side="right",
                         tickvals=[30, 50, 70],
                         title=None,
-                        tickfont=dict(size=11, color="#94a3b8", family="Inter"),
-                        gridcolor="#f1f5f9", showline=False,
+                        tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                        gridcolor="#e2e8f0", showline=False,
                         zeroline=False,
                     ),
                 )
@@ -2280,24 +2280,24 @@ elif _page == "analysis":
                     hovermode="x unified",
                     font=dict(family="Inter, system-ui, sans-serif"),
                     hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                    font=dict(color="white", size=12, family="Inter")),
+                                    font=dict(color="white", size=12, family="DM Sans")),
                     # Legend OUTSIDE the plot — top-right strip, transparent
                     legend=dict(
                         orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0,
-                        font=dict(size=11, family="Inter", color="#64748b"),
+                        font=dict(size=11, family="DM Sans", color="#64748b"),
                         bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
                     ),
                     xaxis=dict(
                         type="date", tickformat="%b '%y", title=None,
-                        tickfont=dict(size=11, color="#94a3b8", family="Inter"),
-                        gridcolor="#f1f5f9", showline=True, linecolor="#e2e8f0",
+                        tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                        gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
                         zeroline=False,
                     ),
                     yaxis=dict(
                         tickformat="$,.2f",
                         title=None, side="right",
-                        tickfont=dict(size=11, color="#94a3b8", family="Inter"),
-                        gridcolor="#f1f5f9", showline=False,
+                        tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
+                        gridcolor="#e2e8f0", showline=False,
                         zeroline=False, autorange=True, rangemode="normal",
                     ),
                 )
@@ -2383,7 +2383,7 @@ elif _page == "analysis":
                             tickformat=",d",
                             tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
                             title_font=dict(size=12, color="#64748b", family="DM Sans"),
-                            gridcolor="#f1f5f9", showline=True, linecolor="#e2e8f0",
+                            gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
                             zeroline=False,
                         ),
                         yaxis=dict(
@@ -2394,7 +2394,7 @@ elif _page == "analysis":
                             rangemode="normal",
                             zeroline=False,
                             tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                            gridcolor="#f1f5f9", showline=False,
+                            gridcolor="#e2e8f0", showline=False,
                         ),
                     )
                     st.plotly_chart(fig_mc, use_container_width=True)
@@ -2581,7 +2581,7 @@ elif _page == "analysis":
                 _chart_layout = dict(
                     plot_bgcolor="#ffffff",
                     paper_bgcolor="#f8fafc",
-                    font=dict(color="#0f172a", family="Inter"),
+                    font=dict(color="#0f172a", family="DM Sans"),
                     xaxis=dict(gridcolor="#e2e8f0", showgrid=True, color="#6b7a8d"),
                     yaxis=dict(gridcolor="#e2e8f0", showgrid=True, color="#6b7a8d"),
                     legend=dict(orientation="h", y=1.04, x=0,

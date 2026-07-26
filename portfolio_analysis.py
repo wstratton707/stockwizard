@@ -237,14 +237,24 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
     return result
 
 
-def generate_efficient_frontier(returns_df, n_portfolios=8000):
+def generate_efficient_frontier(returns_df, n_portfolios=8000, expected_returns=None):
     """
     Generate random portfolios for efficient frontier scatter plot.
     Returns DataFrame with columns: Return, Volatility, Sharpe
     Vectorized — ~60% faster than the per-portfolio loop.
+
+    `expected_returns` (dict {ticker: annual decimal}) puts the random-portfolio
+    cloud on the SAME return basis as the optimizer and the plotted "Your
+    Portfolio" marker — CAPM (Rf + beta*ERP). Without it the cloud used the raw
+    2-yr historical mean while the marker used CAPM, so the marker floated far
+    below the cloud and looked broken. Falls back to the historical mean.
     """
-    n    = len(returns_df.columns)
-    mu   = returns_df.mean().values * 252
+    cols = list(returns_df.columns)
+    n    = len(cols)
+    if expected_returns is not None:
+        mu = np.array([expected_returns.get(c, get_risk_free_rate()) for c in cols])
+    else:
+        mu = returns_df.mean().values * 252
     cov  = returns_df.cov().values  * 252
 
     rng  = np.random.default_rng(42)   # local RNG — no global-state pollution

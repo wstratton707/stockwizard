@@ -447,7 +447,10 @@ def _render_step_2(api_key):
                                             expected_returns=capm_mu)
             progress.progress(80, text="Generating efficient frontier...")
 
-            ef_df = generate_efficient_frontier(returns_df, n_portfolios=_EF_PORTFOLIOS)
+            # Same CAPM basis as the optimizer + the plotted marker, so the
+            # "Your Portfolio" star lands on the cloud instead of floating below it.
+            ef_df = generate_efficient_frontier(returns_df, n_portfolios=_EF_PORTFOLIOS,
+                                                expected_returns=capm_mu)
 
             # Get ticker info — parallel fetches
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -775,30 +778,46 @@ concentration penalty for any single position above 25%.
     with col2:
         # Efficient frontier
         fig_ef = go.Figure()
+        # Random-portfolio cloud, tinted by Sharpe on a sequential single hue
+        # (light -> dark green = worse -> better risk-adjusted return). Cloud and
+        # star share the CAPM return basis, so the star sits on the frontier edge.
         fig_ef.add_trace(go.Scatter(
             x=ef_df["Volatility"], y=ef_df["Return"],
             mode="markers",
-            marker=dict(color=ef_df["Sharpe"], colorscale="RdYlGn",
-                        size=4, opacity=0.6,
-                        colorbar=dict(title="Sharpe")),
-            name="Random Portfolios",
-            hovertemplate="Vol: %{x:.1f}%<br>Return: %{y:.1f}%<extra></extra>",
+            marker=dict(
+                color=ef_df["Sharpe"],
+                colorscale=[[0.0, "#dcfce7"], [1.0, "#15803d"]],
+                size=5, opacity=0.55,
+                colorbar=dict(title=dict(text="Sharpe", side="top"),
+                              thickness=10, len=0.8, x=1.0, xanchor="left",
+                              tickfont=dict(size=9), outlinewidth=0),
+            ),
+            name="Random portfolios",
+            hovertemplate="Volatility %{x:.1f}%<br>Return %{y:.1f}%<extra></extra>",
         ))
+        # "Your Portfolio" — bright brand blue with a white halo so it reads
+        # clearly against the green cloud it now sits on.
         fig_ef.add_trace(go.Scatter(
             x=[ann_vol], y=[ann_ret],
             mode="markers",
-            marker=dict(color=BLUE, size=14, symbol="star",
-                        line=dict(color=DARK, width=1.5)),
-            name="Your Portfolio",
+            marker=dict(color=BLUE, size=17, symbol="star",
+                        line=dict(color="white", width=2)),
+            name="Your portfolio",
+            hovertemplate=("Your portfolio<br>Volatility %{x:.1f}%"
+                           "<br>Return %{y:.1f}%<extra></extra>"),
         ))
         fig_ef.update_layout(
-            title="Efficient Frontier",
-            xaxis_title="Volatility (%)",
-            yaxis_title="Expected Return (%)",
+            title=dict(text="Efficient Frontier", font=dict(size=13, color=DARK),
+                       x=0, xanchor="left"),
+            xaxis=dict(title="Volatility (%)", gridcolor="#e2e8f0", zeroline=False),
+            yaxis=dict(title="Expected Return (%)", gridcolor="#e2e8f0", zeroline=False),
             height=380,
             template="plotly_white",
-            margin=dict(l=0,r=0,t=40,b=0),
-            font=dict(family="DM Sans"),
+            plot_bgcolor="white",
+            margin=dict(l=0, r=44, t=40, b=44),
+            font=dict(family="DM Sans", color="#64748b"),
+            legend=dict(orientation="h", yanchor="top", y=-0.18,
+                        x=0.5, xanchor="center"),
         )
         st.plotly_chart(fig_ef, use_container_width=True)
 
@@ -1070,8 +1089,8 @@ def _render_step_3():
             title=dict(text="Rolling 60D Volatility (%)", font=dict(size=12)),
             height=230, template="plotly_white",
             margin=dict(l=10, r=10, t=36, b=30),
-            yaxis=dict(ticksuffix="%", gridcolor="#f1f5f9"),
-            xaxis=dict(gridcolor="#f1f5f9"),
+            yaxis=dict(ticksuffix="%", gridcolor="#e2e8f0"),
+            xaxis=dict(gridcolor="#e2e8f0"),
             font=dict(family="DM Sans", size=10),
             showlegend=False,
         )
@@ -1094,8 +1113,8 @@ def _render_step_3():
             title=dict(text=f"Rolling {_roll_w//21}M Sharpe Ratio", font=dict(size=12)),
             height=230, template="plotly_white",
             margin=dict(l=10, r=10, t=36, b=30),
-            yaxis=dict(gridcolor="#f1f5f9"),
-            xaxis=dict(gridcolor="#f1f5f9"),
+            yaxis=dict(gridcolor="#e2e8f0"),
+            xaxis=dict(gridcolor="#e2e8f0"),
             font=dict(family="DM Sans", size=10),
             showlegend=False,
         )
@@ -1121,8 +1140,8 @@ def _render_step_3():
                     title=dict(text="Rolling Correlation vs S&P 500", font=dict(size=12)),
                     height=230, template="plotly_white",
                     margin=dict(l=10, r=10, t=36, b=30),
-                    yaxis=dict(range=[-1.1, 1.1], gridcolor="#f1f5f9"),
-                    xaxis=dict(gridcolor="#f1f5f9"),
+                    yaxis=dict(range=[-1.1, 1.1], gridcolor="#e2e8f0"),
+                    xaxis=dict(gridcolor="#e2e8f0"),
                     font=dict(family="DM Sans", size=10),
                     showlegend=False,
                 )
@@ -1172,8 +1191,8 @@ def _render_step_3():
             template="plotly_white",
             margin=dict(l=60, r=80, t=44, b=30),
             xaxis=dict(title="Contribution to Portfolio Return (%)",
-                       ticksuffix="%", gridcolor="#f1f5f9"),
-            yaxis=dict(gridcolor="#f1f5f9"),
+                       ticksuffix="%", gridcolor="#e2e8f0"),
+            yaxis=dict(gridcolor="#e2e8f0"),
             font=dict(family="DM Sans"),
             showlegend=False,
         )
