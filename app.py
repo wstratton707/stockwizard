@@ -149,6 +149,17 @@ def _render_stock_news(ticker, company_name=None):
     except Exception:
         st.caption("News research is unavailable right now.")
         return
+    # Relevance matching keys off the company name as well as the symbol, since
+    # most coverage writes "Nvidia", not "NVDA". Callers that already hold the
+    # company details pass it in; the News page doesn't, so resolve it here
+    # (cached, so this is free after the first lookup).
+    if not company_name:
+        try:
+            from cached_fetchers import cached_fetch_company_details
+            company_name = (cached_fetch_company_details(ticker, POLYGON_API_KEY)
+                            or {}).get("Name") or None
+        except Exception:
+            company_name = None
     arts = _cached_news(ticker, company_name or "")
     if not arts:
         st.caption("No recent news found for this ticker.")
