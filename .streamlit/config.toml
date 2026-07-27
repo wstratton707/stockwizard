@@ -20,3 +20,10 @@ showErrorDetails = true
 
 [browser]
 gatherUsageStats = false
+
+[server]
+# Serve ./static over HTTP at /app/static/<file>. The report-preview carousel used
+# to base64-inline its four screenshots, which pushed ~1.9 MB through the
+# websocket on every single Home render — uncached, and 93% of the page's DOM.
+# As static files the browser caches them and they load off the critical path.
+enableStaticServing = true

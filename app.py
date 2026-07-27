@@ -372,20 +372,42 @@ _REPORT_SLIDES = [
 
 @st.cache_data(show_spinner=False)
 def _report_carousel_html():
-    """Self-contained HTML/JS carousel with every report sheet base64-baked in, so
-    cycling is instant (client-side) — no Streamlit rerun / page reload per click."""
+    """Client-side HTML/JS carousel of the report sheets — cycling is instant, with
+    no Streamlit rerun per click.
+
+    Images are referenced as static URLs, not base64-inlined. Inlining them put
+    ~1.9 MB through the websocket on every Home render (93% of the page's DOM,
+    and uncacheable); as static WebP files the browser caches them across visits
+    and only the visible slide is fetched eagerly. Falls back to inlining the PNG
+    if the WebP is missing, so the preview can never silently disappear.
+    """
     import base64
     _here = os.path.dirname(__file__)
-    slides, caps = [], []
+    parts, caps = [], []
     for path, cap in _REPORT_SLIDES:
-        fp = os.path.join(_here, path)
-        if os.path.exists(fp):
-            slides.append(base64.b64encode(open(fp, "rb").read()).decode())
-            caps.append(cap)
-    if not slides:
+        webp = os.path.join(_here, "static",
+                            os.path.basename(path).replace(".png", ".webp"))
+        png = os.path.join(_here, path)
+        if os.path.exists(webp):
+            # Relative so it still resolves under a baseUrlPath deployment.
+            parts.append("app/static/" + os.path.basename(webp))
+        elif os.path.exists(png):
+            parts.append("data:image/png;base64," +
+                         base64.b64encode(open(png, "rb").read()).decode())
+        else:
+            continue
+        caps.append(cap)
+    if not parts:
         return "<div style='color:#94a3b8'>Sample report preview unavailable.</div>"
-    imgs = "".join('<img class="' + ("on" if i == 0 else "") +
-                   '" src="data:image/png;base64,' + b + '">' for i, b in enumerate(slides))
+    # Deliberately NOT loading="lazy" on the hidden slides: they're display:none, so
+    # a lazy image is never in-viewport and never fetches — the first arrow click
+    # would then stall on a cold download, which is exactly what this carousel
+    # exists to avoid. Low fetch priority keeps them off the critical path instead,
+    # and at ~120 KB of WebP each they cost little to prefetch.
+    imgs = "".join(
+        f'<img class="{"on" if i == 0 else ""}" src="{src}" decoding="async"'
+        f'{"" if i == 0 else " fetchpriority=\"low\""}>'
+        for i, src in enumerate(parts))
     caps_js = ",".join('"' + c.replace('"', "") + '"' for c in caps)
     tmpl = """<!doctype html><html><head><meta charset="utf-8"><style>
 *{box-sizing:border-box;margin:0;padding:0;font-family:'DM Sans',system-ui,Arial,sans-serif}
