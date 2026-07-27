@@ -32,8 +32,8 @@ REPO = Path(__file__).resolve().parents[4]
 # Streamlit at import time and need a running ScriptRunContext).
 CORE_MODULES = [
     "constants", "data", "analysis", "portfolio_data", "portfolio_analysis",
-    "strategy", "cached_fetchers", "excel_builder", "pptx_builder",
-    "stress_test", "live_data", "disclaimers",
+    "cached_fetchers", "excel_builder", "pptx_builder",
+    "stress_test", "live_data", "disclaimers", "news_research",
 ]
 
 GREEN, RED, DIM, RESET = "\033[32m", "\033[31m", "\033[2m", "\033[0m"
