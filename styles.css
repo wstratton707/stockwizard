@@ -1020,42 +1020,120 @@ button[kind^="primary"]:active,
   color: var(--text3) !important;
 }
 
-/* ── Analysis expander styling ── */
+/* ── Generic expanders (Sources, Advanced options, methodology notes …) ──
+   Quiet by default: a light header strip, flush with the body. The Analysis
+   inputs panel below opts into a much stronger treatment via its own key. */
+[data-testid="stExpander"] details {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
 [data-testid="stExpander"] summary {
-  background: linear-gradient(135deg, rgba(59,130,246,0.18), rgba(14,165,233,0.08));
-  border: 1px solid rgba(59,130,246,0.28);
-  border-radius: var(--r-xl);
-  padding: 0.9rem 1rem;
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 0.9rem;
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  padding: 0.7rem 1rem;
+  transition: background 0.15s ease;
 }
-[data-testid="stExpander"] summary:hover {
-  background: linear-gradient(135deg, rgba(59,130,246,0.24), rgba(14,165,233,0.12));
-  border-color: rgba(59,130,246,0.36);
-  transform: translateY(-0.4px);
-}
+[data-testid="stExpander"] summary:hover { background: var(--surface3); }
 [data-testid="stExpander"] summary p {
-  color: var(--navy) !important;
-  font-weight: 700;
-}
-[data-testid="stExpander"] [data-testid="stTextInput"] input,
-[data-testid="stExpander"] [data-testid="stNumberInput"] input {
-  background: rgba(255,255,255,0.98) !important;
-  border: 1px solid rgba(59,130,246,0.16) !important;
-  box-shadow: inset 0 1px 2px rgba(15,23,42,0.06) !important;
-}
-[data-testid="stExpander"] [data-testid="stTextInput"] input::placeholder,
-[data-testid="stExpander"] [data-testid="stNumberInput"] input::placeholder {
-  color: #7dd3fc !important;
-}
-[data-testid="stExpander"] [data-testid="stCheckbox"] p,
-[data-testid="stExpander"] [data-testid="stSelectbox"] label p {
   color: var(--text2) !important;
+  font-weight: 600;
 }
-[data-testid="stExpander"] [data-testid="stCheckbox"] input[type="checkbox"]:checked + svg {
-  color: var(--accent) !important;
+
+/* ── Analysis inputs panel ────────────────────────────────────────────────
+   The entry point to the whole product, so it gets to look like an instrument
+   panel rather than a form: a navy header bar tying it to the top nav, a solid
+   white body (it used to be transparent, which is why it read as flat grey
+   page background), and a monospaced ticker field. */
+.st-key-analysis-inputs [data-testid="stExpander"] details,
+[data-testid="stExpander"].st-key-analysis-inputs details {
+  background: var(--surface);
+  border: 1px solid #dbe3ec;
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(12,30,53,0.18);
 }
+.st-key-analysis-inputs summary,
+[data-testid="stExpander"].st-key-analysis-inputs summary {
+  background: linear-gradient(135deg, var(--navy) 0%, var(--navy2) 100%) !important;
+  border: none !important;
+  border-radius: 0 !important;
+  margin-bottom: 0 !important;
+  padding: 0.95rem 1.15rem !important;
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+  transition: filter 0.15s ease;
+}
+.st-key-analysis-inputs summary:hover,
+[data-testid="stExpander"].st-key-analysis-inputs summary:hover {
+  filter: brightness(1.18);
+  transform: none;
+}
+.st-key-analysis-inputs summary p,
+[data-testid="stExpander"].st-key-analysis-inputs summary p {
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  font-size: 0.78rem !important;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+/* The expand chevron is a Material Symbols ligature span, not an SVG, and it
+   inherits `color` from <summary> — which is dark slate, so on the navy bar it
+   disappeared entirely and the panel lost its only affordance. Light both. */
+.st-key-analysis-inputs summary,
+.st-key-analysis-inputs summary [data-testid="stIconMaterial"],
+[data-testid="stExpander"].st-key-analysis-inputs summary {
+  color: #ffffff !important;
+}
+
+.st-key-analysis-inputs [data-testid="stExpanderDetails"],
+[data-testid="stExpander"].st-key-analysis-inputs [data-testid="stExpanderDetails"] {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  padding: 0.6rem 1.15rem 1.15rem !important;
+}
+
+/* Ticker field: the one input that matters most, so it reads like a terminal
+   entry — monospaced, wide-tracked, upper-case. */
+.st-key-analysis-inputs [data-testid="stTextInput"]:first-of-type input {
+  font-family: var(--font-data) !important;
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--navy) !important;
+}
+.st-key-analysis-inputs [data-testid="stTextInput"] input,
+.st-key-analysis-inputs [data-testid="stNumberInput"] input {
+  background: #ffffff !important;
+  border: 1px solid #d7dfe9 !important;
+  border-radius: var(--r-md) !important;
+  box-shadow: none !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.st-key-analysis-inputs [data-testid="stTextInput"] input:focus,
+.st-key-analysis-inputs [data-testid="stNumberInput"] input:focus {
+  border-color: var(--accent3) !important;
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.16) !important;
+}
+.st-key-analysis-inputs [data-testid="stTextInput"] input::placeholder,
+.st-key-analysis-inputs [data-testid="stNumberInput"] input::placeholder {
+  color: #a9b6c6 !important;
+  letter-spacing: 0.4px;
+  text-transform: none;
+  font-weight: 400;
+}
+/* Field labels get an accent tick so the sections read as a scannable list. */
+.st-key-analysis-inputs .field-label {
+  display: flex; align-items: center; gap: 0.45rem;
+  color: var(--text3);
+  margin: 1.15rem 0 0.4rem;
+}
+.st-key-analysis-inputs .field-label::before {
+  content: ""; width: 3px; height: 11px; border-radius: 2px;
+  background: var(--accent3); flex: 0 0 3px;
+}
+.st-key-analysis-inputs [data-testid="stCheckbox"] p,
+.st-key-analysis-inputs [data-testid="stSelectbox"] label p { color: var(--text2) !important; }
 
 /* ── News & Research ── */
 /* Summary strip: tone on the left, forward-looking catalysts on the right. */

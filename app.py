@@ -603,7 +603,12 @@ if _page == "home":
 # ═════════════════════════════════════════════════════════════════════════════
 elif _page == "analysis":
 
-    with st.expander("Analysis inputs",
+    # Wrapped in a keyed container purely so styles.css can scope this panel via
+    # .st-key-analysis-inputs: the app has seven expanders and the others should
+    # keep the quiet default treatment. (`key` on st.expander itself sets widget
+    # identity but emits no CSS class — only containers do.)
+    _inputs_box = st.container(key="analysis-inputs")
+    with _inputs_box.expander("Analysis inputs",
                      expanded=not st.session_state.get("analysis_ran", False)):
         # Day Trader Mode removed — Investor Mode is the only experience now.
         mode = "Investor Mode"
@@ -611,8 +616,17 @@ elif _page == "analysis":
         # ── Ticker ────────────────────────────────────────────────────────────────
         st.markdown('<div class="field-label">Ticker</div>',
                     unsafe_allow_html=True)
+        # Pressing Enter here runs the analysis just like the Run Analysis button
+        # does (see the `not run_btn and not ticker_input` landing-page test below),
+        # so it has to collapse this panel the same way. Without it the results
+        # rendered underneath a full-height, still-open form and users couldn't tell
+        # anything had happened without scrolling. Clearing the field re-opens the
+        # panel, which matches the landing-page state we fall back to.
         ticker_input = st.text_input(
             "", placeholder="e.g. AAPL, SPY, BTC, ETH",
+            key="analysis_ticker",
+            on_change=lambda: st.session_state.update(
+                analysis_ran=bool(st.session_state.get("analysis_ticker", "").strip())),
             label_visibility="collapsed"
         ).strip().upper()
 
