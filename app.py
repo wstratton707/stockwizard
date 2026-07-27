@@ -62,14 +62,17 @@ except Exception:
     VALUATION_AVAILABLE = False
 
 
+# `ticker` must NOT be underscore-prefixed: st.cache_data excludes underscored
+# args from the cache key, which left this keyed on nothing at all — every ticker
+# was served the first ticker's valuation. Do not rename it back.
 @st.cache_data(ttl=3600, show_spinner=False)
-def _cached_valuation(_ticker):
+def _cached_valuation(ticker):
     """~15yr price-vs-earnings valuation series (EDGAR + yfinance). Cached 1h; the
     underlying fetch is slow, so this keeps repeat views instant."""
     if not VALUATION_AVAILABLE:
         return None
     try:
-        return _get_valuation_data(_ticker)
+        return _get_valuation_data(ticker)
     except Exception:
         return None
 from live_data import get_live_price, get_intraday_data, get_top_movers, get_tape_prices
