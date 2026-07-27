@@ -1687,15 +1687,18 @@ elif _page == "analysis":
                     _cur       = _vdata.get("current_price")
                     _bpe       = _vdata.get("blended_pe")
                     _npe       = _vdata["normal_pe"]
-                    _disc      = ((_cur / _fair_last - 1) * 100) if (_fair_last and _cur) else None
+                    # NB: not `_disc` — that name is the `disclaimers` module alias
+                    # (see the import block); rebinding it here is module-scope in a
+                    # Streamlit script and broke the footer's _disc.DIVIDENDS.
+                    _disc_pct  = ((_cur / _fair_last - 1) * 100) if (_fair_last and _cur) else None
                     _div_last  = next((v for v in reversed(_vdata.get("div") or []) if v), None)
                     _dyield    = (_div_last / _cur * 100) if (_div_last and _cur) else None
                     _epsyield  = (100.0 / _bpe) if _bpe else None
-                    if _disc is None:
+                    if _disc_pct is None:
                         _verd, _vcol, _vbg = "—", "#475569", "#f1f5f9"
-                    elif _disc > 15:
+                    elif _disc_pct > 15:
                         _verd, _vcol, _vbg = "Overvalued", "#b91c1c", "#fee2e2"
-                    elif _disc < -15:
+                    elif _disc_pct < -15:
                         _verd, _vcol, _vbg = "Undervalued", "#15803d", "#dcfce7"
                     else:
                         _verd, _vcol, _vbg = "Near fair value", "#475569", "#f1f5f9"
