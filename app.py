@@ -787,43 +787,41 @@ elif _page == "analysis":
                 fundamentals, a Monte Carlo forecast, and a downloadable Excel &amp; PowerPoint
                 research report.
             </p>
-            <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:2.5rem">
-                <div style="background:#1d4ed8;color:#fff;padding:0.75rem 1.75rem;
-                            border-radius:6px;font-weight:600;font-size:0.9rem;
-                            cursor:default">
-                    &#8593; Enter a ticker above to start — free
-                </div>
+            <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:2.5rem;
+                        color:#b0c4de;font-size:0.92rem;font-weight:500">
+                <span style="color:#60a5fa;font-size:1.05rem;line-height:1">&#8593;</span>
+                Enter a ticker in the panel above &mdash; free, no account needed.
             </div>
             <div style="display:flex;gap:3rem;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,0.08);
                         padding-top:1.5rem">
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
                                 font-family:'JetBrains Mono',monospace">320+</div>
-                    <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
+                    <div style="color:#b0c4de;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Stocks Ranked Daily</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'JetBrains Mono',monospace">2 Years</div>
-                    <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
+                                font-family:'JetBrains Mono',monospace">10Y</div>
+                    <div style="color:#b0c4de;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Price History</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
                                 font-family:'JetBrains Mono',monospace">1,000</div>
-                    <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
+                    <div style="color:#b0c4de;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Monte Carlo Paths</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
                                 font-family:'JetBrains Mono',monospace">5</div>
-                    <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
+                    <div style="color:#b0c4de;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Crash Scenarios</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
                                 font-family:'JetBrains Mono',monospace">Daily</div>
-                    <div style="color:#64748b;font-size:0.75rem;text-transform:uppercase;
+                    <div style="color:#b0c4de;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Market Data</div>
                 </div>
             </div>

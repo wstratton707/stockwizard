@@ -949,7 +949,10 @@ button[kind^="primary"]:active,
   background: transparent !important;
   border: 1px solid transparent !important;
   box-shadow: none !important;
-  color: #9fb0c6 !important;
+  /* #9fb0c6 measured 3.92:1 against the lighter end of the nav gradient —
+     below the 4.5:1 body-text threshold, so inactive links read as disabled
+     rather than merely quiet. #b3c3d6 clears it at 4.82:1. */
+  color: #b3c3d6 !important;
   font-weight: 600 !important; font-size: 0.9rem !important;
   border-radius: 8px !important;
   transition: color 0.15s ease, background 0.15s ease !important;
