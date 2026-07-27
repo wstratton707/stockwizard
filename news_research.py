@@ -226,17 +226,43 @@ def aggregate_news(ticker, api_key, company_name=None, limit=24, days=21):
             _fetch_finnhub(ticker, days, limit) +
             _fetch_fmp(ticker, limit) +
             _fetch_edgar_8k(ticker))
-    # Relevance: title mentions the ticker or a company-name token (title-primary).
+    # Relevance: the story must actually name the company in its title or summary.
+    #
+    # Neither of the obvious shortcuts works. Symbol-scoped endpoints are not
+    # self-certifying — Finnhub's company-news returns market round-ups ("Top Three
+    # ETFs to Watch") that merely mention the company. And a["tickers"] is worse
+    # than useless: for finnhub/fmp _mk fills it with the symbol we queried, while
+    # Polygon tags every ETF round-up with its holdings, so an AAPL page fills up
+    # with "SCHF vs. SPGM". Tag count doesn't separate them either — measured on
+    # live data, real Apple stories carried 9-11 tickers and the noise carried 4-5.
+    #
+    # Matching title+summary rather than title alone matters for mega-caps, which
+    # are usually referenced in the body: AAPL 5 -> 11 relevant, MSFT 4 -> 8.
     name_tokens = [w.lower() for w in re.split(r"\W+", company_name or "")
                    if len(w) > 3][:2]
     tk = ticker.lower()
+
     def relevant(a):
-        if a["provider"] in ("sec", "finnhub", "fmp"):
-            return True                      # symbol-scoped endpoints
-        t = a["title"].lower()
-        return tk in t or any(tok in t for tok in name_tokens) or ticker.upper() in a["tickers"]
-    arts = [a for a in _dedupe(arts) if relevant(a)]
-    arts.sort(key=lambda a: a["ts"], reverse=True)
+        if a["provider"] == "sec":
+            return True                  # a filing is by definition about the issuer
+        hay = f"{a['title']} {a['summary']}".lower()
+        return tk in hay or any(tok in hay for tok in name_tokens)
+
+    def names_in_title(a):
+        t = (a["title"] or "").lower()
+        return tk in t or any(tok in t for tok in name_tokens)
+
+    deduped = _dedupe(arts)
+    arts = [a for a in deduped if relevant(a)]
+    # Quiet tickers (and any ticker whose company_name we weren't given) can filter
+    # down to nothing; show the unfiltered feed rather than an empty section.
+    if len(arts) < 3:
+        arts = deduped
+    # Stories *about* the company outrank stories that merely mention it in passing,
+    # then newest first. Without this a stale ETF round-up that name-drops the
+    # company in its summary can head the feed on a day of real company news.
+    arts.sort(key=lambda a: (names_in_title(a) or a["provider"] == "sec", a["ts"]),
+              reverse=True)
     return arts[:limit]
 
 
