@@ -781,11 +781,10 @@ elif _page == "analysis":
                        line-height:1.2;margin:0 0 1rem;font-family:var(--font-display)">
                 Deep Analysis on Any<br>Stock, ETF, Crypto or Bond
             </h2>
-            <p style="color:#94a3b8;font-size:1rem;max-width:560px;
-                      line-height:1.7;margin:0 0 2rem">
-                Enter a ticker for the full breakdown — price action, technical signals,
-                fundamentals, a Monte Carlo forecast, and a downloadable Excel &amp; PowerPoint
-                research report.
+            <p style="color:#b0c4de;font-size:1.05rem;max-width:520px;
+                      line-height:1.65;margin:0 0 2rem">
+                Technicals, fundamentals, risk and a Monte&nbsp;Carlo forecast —
+                worked through and exported to Excel in about 30 seconds.
             </p>
             <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:2.5rem;
                         color:#b0c4de;font-size:0.92rem;font-weight:500">
@@ -878,12 +877,12 @@ elif _page == "analysis":
 
         p1, p2, p3 = st.columns(3)
         for col, icon, problem, solution in [
-            (p1, "show_chart", "Your brokerage shows you a chart.",
-             "It doesn't tell you if your portfolio would survive a crash. We stress-test your holdings against the magnitude of 2008, COVID, and 2022 using each position's market sensitivity."),
-            (p2, "search", "Stock screeners give you data.",
-             "They don't build your portfolio. We rank 320+ stocks daily by Sharpe ratio and momentum, then optimize weights for your risk tolerance."),
-            (p3, "payments", "Financial advisors charge thousands.",
-             "You shouldn't need one for quantitative analysis. Everything a quant analyst would run — Monte Carlo, efficient frontier, GARCH — for $9.99/month."),
+            (p1, "show_chart", "A price chart isn't risk.",
+             "We give you the numbers that actually matter — volatility, drawdown, Sharpe against the live T-bill, and a 1,000-path forecast."),
+            (p2, "search", "Screeners hand you a list.",
+             "They won't build the portfolio. We rank 320+ names daily, then optimise the weights to your risk tolerance."),
+            (p3, "payments", "Advisors charge thousands.",
+             "Monte Carlo, efficient frontier, GARCH — the models a quant desk runs, for $9.99 a month."),
         ]:
             with col:
                 st.markdown(f"""
@@ -956,12 +955,12 @@ elif _page == "analysis":
 
         h1, h2, h3 = st.columns(3)
         for col, num, title, desc in [
-            (h1, "1", "Enter Your Preferences",
-             "Set your risk tolerance, starting capital, sectors to include, and investment horizon. Takes 2 minutes."),
-            (h2, "2", "We Rank & Optimize",
-             "QuantWizard scores 320+ stocks daily using Sharpe ratio and momentum, selects the best per sector, then runs mean-variance optimization."),
-            (h3, "3", "Get Your Full Report",
-             "5-year backtest, Monte Carlo forecast with milestone probabilities, stress test results, and a downloadable Excel + PowerPoint report."),
+            (h1, "1", "Set your constraints",
+             "Risk tolerance, capital, horizon, sectors. Two minutes."),
+            (h2, "2", "We rank and optimise",
+             "320+ names scored daily on Sharpe and momentum, best-in-sector selected, weights solved by mean-variance."),
+            (h3, "3", "Take the report",
+             "Five-year backtest, Monte Carlo with milestone probabilities, and a formatted Excel and PowerPoint pack."),
         ]:
             with col:
                 st.markdown(f"""
