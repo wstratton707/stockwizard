@@ -889,8 +889,7 @@ elif _page == "analysis":
         ]:
             with col:
                 st.markdown(f"""
-                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
-                            padding:1.25rem;height:100%">
+                <div style="border-top:2px solid #0f2747;padding:0.95rem 1.4rem 0.5rem 0;height:100%">
                     <div style="margin-bottom:0.75rem"><span class="material-symbols-outlined"
                          style="font-size:1.7rem;color:#1d4ed8">{icon}</span></div>
                     <div style="font-weight:600;color:#0f172a;font-size:0.88rem;
@@ -931,9 +930,7 @@ elif _page == "analysis":
                 tier_bg    = "rgba(29,78,216,0.08)" if tier == "Pro" else "rgba(5,150,105,0.08)"
                 items_html = "".join(f"<li style='margin-bottom:0.3rem'>{i}</li>" for i in items)
                 st.markdown(f"""
-                <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;
-                            padding:1.25rem;margin-bottom:1rem;
-                            border-top:3px solid {tier_color}">
+                <div style="border-top:2px solid {tier_color};padding:0.95rem 1.4rem 1.1rem 0;margin-bottom:1.1rem">
                     <div style="display:flex;align-items:center;justify-content:space-between;
                                 margin-bottom:0.75rem">
                         <div style="display:flex;align-items:center;gap:0.5rem">
@@ -970,12 +967,8 @@ elif _page == "analysis":
         ]:
             with col:
                 st.markdown(f"""
-                <div style="text-align:center;padding:1.25rem 0.75rem;
-                            background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px">
-                    <div style="width:40px;height:40px;background:#1d4ed8;border-radius:50%;
-                                display:flex;align-items:center;justify-content:center;
-                                margin:0 auto 0.85rem;font-size:1rem;font-weight:700;
-                                color:#ffffff">{num}</div>
+                <div style="border-top:2px solid #0f2747;padding:0.95rem 1.4rem 0.5rem 0">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.76rem;font-weight:600;color:#3b82f6;letter-spacing:0.6px;margin-bottom:0.5rem">0{num}</div>
                     <div style="font-weight:700;color:#0f172a;font-size:0.9rem;
                                 margin-bottom:0.4rem">{title}</div>
                     <div style="color:#64748b;font-size:0.81rem;line-height:1.6">{desc}</div>
@@ -1020,7 +1013,7 @@ elif _page == "analysis":
              "crises, so future losses can differ."),
         ]
         _mcards = "".join(
-            f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:1.1rem 1.25rem">'
+            f'<div style="border-top:1px solid #e2e8f0;padding:0.9rem 1.3rem 0.9rem 0">'
             f'<div style="margin-bottom:0.5rem;display:flex;align-items:center;gap:0.5rem">'
             f'<span class="material-symbols-outlined" style="color:#1d4ed8;font-size:1.4rem">{ic}</span>'
             f'<span style="font-weight:700;color:#0f172a;font-size:0.9rem">{ti}</span></div>'
@@ -1029,7 +1022,7 @@ elif _page == "analysis":
         )
         st.markdown(
             f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));'
-            f'gap:0.85rem">{_mcards}</div>'
+            f'gap:0 1.9rem">{_mcards}</div>'
             f'<div style="color:#94a3b8;font-size:0.76rem;line-height:1.6;margin-top:1rem;max-width:680px">'
             f'These tools are for research and education, not investment advice. Estimates and forecasts are '
             f'not predictions — past performance and modeled scenarios do not guarantee future results.</div>',
