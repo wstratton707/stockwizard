@@ -139,7 +139,13 @@ def _news_feed_html(articles, n=12):
 def _render_stock_news(ticker, company_name=None):
     """Full per-stock news research: tone + catalysts + theme chips, a grounded
     AI brief (when a key is configured), then the multi-source article feed."""
-    from news_research import sentiment_summary, theme_counts
+    # Guarded like the cached helpers above: a missing/broken news_research must
+    # cost us this section only, never the whole Analysis page.
+    try:
+        from news_research import sentiment_summary, theme_counts
+    except Exception:
+        st.caption("News research is unavailable right now.")
+        return
     arts = _cached_news(ticker, company_name or "")
     if not arts:
         st.caption("No recent news found for this ticker.")
