@@ -353,13 +353,18 @@ footer { visibility: hidden; }
 }
 
 /* ── Guided quick-start ── */
+/* Quick start — was a 3-up card grid nested inside another card, i.e. the
+   card-in-card pattern at its worst. Now a ruled band: no outer box, no inner
+   boxes, columns divided by hairlines. */
 .guide-panel {
-  background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(248,250,252,0.98));
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  padding: 1rem 1.1rem 1.1rem;
-  box-shadow: var(--shadow-sm);
-  margin: 1rem 0 1.4rem;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 1.15rem 0 1.25rem;
+  box-shadow: none;
+  margin: 1.2rem 0 1.5rem;
 }
 .guide-header {
   font-size: 0.73rem;
@@ -367,22 +372,24 @@ footer { visibility: hidden; }
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.95rem;
 }
 .guide-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.75rem;
+  gap: 0;
 }
 .guide-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 0.9rem 0.95rem;
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0.1rem 1.35rem;
   display: flex;
   gap: 0.7rem;
   align-items: flex-start;
 }
+.guide-grid > .guide-card:first-child { border-left: none; padding-left: 0; }
 .guide-card .material-symbols-outlined {
   color: var(--accent);
   font-size: 1.15rem;
@@ -574,6 +581,26 @@ footer { visibility: hidden; }
   display: flex; align-items: center; gap: 0.6rem;
 }
 .section-header::before { content: none; }
+
+/* ── Editorial index rows (replaces the 3-up feature card grid) ──
+   Rules and whitespace do the separating instead of another rounded box. */
+.index-rule { border-top: 1px solid var(--border); height: 0; }
+.index-row {
+  display: flex; gap: 1.15rem; align-items: baseline;
+  padding: 1.2rem 0;
+}
+.index-num {
+  font-family: var(--font-data); font-size: 0.76rem; font-weight: 600;
+  color: var(--accent3); letter-spacing: 0.6px; flex: 0 0 auto;
+}
+.index-title {
+  font-family: var(--font-display); font-size: 1.32rem; font-weight: 600;
+  color: var(--text); line-height: 1.15; letter-spacing: -0.01em;
+}
+.index-desc {
+  font-size: 0.9rem; color: var(--muted); line-height: 1.6;
+  margin-top: 0.3rem; max-width: 62ch;
+}
 
 /* ── Feature cards ── */
 .feature-card {
@@ -974,31 +1001,48 @@ button[kind^="primary"]:active,
 .page-footer a { color: var(--accent3); text-decoration: none; font-weight: 500; }
 .page-footer a:hover { color: var(--accent); }
 
-/* ── Dataframes ── */
+/* ── Data surfaces: charts and tables ──
+   These used to be framed as rounded, bordered, shadowed cards. On a page that
+   is mostly charts and tables, that turns the whole product into a pile of
+   floating boxes — the single biggest contributor to the generated-UI look.
+   Data now sits on a plain white surface separated by a hairline rule, so a
+   run of charts reads as one continuous document rather than N cards. */
 [data-testid="stDataFrame"] {
   background: var(--surface) !important;
-  border-radius: var(--r-md) !important;
-  box-shadow: var(--shadow-sm) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--r-sm) !important;
+  box-shadow: none !important;
 }
 
-/* ── Chart cards ── */
-/* Frame every Plotly chart as a clean card. The figures use a transparent
-   paper background, so the white card + subtle border/shadow reads as a
-   polished panel and visually separates each chart from the page. */
 [data-testid="stPlotlyChart"] {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  padding: 0.85rem 1rem 0.6rem;
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 1rem 1.15rem 0.7rem;
+  box-shadow: none;
   overflow: hidden;
+  /* Run to the full width of the content column — no side inset, so charts
+     align with the page grid instead of sitting inside it. */
+  margin-left: calc(-1 * var(--page-gutter));
+  margin-right: calc(-1 * var(--page-gutter));
+  padding-left: var(--page-gutter);
+  padding-right: var(--page-gutter);
 }
-[data-testid="stPlotlyChart"]:hover {
-  border-color: var(--border2);
+/* Consecutive charts share one rule rather than doubling it up. */
+[data-testid="stPlotlyChart"] + [data-testid="stPlotlyChart"] { border-top: none; }
+/* ...but a chart inside a column must stay inside it. The bleed above is for
+   full-width charts only; left unscoped it drags side-by-side charts 40px into
+   their neighbour and breaks the column grid. */
+[data-testid="stHorizontalBlock"] [data-testid="stPlotlyChart"] {
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
 }
-[data-testid="stPlotlyChart"] .js-plotly-plot,
-[data-testid="stPlotlyChart"] .plot-container { border-radius: var(--r-md); }
 
 /* ── Input focus rings (main content) ── */
 [data-testid="stTextInput"] input:focus,

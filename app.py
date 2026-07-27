@@ -582,15 +582,25 @@ if _page == "home":
         ("account_balance_wallet", "Your Portfolios", "Save a portfolio and track its real performance from day one — "
                                   "value vs the S&P 500, drawdown, and holdings.", "Open Portfolios", "portfolios"),
     ]
-    for _col, (_ic, _ti, _desc, _btn, _pg) in zip(st.columns(3), _cards):
-        with _col:
-            st.markdown(f"""<div class="home-card">
-              <div class="home-card-icon"><span class="material-symbols-outlined">{_ic}</span></div>
-              <div class="home-card-title">{_ti}</div>
-              <div class="home-card-desc">{_desc}</div>
+    # A numbered, ruled index rather than a 3-up card grid. The card grid is the
+    # single most template-ish element in this kind of app — a direct competitor
+    # ships the identical pattern — and it reads as filler. A contents-page list
+    # suits a research product and matches the editorial display face.
+    st.markdown('<div class="index-rule"></div>', unsafe_allow_html=True)
+    for _i, (_ic, _ti, _desc, _btn, _pg) in enumerate(_cards, 1):
+        _c = st.columns([8, 2], vertical_alignment="center")
+        with _c[0]:
+            st.markdown(f"""<div class="index-row">
+              <span class="index-num">{_i:02d}</span>
+              <div>
+                <div class="index-title">{_ti}</div>
+                <div class="index-desc">{_desc}</div>
+              </div>
             </div>""", unsafe_allow_html=True)
+        with _c[1]:
             if st.button(_btn, key=f"card_{_pg}", use_container_width=True):
                 _goto(_pg)
+        st.markdown('<div class="index-rule"></div>', unsafe_allow_html=True)
 
     # ── Excel-export spotlight (the hero feature) — carousel ──────────────────
     st.markdown('<div class="home-section-title">The one-click professional report</div>',
