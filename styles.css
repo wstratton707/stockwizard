@@ -36,6 +36,16 @@
   --navy2:     #1a3557;
   --navy3:     #0f2a4a;
 
+  /* ── Brand navy — the single source of truth for every dark surface ──
+     There were four near-but-not-quite navies hardcoded across the app
+     (#0f2747→#1f4e79, #0c1e35→#1e3a5f, #0f172a→#1e293b, --navy→--navy2), so
+     the nav bar, the Portfolio Builder banner and the Your Portfolios banner
+     never quite agreed. This is the Your Portfolios blue; everything defers
+     to it now. Change it here and the whole app moves together. */
+  --brand-1:   #0f2747;
+  --brand-2:   #1f4e79;
+  --brand-grad: linear-gradient(135deg, var(--brand-1) 0%, var(--brand-2) 100%);
+
   /* ── Semantic ── */
   --green:     #059669;
   --green-bg:  #ecfdf5;
@@ -105,7 +115,7 @@ footer { visibility: hidden; }
 
 /* ── Sidebar ── */
 [data-testid="stSidebar"] {
-  background: var(--navy) !important;
+  background: var(--brand-1) !important;
   border-right: 1px solid rgba(255,255,255,0.05);
   box-shadow: 2px 0 16px rgba(0,0,0,0.15);
 }
@@ -802,7 +812,7 @@ button[kind^="primary"]:active,
 
 .st-key-topnav {
   position: sticky; top: 0; z-index: 1000;
-  background: #0b1220;
+  background: var(--brand-grad);
   border-bottom: 1px solid rgba(255,255,255,0.09);
   box-shadow: 0 6px 18px rgba(4,10,20,0.28);
   padding: 0.4rem 1.35rem; margin-bottom: 1.4rem; border-radius: 0 0 12px 12px;
@@ -1056,7 +1066,7 @@ button[kind^="primary"]:active,
 }
 .st-key-analysis-inputs summary,
 [data-testid="stExpander"].st-key-analysis-inputs summary {
-  background: linear-gradient(135deg, var(--navy) 0%, var(--navy2) 100%) !important;
+  background: var(--brand-grad) !important;
   border: none !important;
   border-radius: 0 !important;
   margin-bottom: 0 !important;

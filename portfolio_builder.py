@@ -1751,12 +1751,12 @@ def render_portfolio_builder(api_key, is_pro=False):
         return
 
     st.markdown("""
-    <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border:1px solid #334155;
-                border-radius:14px;padding:1.5rem 2rem;margin-bottom:1.5rem">
-        <div style="font-family:'JetBrains Mono',monospace;color:#38bdf8;font-size:1.1rem;
-                    font-weight:500;margin-bottom:4px">◈ Portfolio Builder</div>
-        <div style="color:#94a3b8;font-size:0.85rem">
-            Custom portfolio construction · Backtest · Efficient frontier · Monte Carlo · Excel report
+    <div style="background:linear-gradient(135deg,var(--brand-1),var(--brand-2));border-radius:14px;
+                padding:1.6rem 1.8rem;color:#e2e8f0;margin-bottom:1.2rem">
+        <div style="font-size:1.5rem;font-weight:700;color:#fff">Portfolio Builder</div>
+        <div style="font-size:0.95rem;color:#b0c4de;margin-top:0.4rem;max-width:640px">
+            Build a risk-optimized portfolio from a ranked universe — backtested over five
+            years, with an efficient frontier, Monte Carlo forecast and a one-click Excel report.
         </div>
     </div>
     """, unsafe_allow_html=True)

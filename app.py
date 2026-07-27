@@ -453,7 +453,7 @@ with st.sidebar:
         # ── Original payment UI preserved below — do not delete ──────────────
         if st.session_state["is_pro"]:
             st.markdown("""
-            <div style="background:linear-gradient(135deg,#0c1e35,#1e3a5f);
+            <div style="background:linear-gradient(135deg,var(--brand-1),var(--brand-2));
                         border:1px solid rgba(59,130,246,0.3);border-radius:2px;
                         padding:0.75rem 1rem;margin-bottom:1.25rem;text-align:center">
                 <span style="color:#1d4ed8;font-weight:700;font-size:0.82rem;
@@ -466,7 +466,7 @@ with st.sidebar:
                 st.rerun()
     else:
         st.markdown("""
-        <div style="background:linear-gradient(135deg,#0c1e35,#1e3a5f);
+        <div style="background:linear-gradient(135deg,var(--brand-1),var(--brand-2));
                     border:1px solid rgba(59,130,246,0.3);border-radius:2px;
                     padding:0.7rem 1rem;margin-bottom:1.25rem;text-align:center">
             <span style="color:#1d4ed8;font-weight:700;font-size:0.8rem;letter-spacing:0.5px">
@@ -756,7 +756,7 @@ elif _page == "analysis":
 
         # ── Hero ──────────────────────────────────────────────────────────────
         st.markdown("""
-        <div style="background:linear-gradient(135deg,#0c1e35 0%,#1e3a5f 100%);
+        <div style="background:linear-gradient(135deg,var(--brand-1) 0%,var(--brand-2) 100%);
                     border-radius:12px;padding:3rem 2.5rem 2.5rem;margin-bottom:2rem;
                     border:1px solid rgba(255,255,255,0.08)">
             <div style="display:inline-block;background:rgba(29,78,216,0.2);
@@ -1852,7 +1852,7 @@ elif _page == "analysis":
             # bottom, so the app delivers on "tells you what to do" immediately.
             if summary_text:
                 st.markdown(
-                    f'<div style="background:linear-gradient(135deg,#0c1e35 0%,#1e3a5f 100%);'
+                    f'<div style="background:linear-gradient(135deg,var(--brand-1) 0%,var(--brand-2) 100%);'
                     f'border:1px solid rgba(59,130,246,0.3);border-radius:12px;'
                     f'padding:1.2rem 1.5rem;margin:1.4rem 0 0.4rem;box-shadow:0 4px 16px rgba(15,23,42,0.09)">'
                     f'<div style="font-size:0.66rem;font-weight:700;letter-spacing:1.2px;'

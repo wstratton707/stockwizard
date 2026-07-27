@@ -85,7 +85,7 @@ def _current_email():
 
 def _render_login_gate():
     st.markdown(f"""
-    <div style="background:linear-gradient(135deg,#0f2747,#1f4e79);border-radius:14px;
+    <div style="background:linear-gradient(135deg,var(--brand-1),var(--brand-2));border-radius:14px;
                 padding:1.6rem 1.8rem;color:#e2e8f0;margin-bottom:1.2rem">
       <div style="font-size:1.5rem;font-weight:700;color:#fff">Your Portfolios</div>
       <div style="font-size:0.95rem;color:#b0c4de;margin-top:0.4rem;max-width:640px">
