@@ -713,6 +713,24 @@ button[kind^="primary"]:active,
 .vf-row b{ color:#0f172a; font-weight:700; font-variant-numeric:tabular-nums; }
 .vf-badge{ padding:2px 9px; border-radius:20px; font-weight:700; font-size:0.74rem; }
 
+/* ── Fundamentals table (replaces the card grid) ── */
+.fund-table{
+  width:100%; border-collapse:collapse; font-size:0.86rem;
+  font-variant-numeric:tabular-nums; margin:2px 0 6px;
+}
+.fund-table td{ padding:6px 12px; border-bottom:1px solid #f1f5f9; }
+.fund-table tr:last-child td{ border-bottom:none; }
+.fund-table .grp td{
+  padding:14px 4px 5px; font-size:0.66rem; text-transform:uppercase;
+  letter-spacing:0.07em; color:#94a3b8; font-weight:700;
+  border-bottom:1px solid #e2e8f0;
+}
+.fund-table .k{ color:#64748b; width:23%; white-space:nowrap; }
+.fund-table .v{ text-align:right; width:27%; font-weight:700; color:#334155; }
+.fund-table .v.pos{ color:#15803d; }
+.fund-table .v.neg{ color:#b91c1c; }
+.fund-table .pair2{ border-left:1px solid #eef2f6; padding-left:22px; }
+
 /* ── Sidebar group label ── */
 .sidebar-group {
   font-family: var(--font-sans); font-size: 0.63rem; font-weight: 700;

@@ -1840,64 +1840,70 @@ elif _page == "analysis":
 
                     _v, _m, _r, _l, _g = (fund["valuation"], fund["margins"],
                                           fund["returns"], fund["leverage"], fund["growth"])
-                    _cards = [
-                        [("P/E", _fv(_v["pe"], "×"), "neutral"),
-                         ("P/S", _fv(_v["ps"], "×"), "neutral"),
-                         ("P/B", _fv(_v["pb"], "×"), "neutral"),
-                         ("Earnings Yield", _fv(_v["earnings_yield"], "%"), "neutral")],
-                        [("Gross Margin", _fv(_m["gross"], "%"), "positive" if _m["gross"] else "neutral"),
-                         ("Operating Margin", _fv(_m["operating"], "%"), "positive" if _m["operating"] else "neutral"),
-                         ("Net Margin", _fv(_m["net"], "%"), "positive" if _m["net"] else "neutral"),
-                         ("ROE", _fv(_r["roe"], "%"), "positive" if _r["roe"] else "neutral")],
-                        [("Revenue Growth (YoY)", _fv(_g["revenue_yoy"], "%"),
-                          "positive" if (_g["revenue_yoy"] or 0) >= 0 else "negative"),
-                         ("EPS Growth (YoY)", _fv(_g["eps_yoy"], "%"),
-                          "positive" if (_g["eps_yoy"] or 0) >= 0 else "negative"),
-                         ("Current Ratio", _fv(_l["current_ratio"]), "neutral"),
-                         ("Debt / Equity", _fv(_l["debt_to_equity"]), "neutral")],
-                    ]
-                    for _rowdef in _cards:
-                        for _col, (_lbl, _val, _cls) in zip(st.columns(4), _rowdef):
-                            with _col:
-                                st.markdown(
-                                    f'<div class="metric-card"><div class="metric-label">{_lbl}</div>'
-                                    f'<div class="metric-value {_cls}">{_val}</div></div>',
-                                    unsafe_allow_html=True)
-                        st.markdown("<div style='height:0.7rem'></div>", unsafe_allow_html=True)
-
-                    # ── Quality scorecard — the EDGAR-powered differentiators ──
                     _q, _fc = fund["quality"], fund["fcf"]
-                    _fs = _q["f_score"]
-                    _fs_cls = ("positive" if (_fs is not None and _fs >= 7)
-                               else "negative" if (_fs is not None and _fs <= 3) else "neutral")
-                    _z, _zone = _q["z_score"], _q["z_zone"]
-                    _z_cls = {"safe": "positive", "distress": "negative"}.get(_zone, "neutral")
-                    _fy = _fc["fcf_yield"]
-                    _quality_cards = [
-                        ("Piotroski F-Score", f"{_fs} / 9" if _fs is not None else "N/A", _fs_cls),
-                        ("Altman Z-Score",
-                         f"{_z} · {_zone.title()}" if _z is not None else "N/A", _z_cls),
-                        ("FCF Yield", _fv(_fy, "%"),
-                         "positive" if (_fy or 0) > 0 else
-                         ("negative" if (_fy is not None and _fy < 0) else "neutral")),
-                        ("EV / EBITDA", _fv(fund["ev_ebitda"], "×"), "neutral"),
-                    ]
+                    _fs, _z, _zone, _fy = _q["f_score"], _q["z_score"], _q["z_zone"], _fc["fcf_yield"]
+                    _fs_cls = ("pos" if (_fs is not None and _fs >= 7)
+                               else "neg" if (_fs is not None and _fs <= 3) else "")
+                    _z_cls  = {"safe": "pos", "distress": "neg"}.get(_zone, "")
                     _qtips = {
                         "Piotroski F-Score": "9-point test of fundamental strength (profitability, leverage, efficiency vs last year). 8-9 strong, 0-2 weak.",
-                        "Altman Z-Score": "Bankruptcy-risk score. Above 2.99 = safe zone, 1.81-2.99 grey, below 1.81 = distress. Not meaningful for banks.",
-                        "FCF Yield": "Free cash flow (operating cash flow − capex) ÷ market cap. Higher = more cash generated per dollar of value.",
+                        "Altman Z-Score": "Bankruptcy-risk score. Above 2.99 = safe, 1.81-2.99 grey, below 1.81 = distress. Not meaningful for banks.",
+                        "FCF Yield": "Free cash flow (operating cash flow − capex) ÷ market cap. Higher = more cash per dollar of value.",
                         "EV / EBITDA": "Enterprise value ÷ EBITDA — a capital-structure-neutral valuation multiple.",
                     }
-                    for _col, (_lbl, _val, _cls) in zip(st.columns(4), _quality_cards):
-                        _tip = _qtips.get(_lbl, "")
-                        _th  = (f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{_tip}</span></span>'
-                                if _tip else "")
-                        with _col:
-                            st.markdown(
-                                f'<div class="metric-card"><div class="metric-label">{_lbl}{_th}</div>'
-                                f'<div class="metric-value {_cls}">{_val}</div></div>',
-                                unsafe_allow_html=True)
-                    st.markdown("<div style='height:0.7rem'></div>", unsafe_allow_html=True)
+
+                    def _mv(v, suffix="", na="—"):
+                        return f"{v}{suffix}" if v is not None else na
+                    def _dir(x):
+                        return "" if x is None else ("pos" if x >= 0 else "neg")
+                    def _pos0(x):
+                        return "pos" if (x or 0) > 0 else ("neg" if (x is not None and x < 0) else "")
+
+                    # Ordered by the question each metric answers — how expensive,
+                    # how profitable, how fast-growing, how financially sound.
+                    _fund_groups = [
+                        ("Valuation", [
+                            ("P/E",            _mv(_v["pe"], "×"),   "", ""),
+                            ("P/S",            _mv(_v["ps"], "×"),   "", ""),
+                            ("P/B",            _mv(_v["pb"], "×"),   "", ""),
+                            ("EV / EBITDA",    _mv(fund["ev_ebitda"], "×"), "", _qtips["EV / EBITDA"]),
+                            ("Earnings Yield", _mv(_v["earnings_yield"], "%"), _pos0(_v["earnings_yield"]), ""),
+                            ("FCF Yield",      _mv(_fy, "%"), _pos0(_fy), _qtips["FCF Yield"]),
+                        ]),
+                        ("Profitability", [
+                            ("Gross Margin",     _mv(_m["gross"], "%"),     "pos" if _m["gross"] else "", ""),
+                            ("Operating Margin", _mv(_m["operating"], "%"), "pos" if _m["operating"] else "", ""),
+                            ("Net Margin",       _mv(_m["net"], "%"),       "pos" if _m["net"] else "", ""),
+                            ("Return on Equity", _mv(_r["roe"], "%"),       "pos" if _r["roe"] else "", ""),
+                        ]),
+                        ("Growth", [
+                            ("Revenue Growth (YoY)", _mv(_g["revenue_yoy"], "%"), _dir(_g["revenue_yoy"]), ""),
+                            ("EPS Growth (YoY)",     _mv(_g["eps_yoy"], "%"),     _dir(_g["eps_yoy"]), ""),
+                        ]),
+                        ("Financial Health", [
+                            ("Current Ratio", _mv(_l["current_ratio"]), "", ""),
+                            ("Debt / Equity", _mv(_l["debt_to_equity"]), "", ""),
+                            ("Piotroski F-Score", f"{_fs} / 9" if _fs is not None else "—", _fs_cls, _qtips["Piotroski F-Score"]),
+                            ("Altman Z-Score", f"{_z} · {_zone.title()}" if _z is not None else "—", _z_cls, _qtips["Altman Z-Score"]),
+                        ]),
+                    ]
+                    _rows = ['<table class="fund-table">']
+                    for _cat, _metrics in _fund_groups:
+                        _rows.append(f'<tr class="grp"><td colspan="4">{_cat}</td></tr>')
+                        for _i in range(0, len(_metrics), 2):
+                            _cells = ""
+                            for _j in range(2):
+                                if _i + _j < len(_metrics):
+                                    _lbl, _val, _cls, _tip = _metrics[_i + _j]
+                                    _th = (f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{_tip}</span></span>'
+                                           if _tip else "")
+                                    _kcls = "k pair2" if _j == 1 else "k"
+                                    _cells += f'<td class="{_kcls}">{_lbl}{_th}</td><td class="v {_cls}">{_val}</td>'
+                                else:
+                                    _cells += '<td class="k"></td><td class="v"></td>'
+                            _rows.append(f'<tr>{_cells}</tr>')
+                    _rows.append('</table>')
+                    st.markdown("".join(_rows), unsafe_allow_html=True)
 
                     # ── Fundamentals vs Peers ─────────────────────────────────
                     # Context for the metrics above: how this name stacks up against
