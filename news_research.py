@@ -81,6 +81,50 @@ MAX_PER_SOURCE = 3      # no single outlet may own more than this many slots
 MIN_FEED = 8            # below this we relax the cap rather than show a stub feed
 
 
+def is_english(text):
+    """Reject headlines that aren't in a Latin script.
+
+    Polygon's wire carries global editions, so a Hebrew or Japanese release turns
+    up verbatim in a US retail feed. Judged by script rather than by a language
+    library: count ASCII letters against letters from non-Latin blocks (Hebrew
+    0x590+, Arabic 0x600+, Cyrillic 0x400+, CJK 0x4E00+). The 0x2FF floor keeps
+    accented Latin ("Société", "Über") on the English side.
+    """
+    t = text or ""
+    latin = sum(1 for c in t if "a" <= c.lower() <= "z")
+    other = sum(1 for c in t if ord(c) > 0x2FF and c.isalpha())
+    return latin >= other
+
+
+# Plaintiff firms that publish "deadline to join the class action" wire releases.
+# These are advertisements for legal services dressed as news; they flood the PR
+# wires and crowd out actual company coverage.
+_LAW_FIRMS = (
+    "rosen law", "rosen, global", "the rosen", "pomerantz", "levi & korsinsky",
+    "bronstein, gewirtz", "glancy prongay", "robbins geller", "kessler topaz",
+    "faruqi & faruqi", "schall law", "kahn swick", "bragar eagel", "block & leviton",
+    "berger montague", "gross law", "howard g. smith", "johnson fistel", "scott+scott",
+    "labaton", "bernstein liebhard",
+)
+
+
+def is_solicitation(title, summary=""):
+    """True for plaintiff-firm class-action adverts, which are not investor news.
+
+    Deliberately narrow: a law-firm name, or 'class action' paired with the
+    call-to-action wording. Genuine enforcement coverage ("SEC charges X with
+    fraud") has neither and is kept — that's real news about the company.
+    """
+    hay = f"{title or ''} {summary or ''}".lower()
+    if any(f in hay for f in _LAW_FIRMS):
+        return True
+    if "class action" in hay and any(
+        k in hay for k in ("deadline", "lead plaintiff", "encourag",
+                           "secure counsel", "suffered losses", "reminds investors")):
+        return True
+    return False
+
+
 def _source_brand(source):
     """Collapse a publisher's editions to one brand so the per-source cap can't be
     gamed by regional splits — "Yahoo", "Yahoo Finance", "Yahoo Finance UK" and
@@ -217,27 +261,22 @@ def _fetch_edgar_8k(ticker, limit=6):
     return out
 
 
-def _fetch_gnews(ticker, company_name=None, days=7, limit=40):
+def _gnews_rss(query, days, limit, tickers):
     """Google News RSS — keyless, and the only upstream that spans the wider press.
 
-    Polygon and Finnhub between them return ~4 distinct outlets for a given
-    ticker; this one routinely returns 20+, which is what makes the per-source
-    cap in _diversify meaningful. Titles arrive as "Headline - Publisher", and
-    the publisher is also given in <source>, so we strip the suffix.
+    Polygon and Finnhub between them return ~4 distinct outlets for a ticker (and
+    only 2 for the market-wide feed); this one routinely returns 20+, which is what
+    makes the per-source cap in _diversify meaningful. Titles arrive as
+    "Headline - Publisher", and the publisher is also given in <source>, so the
+    suffix is stripped.
     """
     out = []
     try:
         import xml.etree.ElementTree as ET
         from email.utils import parsedate_to_datetime
 
-        name = (company_name or "").strip()
-        # Quote the company name so multi-word names aren't OR'd apart, and require
-        # a finance word — otherwise a consumer brand pulls in its sponsorships
-        # (a plain "Coca-Cola" search returned UFC.com and Yahoo Sports).
-        subject = f'"{name}" OR {ticker.upper()}' if name else ticker.upper()
-        q = f"({subject}) (stock OR shares OR earnings OR investors OR analyst)"
         r = requests.get("https://news.google.com/rss/search",
-                         params={"q": f"{q} when:{days}d", "hl": "en-US",
+                         params={"q": f"{query} when:{days}d", "hl": "en-US",
                                  "gl": "US", "ceid": "US:en"},
                          headers={"User-Agent": "Mozilla/5.0 (compatible; QuantWizard/1.0)"},
                          timeout=10)
@@ -256,7 +295,32 @@ def _fetch_gnews(ticker, company_name=None, days=7, limit=40):
             except Exception:
                 pass
             out.append(_mk(title, it.findtext("link"), source, "gnews", ts,
-                           "", None, [ticker.upper()]))
+                           "", None, list(tickers)))
+    except Exception:
+        pass
+    return out
+
+
+def _fetch_gnews_market(days=2, limit=60):
+    """Market-wide headlines. Polygon's market feed is two publishers deep, so
+    without this the News page is a Motley Fool column with a GlobeNewswire
+    sidebar."""
+    return _gnews_rss(
+        "(stock market OR S&P 500 OR Nasdaq OR Dow Jones OR Federal Reserve "
+        "OR earnings OR Wall Street)", days, limit, [])
+
+
+def _fetch_gnews(ticker, company_name=None, days=7, limit=40):
+    """Per-ticker Google News search."""
+    out = []
+    try:
+        name = (company_name or "").strip()
+        # Quote the company name so multi-word names aren't OR'd apart, and require
+        # a finance word — otherwise a consumer brand pulls in its sponsorships
+        # (a plain "Coca-Cola" search returned UFC.com and Yahoo Sports).
+        subject = f'"{name}" OR {ticker.upper()}' if name else ticker.upper()
+        q = f"({subject}) (stock OR shares OR earnings OR investors OR analyst)"
+        out = _gnews_rss(q, days, limit, [ticker.upper()])
     except Exception:
         pass
     return out
@@ -351,10 +415,14 @@ def aggregate_news(ticker, api_key, company_name=None, limit=24, days=21):
         t = (a["title"] or "").lower()
         return tk in t or any(tok in t for tok in name_tokens)
 
-    deduped = _dedupe(arts)
+    # Language and solicitation are a hard gate applied before relevance, not part
+    # of it — the relevance fallback below deliberately widens the net, and it must
+    # not be able to pull a Hebrew wire release or a class-action advert back in.
+    deduped = [a for a in _dedupe(arts)
+               if is_english(a["title"]) and not is_solicitation(a["title"], a["summary"])]
     arts = [a for a in deduped if relevant(a)]
     # Quiet tickers (and any ticker whose company_name we weren't given) can filter
-    # down to nothing; show the unfiltered feed rather than an empty section.
+    # down to nothing; show the wider feed rather than an empty section.
     if len(arts) < 3:
         arts = deduped
     # Rank: stories *about* the company first (a passing mention shouldn't head the
@@ -444,14 +512,29 @@ def market_pulse(api_key, limit=90, universe=None):
                 elif not (t.isalpha() and len(t) <= 5):
                     continue
                 freq[t] = freq.get(t, 0) + 1
-            arts.append(_mk(it.get("title"), it.get("article_url"),
-                            (it.get("publisher") or {}).get("name", "Polygon"),
-                            "polygon", _iso_to_ts(it.get("published_utc")),
-                            it.get("description"), None, tks))
+            a = _mk(it.get("title"), it.get("article_url"),
+                    (it.get("publisher") or {}).get("name", "Polygon"),
+                    "polygon", _iso_to_ts(it.get("published_utc")),
+                    it.get("description"), None, tks)
+            # This feed used to be returned raw, which is how a Hebrew-language
+            # plaintiff-firm release ended up as the top story on the News page.
+            # Trending counts are taken from everything; only the shown list is
+            # filtered, so a story we won't display still informs the tickers.
+            if is_english(a["title"]) and not is_solicitation(a["title"], a["summary"]):
+                arts.append(a)
     except Exception:
         pass
     trending = sorted(freq.items(), key=lambda kv: kv[1], reverse=True)[:14]
-    return {"articles": arts, "trending": trending}
+
+    # Polygon's market wire is two publishers deep; once the plaintiff-firm
+    # releases are stripped it can't fill a page. Google News supplies the breadth.
+    arts += [a for a in _fetch_gnews_market()
+             if is_english(a["title"]) and not is_solicitation(a["title"], a["summary"])]
+    # Same ranking and per-publisher cap as the per-ticker feed, so the market page
+    # isn't three-quarters one wire service either.
+    arts = _dedupe(arts)
+    arts.sort(key=lambda a: (-source_tier(a["source"]), a["ts"]), reverse=True)
+    return {"articles": _diversify(arts, 24), "trending": trending}
 
 
 # ── Catalysts (what's coming up / just filed) ─────────────────────────────────
