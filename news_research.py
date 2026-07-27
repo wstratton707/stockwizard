@@ -40,6 +40,57 @@ _POS = ("surge", "jump", "beat", "upgrade", "record", "growth", "gain", "soar",
 _NEG = ("plunge", "drop", "miss", "downgrade", "lawsuit", "fall", "slump", "warn",
         "cut", "loss", "weak", "decline", "probe", "recall", "sink", "slash", "concern", "fear")
 
+# ── Source reliability tiers ─────────────────────────────────────────────────
+# Our upstreams are lopsided: Polygon's feed is ~95% Motley Fool and Finnhub's is
+# ~75% Yahoo, so an unweighted merge reads as two publishers with a rotating
+# byline. Tier drives ranking, and MAX_PER_SOURCE below stops any one outlet from
+# owning the page.
+_TIER_WIRE = (          # paid company announcements, not independent reporting
+    "globenewswire", "pr newswire", "prnewswire", "business wire", "businesswire",
+    "accesswire", "newsfile", "ein presswire", "issuerdirect", "acquire media",
+)
+_TIER_MAJOR = (         # primary financial press / wire services
+    "reuters", "bloomberg", "wall street journal", "wsj", "financial times",
+    "associated press", "cnbc", "barron", "marketwatch", "investor's business daily",
+    "investors business daily", "new york times", "washington post", "the economist",
+    "axios", "forbes", "fortune", "nikkei", "guardian",
+)
+_TIER_SECONDARY = (     # aggregators, commentary, retail-facing outlets
+    "yahoo", "seeking alpha", "seekingalpha", "benzinga", "motley fool", "fool.com",
+    "zacks", "thestreet", "investing.com", "business insider", "insider monkey",
+    "simply wall st", "247wallst", "quartz", "invezz", "tipranks",
+)
+
+
+def source_tier(source):
+    """Lower is better. 0 = official filing, 1 = major press, 2 = secondary,
+    3 = unknown/other, 4 = press-release wire."""
+    s = (source or "").lower()
+    if "sec edgar" in s:
+        return 0
+    if any(k in s for k in _TIER_MAJOR):
+        return 1
+    if any(k in s for k in _TIER_SECONDARY):
+        return 2
+    if any(k in s for k in _TIER_WIRE):
+        return 4
+    return 3
+
+
+MAX_PER_SOURCE = 3      # no single outlet may own more than this many slots
+MIN_FEED = 8            # below this we relax the cap rather than show a stub feed
+
+
+def _source_brand(source):
+    """Collapse a publisher's editions to one brand so the per-source cap can't be
+    gamed by regional splits — "Yahoo", "Yahoo Finance", "Yahoo Finance UK" and
+    "Yahoo Sports" are one outlet's worth of quota, not four."""
+    s = re.sub(r"[^a-z0-9 ]", " ", (source or "").lower())
+    words = [w for w in s.split() if w]
+    if words and words[0] == "the":
+        words = words[1:]
+    return words[0] if words else "unknown"
+
 
 def _clean(txt):
     return re.sub(r"\s+", " ", (txt or "")).strip()
@@ -166,6 +217,51 @@ def _fetch_edgar_8k(ticker, limit=6):
     return out
 
 
+def _fetch_gnews(ticker, company_name=None, days=7, limit=40):
+    """Google News RSS — keyless, and the only upstream that spans the wider press.
+
+    Polygon and Finnhub between them return ~4 distinct outlets for a given
+    ticker; this one routinely returns 20+, which is what makes the per-source
+    cap in _diversify meaningful. Titles arrive as "Headline - Publisher", and
+    the publisher is also given in <source>, so we strip the suffix.
+    """
+    out = []
+    try:
+        import xml.etree.ElementTree as ET
+        from email.utils import parsedate_to_datetime
+
+        name = (company_name or "").strip()
+        # Quote the company name so multi-word names aren't OR'd apart, and require
+        # a finance word — otherwise a consumer brand pulls in its sponsorships
+        # (a plain "Coca-Cola" search returned UFC.com and Yahoo Sports).
+        subject = f'"{name}" OR {ticker.upper()}' if name else ticker.upper()
+        q = f"({subject}) (stock OR shares OR earnings OR investors OR analyst)"
+        r = requests.get("https://news.google.com/rss/search",
+                         params={"q": f"{q} when:{days}d", "hl": "en-US",
+                                 "gl": "US", "ceid": "US:en"},
+                         headers={"User-Agent": "Mozilla/5.0 (compatible; QuantWizard/1.0)"},
+                         timeout=10)
+        if r.status_code != 200:
+            return out
+        for it in ET.fromstring(r.content).findall(".//item")[:limit]:
+            title = (it.findtext("title") or "").strip()
+            src_el = it.find("source")
+            source = (src_el.text if src_el is not None else "") or "Google News"
+            # "Why Apple Stock Dropped Today - Yahoo Finance" -> drop the byline
+            if source and title.endswith(f" - {source}"):
+                title = title[: -(len(source) + 3)]
+            ts = 0
+            try:
+                ts = int(parsedate_to_datetime(it.findtext("pubDate")).timestamp())
+            except Exception:
+                pass
+            out.append(_mk(title, it.findtext("link"), source, "gnews", ts,
+                           "", None, [ticker.upper()]))
+    except Exception:
+        pass
+    return out
+
+
 def _iso_to_ts(s):
     if not s:
         return 0
@@ -205,7 +301,9 @@ def _norm_key(title):
 def _dedupe(articles):
     """Drop duplicates across sources — same story from different publishers —
     keeping the richest copy (longest summary, preferring an official/Polygon one)."""
-    prio = {"sec": 0, "polygon": 1, "finnhub": 2, "fmp": 3}
+    # gnews last: it carries no summary, so when the same story also arrives from
+    # Polygon/Finnhub we want to keep the copy that has one.
+    prio = {"sec": 0, "polygon": 1, "finnhub": 2, "fmp": 3, "gnews": 4}
     best = {}
     for a in articles:
         k = _norm_key(a["title"])
@@ -225,6 +323,7 @@ def aggregate_news(ticker, api_key, company_name=None, limit=24, days=21):
     arts = (_fetch_polygon(ticker, api_key, limit) +
             _fetch_finnhub(ticker, days, limit) +
             _fetch_fmp(ticker, limit) +
+            _fetch_gnews(ticker, company_name) +
             _fetch_edgar_8k(ticker))
     # Relevance: the story must actually name the company in its title or summary.
     #
@@ -258,12 +357,53 @@ def aggregate_news(ticker, api_key, company_name=None, limit=24, days=21):
     # down to nothing; show the unfiltered feed rather than an empty section.
     if len(arts) < 3:
         arts = deduped
-    # Stories *about* the company outrank stories that merely mention it in passing,
-    # then newest first. Without this a stale ETF round-up that name-drops the
-    # company in its summary can head the feed on a day of real company news.
-    arts.sort(key=lambda a: (names_in_title(a) or a["provider"] == "sec", a["ts"]),
-              reverse=True)
-    return arts[:limit]
+    # Rank: stories *about* the company first (a passing mention shouldn't head the
+    # feed on a day of real company news), then by source quality, then newest.
+    # -tier because sort is descending and lower tier == better.
+    arts.sort(key=lambda a: (names_in_title(a) or a["provider"] == "sec",
+                             -source_tier(a["source"]),
+                             a["ts"]), reverse=True)
+    return _diversify(arts, limit)
+
+
+def _diversify(ranked, limit, max_per_source=None):
+    """Pick `limit` articles spread across publishers, best-ranked first.
+
+    Round-robin: take each outlet's top story, then everyone's second, and so on
+    up to `max_per_source`. Taking a straight top-N and merely capping runs lets a
+    prolific outlet still own the tail once the pool thins out (Coca-Cola filtered
+    down to nine outlets and Yahoo took seven slots that way).
+
+    Selection is diversified, then the result is restored to rank order so the
+    feed still reads most-relevant-first.
+    """
+    cap = MAX_PER_SOURCE if max_per_source is None else max_per_source
+    rank_of, buckets, order = {}, {}, []
+    for i, a in enumerate(ranked):
+        rank_of[id(a)] = i
+        b = _source_brand(a["source"])
+        if b not in buckets:
+            buckets[b] = []
+            order.append(b)
+        buckets[b].append(a)
+
+    picked = []
+    for depth in range(cap):
+        for b in order:
+            if len(buckets[b]) > depth:
+                picked.append(buckets[b][depth])
+                if len(picked) >= limit:
+                    picked.sort(key=lambda a: rank_of[id(a)])
+                    return picked
+    # Too few outlets to fill the page at full quota. Don't pad up to `limit` — on
+    # Coca-Cola that bought 4 extra articles at the cost of letting Yahoo hold 7 of
+    # 24 slots. Only top up to MIN_FEED so a thinly-covered ticker still has a
+    # usable section; past that, a shorter, broader feed is the better answer.
+    if len(picked) < MIN_FEED:
+        chosen = {id(a) for a in picked}
+        picked += [a for a in ranked if id(a) not in chosen][: MIN_FEED - len(picked)]
+    picked.sort(key=lambda a: rank_of[id(a)])
+    return picked
 
 
 def sentiment_summary(articles):
