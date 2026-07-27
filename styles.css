@@ -1057,8 +1057,73 @@ button[kind^="primary"]:active,
   color: var(--accent) !important;
 }
 
+/* ── News & Research ── */
+/* Summary strip: tone on the left, forward-looking catalysts on the right. */
+.news-top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  flex-wrap: wrap; gap: 0.5rem 1rem;
+  padding-bottom: 0.7rem; margin-bottom: 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+.news-tone {
+  font-family: var(--font-sans); font-size: 0.9rem; font-weight: 700;
+  letter-spacing: -0.1px;
+}
+.news-tone-sub {
+  font-weight: 500; font-size: 0.74rem; color: var(--muted);
+  font-family: var(--font-data);
+}
+.news-cats { font-size: 0.76rem; color: var(--text3); }
+.news-cats b { color: var(--text); font-weight: 600; }
+
+/* Theme chips — the row under the summary, plus a smaller inline variant. */
+.news-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.news-chip {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 3px 11px; font-size: 0.72rem; font-weight: 600;
+  font-family: var(--font-sans); color: var(--text3);
+  letter-spacing: 0.2px; white-space: nowrap;
+}
+.news-chip.sm {
+  padding: 1px 8px; font-size: 0.66rem; font-weight: 600;
+  background: #eff6ff; border-color: #dbeafe; color: var(--accent);
+  margin-right: 0.5rem;
+}
+
+/* Article cards — sentiment dot + headline + source/date meta. */
+.news-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 0.7rem 0.9rem; margin-bottom: 0.5rem;
+  display: flex; align-items: flex-start; gap: 0.7rem;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.news-card:hover { box-shadow: var(--shadow-md); border-color: var(--border2); }
+.news-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  margin-top: 0.42rem; flex: 0 0 7px;
+}
+.news-card-b { min-width: 0; }
+.news-title {
+  display: block;
+  font-family: var(--font-sans); font-size: 0.84rem; font-weight: 500;
+  color: var(--text) !important; text-decoration: none !important;
+  line-height: 1.45;
+}
+.news-title:hover { color: var(--accent) !important; text-decoration: underline !important; }
+.news-meta {
+  font-size: 0.71rem; color: var(--muted);
+  margin-top: 0.3rem; display: flex; align-items: center; flex-wrap: wrap;
+}
+
 /* ── Mobile / narrow screens ── */
 @media (max-width: 640px) {
+  .news-top { flex-direction: column; align-items: flex-start; gap: 0.35rem; }
+  .news-cats { font-size: 0.72rem; }
   .block-container { padding-left: 0.85rem !important; padding-right: 0.85rem !important; }
   .main-header { padding: 1.4rem 1.2rem; }
   .main-header h1 { font-size: 1.45rem; }
