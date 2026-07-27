@@ -410,7 +410,7 @@ def _report_carousel_html():
         for i, src in enumerate(parts))
     caps_js = ",".join('"' + c.replace('"', "") + '"' for c in caps)
     tmpl = """<!doctype html><html><head><meta charset="utf-8"><style>
-*{box-sizing:border-box;margin:0;padding:0;font-family:'DM Sans',system-ui,Arial,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,Arial,sans-serif}
 body{background:transparent}
 .wrap{display:flex;align-items:center;gap:12px}
 .frame{flex:1;text-align:center;min-width:0}
@@ -719,7 +719,7 @@ elif _page == "analysis":
                         'border:1px solid #e2e8f0;'
                         'border-left:3px solid #1d4ed8;'
                         'margin-bottom:0.5rem;'
-                        'font-family:Inter,sans-serif">'
+                        'font-family:var(--font-sans)">'
                         'Our <span style="color:#1d4ed8 !important;font-weight:600">Custom Forecast</span> '
                         'combines three models — '
                         '<span style="color:#1d4ed8 !important;font-weight:500">GARCH</span> volatility modeling, '
@@ -768,7 +768,7 @@ elif _page == "analysis":
                 </span>
             </div>
             <h2 style="color:#ffffff;font-size:2rem;font-weight:700;
-                       line-height:1.2;margin:0 0 1rem;font-family:'DM Sans',sans-serif">
+                       line-height:1.2;margin:0 0 1rem;font-family:var(--font-display)">
                 Deep Analysis on Any<br>Stock, ETF, Crypto or Bond
             </h2>
             <p style="color:#94a3b8;font-size:1rem;max-width:560px;
@@ -1860,7 +1860,7 @@ elif _page == "analysis":
                     f'display:flex;align-items:center;gap:0.4rem">'
                     f'<span class="material-symbols-outlined" style="font-size:1rem">lightbulb</span> The Bottom Line</div>'
                     f'<div style="color:#cbd5e1;font-size:0.9rem;line-height:1.75;'
-                    f'font-family:Inter,sans-serif">{summary_text}</div></div>',
+                    f'font-family:var(--font-sans)">{summary_text}</div></div>',
                     unsafe_allow_html=True)
 
             # ── Valuation Lens — price vs. earnings-justified fair value ──────

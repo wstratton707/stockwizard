@@ -1,4 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+/* Newsreader (display) + Public Sans (UI) + JetBrains Mono (numerics).
+   Deliberately NOT DM Sans or Inter: those are the default fintech-SaaS pairing,
+   and a direct competitor (tradeframe.io) ships the identical DM Sans +
+   JetBrains Mono combination. An editorial serif for display is rare in retail
+   finance and matches what this product actually is — research, not a dashboard. */
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Public+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap');
 
 /* Professional line-art icons (replaces emoji in custom HTML sections) */
@@ -65,24 +70,61 @@
   --dim:       #94a3b8;
   --dim2:      #cbd5e1;
 
-  /* ── Shadows ── */
-  --shadow-sm: 0 1px 3px rgba(15,23,42,0.07), 0 1px 2px rgba(15,23,42,0.04);
-  --shadow-md: 0 4px 16px rgba(15,23,42,0.09), 0 2px 4px rgba(15,23,42,0.05);
+  /* ── Shadows ──
+     Flat by default. A drop shadow should mean "this floats above the page" —
+     when every static card carries one, nothing reads as raised and the layout
+     turns into a pile of hovering rectangles. --shadow-sm is now a hairline that
+     just seats a card on the surface; real elevation is reserved for things that
+     genuinely overlay (menus, modals, sticky bars) and for hover feedback. */
+  --shadow-sm: 0 1px 1px rgba(15,23,42,0.03);
+  --shadow-md: 0 2px 8px rgba(15,23,42,0.07);
   --shadow-lg: 0 8px 32px rgba(15,23,42,0.12), 0 2px 8px rgba(15,23,42,0.06);
   --shadow-blue: 0 4px 12px rgba(29,78,216,0.25);
 
-  /* ── Fonts ── */
-  --font-sans:  'Inter', 'DM Sans', sans-serif;
-  --font-data:  'JetBrains Mono', monospace;
-  --font-chart: 'DM Sans', 'Inter', sans-serif;
+  /* ── Fonts ──
+     display = headlines and titles only. Keep it off labels, data and dense UI:
+     a serif at 0.7rem uppercase reads as a mistake, and numbers belong in mono. */
+  --font-display: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-sans:  'Public Sans', system-ui, -apple-system, sans-serif;
+  --font-data:  'JetBrains Mono', ui-monospace, monospace;
+  --font-chart: 'Public Sans', system-ui, sans-serif;
 
-  /* ── Radius ── */
+  /* ── Layout ── */
+  --page-gutter: 2.5rem;
+
+  /* ── Radius ──
+     Scales INVERSELY with element size. Page chrome gets 0 so it anchors to the
+     edges; big surfaces stay restrained; only small controls look pill-ish.
+     One radius on everything (which is what this was) flattens all hierarchy
+     and is the single clearest tell of a generated UI. */
+  --r-chrome: 0;      /* nav, full-bleed bars — anchored, never floating */
+  --r-panel: 10px;    /* large surfaces: banners, page panels */
   --r-sm:  5px;
   --r-md:  8px;
   --r-lg:  10px;
   --r-xl:  12px;
   --r-pill: 999px;
 }
+
+/* ── Display type ──
+   Headlines and card titles only. Everything else (micro-labels, table headers,
+   metric values, chips) stays in the sans or the mono — the serif is the accent,
+   not the voice of the whole app. */
+/* !important throughout: Streamlit ships its own heading font-family at higher
+   specificity than a bare `h1`, so without it these silently stay on Source Sans. */
+h1, h2, h3,
+.main-header h1,
+.home-hero-title,
+.home-section-title,
+.home-card-title,
+.home-spotlight-lead h3,
+.feature-card-title,
+.stock-hero-symbol {
+  font-family: var(--font-display) !important;
+  letter-spacing: -0.01em;
+}
+/* Newsreader runs light at display sizes; nudge weight so headlines hold up. */
+h1, .main-header h1, .home-hero-title { font-weight: 700 !important; }
 
 /* ── Base ── */
 html, body, [class*="css"] {
@@ -101,7 +143,25 @@ footer { visibility: hidden; }
 .stDeployButton,
 .stAppDeployButton { display: none !important; }
 [data-testid="stHeader"] { height: 0 !important; }
-.block-container { padding-top: 1.75rem !important; max-width: 1200px !important; }
+/* Own the horizontal gutter rather than inheriting Streamlit's (80px at this
+   width, and responsive), so full-bleed elements can cancel it with a known
+   number. Also buys back 80px of content width. */
+.block-container {
+  padding-top: 1.75rem !important;
+  padding-left: var(--page-gutter) !important;
+  padding-right: var(--page-gutter) !important;
+  max-width: 1200px !important;
+}
+
+/* Full-bleed helper: cancel the gutter, then re-apply it as padding so the
+   background spans the whole content area while the contents stay on the grid.
+   This is what stops page chrome reading as a card floating in grey. */
+.bleed {
+  margin-left: calc(-1 * var(--page-gutter));
+  margin-right: calc(-1 * var(--page-gutter));
+  padding-left: var(--page-gutter);
+  padding-right: var(--page-gutter);
+}
 
 /* ── Backgrounds ── */
 [data-testid="stAppViewContainer"] {
@@ -810,12 +870,26 @@ button[kind^="primary"]:active,
 /* ── Custom top navigation (replaces Streamlit's empty built-in header bar) ── */
 [data-testid="stHeader"] { display: none; }
 
+/* Spans the full content area and sits flush to the top — no side margins, no
+   bottom radius, no drop shadow. Previously it was an inset, rounded, shadowed
+   bar floating in the grey, which is what made the whole page read as a stack
+   of cards rather than a designed surface. */
 .st-key-topnav {
   position: sticky; top: 0; z-index: 1000;
   background: var(--brand-grad);
-  border-bottom: 1px solid rgba(255,255,255,0.09);
-  box-shadow: 0 6px 18px rgba(4,10,20,0.28);
-  padding: 0.4rem 1.35rem; margin-bottom: 1.4rem; border-radius: 0 0 12px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.10);
+  box-shadow: none;
+  border-radius: var(--r-chrome);
+  margin-top: -1.75rem;                 /* cancel .block-container padding-top */
+  margin-left: calc(-1 * var(--page-gutter));
+  margin-right: calc(-1 * var(--page-gutter));
+  /* Streamlit pins this block to an explicit width AND caps it at max-width:100%
+     of the parent, so the negative margins would slide it left without ever
+     widening it. Both have to go for the margins to size it. */
+  width: auto !important;
+  max-width: none !important;
+  padding: 0.45rem var(--page-gutter);
+  margin-bottom: 1.6rem;
 }
 .st-key-topnav [data-testid="stHorizontalBlock"] { align-items: center; gap: 0.3rem; }
 
