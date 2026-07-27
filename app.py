@@ -62,9 +62,11 @@ except Exception:
     VALUATION_AVAILABLE = False
 
 
-# `ticker` must NOT be underscore-prefixed: st.cache_data excludes underscored
-# args from the cache key, which left this keyed on nothing at all — every ticker
-# was served the first ticker's valuation. Do not rename it back.
+# NOTE ON PARAMETER NAMES: st.cache_data deliberately EXCLUDES any argument whose
+# name starts with an underscore from the cache key (that's the documented escape
+# hatch for unhashable args). These take plain strings, so they must NOT be
+# underscore-prefixed — doing so leaves an empty cache key, and every ticker gets
+# served the first ticker's result. Do not rename these back.
 @st.cache_data(ttl=3600, show_spinner=False)
 def _cached_valuation(ticker):
     """~15yr price-vs-earnings valuation series (EDGAR + yfinance). Cached 1h; the
@@ -79,35 +81,36 @@ def _cached_valuation(ticker):
 
 # ── News research (multi-source + AI brief) — all cached to bound API/LLM cost ─
 @st.cache_data(ttl=900, show_spinner=False)
-def _cached_news(_ticker, _company):
+def _cached_news(ticker, company):
     try:
         from news_research import aggregate_news
-        return aggregate_news(_ticker, POLYGON_API_KEY, company_name=_company or None)
+        return aggregate_news(ticker, POLYGON_API_KEY, company_name=company or None)
     except Exception:
         return []
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def _cached_catalysts(_ticker):
+def _cached_catalysts(ticker):
     try:
         from news_research import get_catalysts
-        return get_catalysts(_ticker)
+        return get_catalysts(ticker)
     except Exception:
         return {}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _cached_news_brief(_ticker, _company):
+def _cached_news_brief(ticker, company):
     try:
         from news_research import ai_news_brief
-        return ai_news_brief(_ticker, _cached_news(_ticker, _company),
-                             company_name=_company or None)
+        return ai_news_brief(ticker, _cached_news(ticker, company),
+                             company_name=company or None)
     except Exception:
         return None
 
 
 @st.cache_data(ttl=900, show_spinner=False)
 def _cached_market_pulse():
+    """Market-wide feed + trending tickers for the News page. One Polygon call."""
     try:
         from news_research import market_pulse
         try:
@@ -3164,6 +3167,47 @@ elif _page == "analysis":
 
         st.markdown(render_section("Data & Methodology", _disc.DIVIDENDS), unsafe_allow_html=True)
         st.markdown(render_inline(_disc.SHORT), unsafe_allow_html=True)
+
+# ═════════════════════════════════════════════════════════════════════════════
+# NEWS — market-wide pulse + per-ticker research
+# ═════════════════════════════════════════════════════════════════════════════
+elif _page == "news":
+    st.markdown('<div class="section-header">Market News '
+                '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                'text-transform:none;font-size:0.7rem">· across the market, '
+                'theme-tagged</span></div>', unsafe_allow_html=True)
+
+    import html as _html_mod
+    _pulse   = _cached_market_pulse()
+    _m_arts  = _pulse.get("articles") or []
+    _trend   = _pulse.get("trending") or []
+
+    if not _m_arts:
+        st.info("Market news is unavailable right now — the news provider did not "
+                "return any stories. Per-ticker research below still works.")
+    else:
+        if _trend:
+            st.caption("Most-mentioned tickers in recent market coverage")
+            st.markdown(
+                '<div class="news-chips">' +
+                "".join(f'<span class="news-chip">{_html_mod.escape(str(_tk))} · {_n}</span>'
+                        for _tk, _n in _trend) +
+                '</div>', unsafe_allow_html=True)
+        st.markdown(_news_feed_html(_m_arts, 20), unsafe_allow_html=True)
+
+    st.markdown('<div class="section-header">Research a ticker</div>',
+                unsafe_allow_html=True)
+    _nt = st.text_input("Ticker", key="news_ticker",
+                        placeholder="e.g. AAPL, MSFT, NVDA",
+                        label_visibility="collapsed")
+    if _nt and _nt.strip():
+        _render_stock_news(_nt.strip().upper())
+    else:
+        st.caption("Enter a ticker to see its news tone, catalysts and sourced brief.")
+
+    # No news-specific disclaimer exists in `disclaimers`; the dividends one would
+    # be plainly wrong here, so use the short general disclaimer only.
+    st.markdown(render_inline(_disc.SHORT), unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # PORTFOLIO BUILDER
