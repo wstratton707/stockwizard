@@ -112,11 +112,19 @@ def _section_header(text):
 
 def _render_step_0():
     _section_header("Risk Profile")
+    preset_choice = st.selectbox(
+        "Quick start preset",
+        ["Balanced", "Conservative", "Growth", "Aggressive"],
+        index=0,
+        help="Pick a starting point to make the first build feel more guided."
+    )
+    preset_map = {"Conservative": 3, "Balanced": 5, "Growth": 7, "Aggressive": 8}
     risk = st.slider(
         "Risk Tolerance",
-        min_value=1, max_value=10, value=5,
+        min_value=1, max_value=10, value=preset_map[preset_choice],
         help="1 = Very conservative (capital preservation) · 10 = Very aggressive (maximum growth)"
     )
+    st.caption(f"Suggested starter: {preset_choice.lower()} · adjust the slider if you want a different posture.")
     risk_labels = {
         (1,3): ("Conservative","Capital preservation. Heavy bonds and defensive ETFs."),
         (4,6): ("Moderate",    "Balanced growth. Mix of growth stocks and stability."),

@@ -75,6 +75,111 @@ def _cached_valuation(ticker):
         return _get_valuation_data(ticker)
     except Exception:
         return None
+
+
+# ── News research (multi-source + AI brief) — all cached to bound API/LLM cost ─
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_news(_ticker, _company):
+    try:
+        from news_research import aggregate_news
+        return aggregate_news(_ticker, POLYGON_API_KEY, company_name=_company or None)
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cached_catalysts(_ticker):
+    try:
+        from news_research import get_catalysts
+        return get_catalysts(_ticker)
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_news_brief(_ticker, _company):
+    try:
+        from news_research import ai_news_brief
+        return ai_news_brief(_ticker, _cached_news(_ticker, _company),
+                             company_name=_company or None)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_market_pulse():
+    try:
+        from news_research import market_pulse
+        try:
+            from portfolio_data import SECTOR_UNIVERSE
+            uni = {t for v in SECTOR_UNIVERSE.values() for t in v}
+        except Exception:
+            uni = None
+        return market_pulse(POLYGON_API_KEY, universe=uni)
+    except Exception:
+        return {"articles": [], "trending": []}
+
+
+def _news_feed_html(articles, n=12):
+    """Compact, linked news cards with a theme chip + sentiment dot."""
+    import html as _html
+    out = []
+    for a in articles[:n]:
+        dot = {"Positive": "#15803d", "Negative": "#b91c1c"}.get(a["sentiment"], "#94a3b8")
+        title = _html.escape(a["title"] or "")
+        out.append(
+            f'<div class="news-card"><span class="news-dot" style="background:{dot}"></span>'
+            f'<div class="news-card-b">'
+            f'<a href="{a["url"]}" target="_blank" class="news-title">{title}</a>'
+            f'<div class="news-meta"><span class="news-chip sm">{a["theme"]}</span>'
+            f'{_html.escape(a["source"] or "")} · {a["date"]}</div></div></div>')
+    return "".join(out)
+
+
+def _render_stock_news(ticker, company_name=None):
+    """Full per-stock news research: tone + catalysts + theme chips, a grounded
+    AI brief (when a key is configured), then the multi-source article feed."""
+    from news_research import sentiment_summary, theme_counts
+    arts = _cached_news(ticker, company_name or "")
+    if not arts:
+        st.caption("No recent news found for this ticker.")
+        return
+    sent   = sentiment_summary(arts)
+    themes = theme_counts(arts)
+    cats   = _cached_catalysts(ticker)
+
+    _tone = ("Bullish" if sent["score"] > 0.15 else
+             "Bearish" if sent["score"] < -0.15 else "Mixed")
+    _tcol = ("#15803d" if sent["score"] > 0.15 else
+             "#b91c1c" if sent["score"] < -0.15 else "#64748b")
+    _catbits = []
+    if cats.get("next_earnings"):
+        _catbits.append(f'Next earnings <b>{cats["next_earnings"]["date"]}</b>')
+    if cats.get("latest_8k"):
+        _catbits.append(f'<a href="{cats["latest_8k"]["url"]}" target="_blank" '
+                        f'style="color:#1d4ed8;text-decoration:none">Latest 8-K · '
+                        f'{cats["latest_8k"]["date"]}</a>')
+    _chips = "".join(f'<span class="news-chip">{t} · {c}</span>'
+                     for t, c in list(themes.items())[:5])
+    st.markdown(
+        f'<div class="news-top"><div class="news-tone" style="color:{_tcol}">'
+        f'● News tone: {_tone}<span class="news-tone-sub"> &nbsp;'
+        f'{sent["positive"]}+ / {sent["negative"]}− / {sent["neutral"]}○ · '
+        f'{sent["n"]} stories</span></div>'
+        f'<div class="news-cats">{" &nbsp;·&nbsp; ".join(_catbits)}</div></div>'
+        f'<div class="news-chips">{_chips}</div>', unsafe_allow_html=True)
+
+    brief = _cached_news_brief(ticker, company_name or "")
+    if brief:
+        with st.container(border=True):
+            st.markdown("**AI briefing**  ·  *synthesised only from the sources below — "
+                        "verify before acting; not investment advice*")
+            st.markdown(brief["text"])
+            with st.expander(f"Sources ({len(brief['sources'])})"):
+                for s in brief["sources"]:
+                    st.markdown(f"**[{s['n']}]** [{s['title']}]({s['url']}) — *{s['source']}*")
+
+    st.markdown(_news_feed_html(arts, 12), unsafe_allow_html=True)
 from live_data import get_live_price, get_intraday_data, get_top_movers, get_tape_prices
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
@@ -176,7 +281,7 @@ elif not DEV_MODE_FREE and not st.session_state.get("is_pro"):
 # Custom sticky navbar (replaces Streamlit's empty built-in header). Uses native
 # buttons in a keyed container so nav clicks are reruns — session state (e.g. a
 # built portfolio) survives — while ?page= keeps the URL shareable.
-_PAGES = ("home", "analysis", "builder", "portfolios")
+_PAGES = ("home", "analysis", "news", "builder", "portfolios")
 _page  = st.query_params.get("page", "home")
 if _page not in _PAGES:
     _page = "home"
@@ -187,7 +292,7 @@ def _goto(pg):
 
 with st.container(key="topnav"):
     # Brand (left) · flexible spacer · nav links clustered to the right.
-    _nc = st.columns([2.4, 2.2, 1.0, 1.3, 2.1, 1.9], vertical_alignment="center")
+    _nc = st.columns([2.4, 1.5, 0.95, 1.25, 0.95, 2.0, 1.85], vertical_alignment="center")
     _brand_mark = (
         f'<img class="topnav-mark-img" src="data:image/png;base64,{_MARK_B64}" alt="QuantWizard">'
         if _MARK_B64 else
@@ -198,7 +303,7 @@ with st.container(key="topnav"):
         '<span class="topnav-word">Quant<b>Wizard</b></span></div>',
         unsafe_allow_html=True)
     for _i, (_lbl, _pg) in enumerate(
-            [("Home", "home"), ("Analysis", "analysis"),
+            [("Home", "home"), ("Analysis", "analysis"), ("News", "news"),
              ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=2):
         if _nc[_i].button(_lbl, key=f"nav_{_pg}", use_container_width=True,
                           type="primary" if _page == _pg else "tertiary"):
@@ -390,6 +495,35 @@ if _page == "home":
         _goto("analysis")
     if _hc[1].button("Build a portfolio", use_container_width=True, key="cta_build"):
         _goto("builder")
+
+    st.markdown("""
+    <div class="guide-panel">
+      <div class="guide-header">Quick start</div>
+      <div class="guide-grid">
+        <div class="guide-card">
+          <span class="material-symbols-outlined">query_stats</span>
+          <div>
+            <strong>Start with analysis</strong>
+            <p>Check any ticker, review the technicals and fundamentals, and export a polished report.</p>
+          </div>
+        </div>
+        <div class="guide-card">
+          <span class="material-symbols-outlined">pie_chart</span>
+          <div>
+            <strong>Build your first portfolio</strong>
+            <p>Pick a balanced starting point, then refine allocations and risk settings in a few steps.</p>
+          </div>
+        </div>
+        <div class="guide-card">
+          <span class="material-symbols-outlined">account_balance_wallet</span>
+          <div>
+            <strong>Track what matters</strong>
+            <p>Monitor forward performance against the S&amp;P 500 and keep your portfolio ideas organized.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # ── Live ticker tape ──────────────────────────────────────────────────────
     _tape_items = _cached_tape(POLYGON_API_KEY)
@@ -2788,7 +2922,13 @@ elif _page == "analysis":
                 )
                 st.plotly_chart(fig_corr, use_container_width=True)
 
-            if news_list:
+            if not is_crypto:
+                st.markdown('<div class="section-header">News &amp; Research '
+                            '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                            'text-transform:none;font-size:0.7rem">· multi-source, theme-tagged'
+                            ', AI-briefed</span></div>', unsafe_allow_html=True)
+                _render_stock_news(ticker_input, company_details.get("Name"))
+            elif news_list:
                 st.markdown('<div class="section-header">Recent News</div>', unsafe_allow_html=True)
                 for item in news_list[:8]:
                     st.markdown(f"""
