@@ -425,6 +425,14 @@ def select_by_factors(returns_df, sector_map, always_keep=None, max_total=18,
 
     ann = 252
 
+    # Rank on the SAME horizon precompute uses (~1 year), not the full 5-year
+    # price window this frame carries. Previously the two paths scored on
+    # different lookbacks, so whether the nightly cache happened to be warm
+    # silently changed which stocks were picked — the same inputs produced
+    # different portfolios depending on infrastructure state.
+    if len(returns_df) > ann:
+        returns_df = returns_df.iloc[-ann:]
+
     def _factors(ticker):
         r = returns_df[ticker].dropna()
         if len(r) < 30:
@@ -436,7 +444,10 @@ def select_by_factors(returns_df, sector_map, always_keep=None, max_total=18,
         # histories; fall back to the full window when there's very little data.
         window   = r.iloc[-ann:-21] if len(r) > 63 else r
         momentum = float((1 + window).prod() - 1)
-        return {"sharpe": sharpe, "ann_vol": ann_vol, "momentum": momentum}
+        # Volatility-adjusted, matching precompute: raw momentum mostly ranks by
+        # beta, so the highest-vol name wins by construction.
+        mom_adj  = momentum / ann_vol if ann_vol > 0 else 0.0
+        return {"sharpe": sharpe, "ann_vol": ann_vol, "momentum": mom_adj}
 
     pinned, cand, facts = [], [], {}
     for ticker in returns_df.columns:
@@ -449,9 +460,23 @@ def select_by_factors(returns_df, sector_map, always_keep=None, max_total=18,
             cand.append(ticker)
 
     def _norm(vals):
-        lo, hi = min(vals), max(vals)
-        rng = hi - lo
-        return {t: ((v - lo) / rng if rng > 0 else 0.5) for t, v in zip(cand, vals)}
+        """Percentile rank, matching precompute. Min-max let a single outlier
+        rescale every other name; a rank is immune to that."""
+        n = len(vals)
+        if n <= 1:
+            return {t: 0.5 for t in cand}
+        order = sorted(range(n), key=lambda i: vals[i])
+        out   = [0.0] * n
+        i = 0
+        while i < n:
+            j = i
+            while j + 1 < n and vals[order[j + 1]] == vals[order[i]]:
+                j += 1
+            avg = (i + j) / 2.0
+            for k in range(i, j + 1):
+                out[order[k]] = avg / (n - 1)
+            i = j + 1
+        return {t: out[idx] for idx, t in enumerate(cand)}
 
     if cand:
         n_sharpe = _norm([facts[t]["sharpe"]   for t in cand])

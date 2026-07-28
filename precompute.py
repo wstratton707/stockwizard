@@ -119,22 +119,40 @@ def _compute_factors(prices: pd.Series) -> dict | None:
     sharpe  = (ann_ret - get_risk_free_rate()) / ann_vol if ann_vol > 0 else -999.0
 
     # Momentum: price today vs. N trading days ago
-    mom_6m = float((prices.iloc[-1] / prices.iloc[max(0, len(prices)-132)] - 1) * 100) \
-             if len(prices) >= 132 else 0.0
-    mom_3m = float((prices.iloc[-1] / prices.iloc[max(0, len(prices)-69)]  - 1) * 100) \
-             if len(prices) >= 69  else 0.0
-    # 12-1 momentum: return from ~12 months ago to ~1 month ago. Skipping the most
-    # recent month is the academic momentum construction (avoids short-term reversal).
-    mom_12m = float((prices.iloc[-21] / prices.iloc[-252] - 1) * 100) \
-              if len(prices) >= 252 else mom_6m
+    # All three skip the most recent ~month. That's the academic momentum
+    # construction (short-term reversal makes the last month a *negative*
+    # predictor), and previously only the 12-month leg did it — so 12-1 ended one
+    # month ago while 6m and 3m ended today. Averaging series with different
+    # endpoints mixes a momentum signal with a reversal signal.
+    SKIP = 21
+    def _mom(lookback):
+        if len(prices) < lookback + SKIP:
+            return None
+        return float((prices.iloc[-SKIP] / prices.iloc[-(lookback + SKIP)] - 1) * 100)
+
+    mom_12m = _mom(252)
+    mom_6m  = _mom(126)
+    mom_3m  = _mom(63)
+    # Fall back down the ladder rather than to 0.0 — a zero is not "no momentum",
+    # it's a neutral reading that a young name hasn't earned.
+    mom_6m  = mom_6m  if mom_6m  is not None else (mom_3m or 0.0)
+    mom_12m = mom_12m if mom_12m is not None else (mom_6m or 0.0)
+    mom_3m  = mom_3m  if mom_3m  is not None else 0.0
+
+    # Volatility-adjusted: raw momentum rewards whatever moved most, which is
+    # usually just the highest-beta name. Dividing by realised vol makes it a
+    # return-per-unit-risk ranking and is markedly more stable period to period.
+    _volpct = ann_vol * 100 if ann_vol > 0 else None
+    mom_12m_adj = (mom_12m / _volpct) if _volpct else 0.0
 
     return {
-        "sharpe":     round(sharpe,  4),
-        "ann_return": round(ann_ret * 100, 2),
-        "ann_vol":    round(ann_vol * 100, 2),
-        "mom_12m":    round(mom_12m, 2),
-        "mom_6m":     round(mom_6m, 2),
-        "mom_3m":     round(mom_3m, 2),
+        "sharpe":      round(sharpe,  4),
+        "ann_return":  round(ann_ret * 100, 2),
+        "ann_vol":     round(ann_vol * 100, 2),
+        "mom_12m":     round(mom_12m, 2),
+        "mom_6m":      round(mom_6m, 2),
+        "mom_3m":      round(mom_3m, 2),
+        "mom_12m_adj": round(mom_12m_adj, 4),
     }
 
 
@@ -189,26 +207,79 @@ def _add_combined_scores(rankings: dict) -> dict:
     if not rankings:
         return rankings
 
-    def _norm(values: list) -> list:
-        lo, hi = min(values), max(values)
-        rng = hi - lo
-        return [(v - lo) / rng if rng > 0 else 0.5 for v in values]
+    def _pct_rank(values: list) -> list:
+        """Percentile rank in [0,1]. Replaces min-max, which is hostage to
+        outliers: one name up 400% compresses every other score toward zero, so
+        adding or removing a single ticker rescales the whole universe. A rank is
+        invariant to that."""
+        n = len(values)
+        if n == 1:
+            return [0.5]
+        order = sorted(range(n), key=lambda i: values[i])
+        out   = [0.0] * n
+        i = 0
+        while i < n:
+            j = i
+            while j + 1 < n and values[order[j + 1]] == values[order[i]]:
+                j += 1
+            avg_rank = (i + j) / 2.0            # average rank for ties
+            for k in range(i, j + 1):
+                out[order[k]] = avg_rank / (n - 1)
+            i = j + 1
+        return out
 
     tickers = list(rankings.keys())
-    n_sharpe = _norm([rankings[t].get("sharpe", 0)  for t in tickers])
-    n_vol    = _norm([rankings[t].get("ann_vol", 0) for t in tickers])
-    n_12m    = _norm([rankings[t].get("mom_12m", rankings[t].get("mom_6m", 0)) for t in tickers])
-    n_6m     = _norm([rankings[t].get("mom_6m", 0)  for t in tickers])
-    n_3m     = _norm([rankings[t].get("mom_3m", 0)  for t in tickers])
 
-    for i, t in enumerate(tickers):
-        momentum = (n_12m[i] + n_6m[i] + n_3m[i]) / 3.0
-        low_vol  = 1.0 - n_vol[i]                       # lower volatility → higher
-        quality  = rankings[t].get("quality")
-        quality  = 0.5 if quality is None else float(quality)   # neutral if missing
+    def _by_group(field, groups, invert=False):
+        """Percentile-rank `field` WITHIN each sector, not across the whole
+        universe. Comparing a utility's ROE or volatility against a semiconductor's
+        measures the sector, not the company — cross-sectional ranking without
+        this systematically selects whole sectors. Groups of one fall back to
+        neutral 0.5, since a rank of one thing carries no information."""
+        out = {}
+        for g, members in groups.items():
+            vals = [rankings[t].get(field, 0) or 0 for t in members]
+            if len(members) < 3:
+                for t in members:
+                    out[t] = 0.5
+                continue
+            ranks = _pct_rank(vals)
+            for t, r in zip(members, ranks):
+                out[t] = (1.0 - r) if invert else r
+        return out
+
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for t in tickers:
+        groups[rankings[t].get("sector", "Unknown")].append(t)
+
+    # Momentum and quality are sector-relative; volatility and Sharpe stay
+    # absolute — a genuinely low-volatility name is low-volatility regardless of
+    # what its neighbours do, and that is the property being selected for.
+    g_12m = _by_group("mom_12m_adj", groups)
+    g_6m  = _by_group("mom_6m",      groups)
+    g_3m  = _by_group("mom_3m",      groups)
+
+    a_sharpe = dict(zip(tickers, _pct_rank([rankings[t].get("sharpe", 0)  or 0 for t in tickers])))
+    a_vol    = dict(zip(tickers, _pct_rank([rankings[t].get("ann_vol", 0) or 0 for t in tickers])))
+
+    q_vals   = [rankings[t].get("quality") for t in tickers]
+    have_q   = [t for t, v in zip(tickers, q_vals) if v is not None]
+    q_rank   = dict(zip(have_q, _pct_rank([rankings[t]["quality"] for t in have_q]))) if have_q else {}
+
+    for t in tickers:
+        momentum = (g_12m[t] + g_6m[t] + g_3m[t]) / 3.0
+        low_vol  = 1.0 - a_vol[t]                        # lower volatility → higher
+        quality  = q_rank.get(t, 0.5)                    # neutral when unavailable
         score = (0.30 * momentum + 0.30 * quality +
-                 0.20 * low_vol  + 0.20 * n_sharpe[i])
+                 0.20 * low_vol  + 0.20 * a_sharpe[t])
         rankings[t]["score"] = round(score, 4)
+        # Keep the components — the UI attributes each holding to them, and
+        # without this the reason a name was picked is unrecoverable.
+        rankings[t]["f_momentum"] = round(momentum, 4)
+        rankings[t]["f_quality"]  = round(quality, 4)
+        rankings[t]["f_lowvol"]   = round(low_vol, 4)
+        rankings[t]["f_sharpe"]   = round(a_sharpe[t], 4)
 
     return rankings
 

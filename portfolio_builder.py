@@ -31,6 +31,7 @@ from portfolio_analysis import (
     compute_monthly_heatmap, run_portfolio_monte_carlo,
     compute_diversification_score, get_rebalancing_recommendations,
     compute_betas, capm_expected_returns, portfolio_beta, shrunk_covariance,
+    factor_tilted_expected_returns,
 )
 from portfolio_excel import build_portfolio_excel
 from pptx_builder import build_portfolio_pptx, PPTX_AVAILABLE
@@ -363,13 +364,39 @@ def _render_step_2(api_key):
                     if t not in candidates and t not in excl_tickers:
                         candidates.append(t)
 
-                for sector, ticker_scores in sector_groups.items():
-                    ranked = sorted(ticker_scores, key=lambda x: x[1], reverse=True)
-                    added  = 0
-                    for t, _ in ranked:
-                        if t not in candidates and added < 2:
+                # Flexible sector allocation. Hard top-2-per-sector treated every
+                # sector as equally deep: if Health Care held five names scoring
+                # 0.96-0.91 and Utilities' best was 0.53, both still contributed
+                # exactly two. Now every sector gets a guaranteed floor (so
+                # diversification is preserved), and the remaining slots go to the
+                # best names anywhere, capped per sector so nothing runs away.
+                _MIN_PER_SECTOR, _MAX_PER_SECTOR = 1, 4
+                per_sector = {s: sorted(v, key=lambda x: x[1], reverse=True)
+                              for s, v in sector_groups.items()}
+
+                taken = {s: 0 for s in per_sector}
+                for sector, ranked in per_sector.items():        # floor first
+                    for t, _ in ranked[:_MIN_PER_SECTOR]:
+                        if t not in candidates:
                             candidates.append(t)
-                            added += 1
+                            taken[sector] += 1
+
+                # Then fill by global score until the candidate pool is deep enough
+                # to give the optimiser real choice (~2.5x the final portfolio).
+                pool_target = _MAX_PORTFOLIO_TICKERS * 2.5
+                remaining = sorted(
+                    ((t, sc, s) for s, v in per_sector.items() for t, sc in v),
+                    key=lambda x: x[1], reverse=True)
+                for t, _sc, sector in remaining:
+                    if len(candidates) >= pool_target:
+                        break
+                    if t in candidates or taken[sector] >= _MAX_PER_SECTOR:
+                        continue
+                    candidates.append(t)
+                    taken[sector] += 1
+
+                _spread = {s: n for s, n in sorted(taken.items(), key=lambda x: -x[1]) if n}
+                log(f"   Sector spread: {_spread}")
 
                 # Build sector_map from rankings
                 sector_map = {t: rankings[t]["sector"] for t in candidates if t in rankings}
@@ -442,7 +469,23 @@ def _render_step_2(api_key):
                     market_returns = _spy_df["SPY"] if "SPY" in _spy_df.columns else None
                 except Exception:
                     market_returns = None
-            capm_mu = capm_expected_returns(compute_betas(returns_df, market_returns))
+            # Expected returns now carry the factor view, not just beta. Scores
+            # come from whichever selection path ran, so the optimiser weights on
+            # the same evidence that chose the names.
+            _factor_scores = {}
+            if used_precompute:
+                _factor_scores = {t: rankings[t].get("score")
+                                  for t in returns_df.columns
+                                  if t in rankings and rankings[t].get("score") is not None}
+            _betas  = compute_betas(returns_df, market_returns)
+            capm_mu = factor_tilted_expected_returns(_betas, _factor_scores)
+            if _factor_scores:
+                _tilt = {t: (capm_mu[t] - (get_risk_free_rate() + _betas[t] * EQUITY_RISK_PREMIUM))
+                         for t in _factor_scores}
+                _hi = max(_tilt.values()) * 100 if _tilt else 0
+                _lo = min(_tilt.values()) * 100 if _tilt else 0
+                log(f"   Factor tilt applied to expected returns: {_lo:+.1f}% … {_hi:+.1f}% "
+                    f"on {len(_factor_scores)} of {len(returns_df.columns)} holdings")
 
             # Metrics
             stock_metrics = compute_stock_metrics(returns_df, market_returns)
@@ -509,6 +552,10 @@ def _render_step_2(api_key):
                 "ef_df":         ef_df,
                 "ticker_info":   ticker_info,
                 "div_score":     div_score,
+                "factor_scores": _factor_scores,
+                "sector_map":    sector_map,
+                "rankings_meta": (rankings.get("_meta", {}) if used_precompute else
+                                  {"computed_at": "live (no precompute cache)"}),
                 "failed":        failed,
             }
 
@@ -620,6 +667,49 @@ def _render_step_2(api_key):
         pbeta   = portfolio_beta(selected_weights, _betas)
         ann_ret = (get_risk_free_rate() + pbeta * EQUITY_RISK_PREMIUM) * 100
         sharpe  = (ann_ret - _rfr_pct) / ann_vol if ann_vol > 0 else 0
+
+    # ── Why each holding is here ──────────────────────────────────────────────
+    # Every number below was already computed and then discarded at render time.
+    # Showing it is the difference between "here is a portfolio" and "here is why
+    # this portfolio" — and it's the part a user is actually paying for, since
+    # the maths itself is invisible to them.
+    _section_header("Why These Holdings")
+    _fs   = opt.get("factor_scores", {}) or {}
+    _meta = opt.get("rankings_meta", {}) or {}
+    _rows = []
+    for _t, _w in sorted(selected_weights.items(), key=lambda x: -x[1]):
+        _m   = stock_metrics.get(_t, {})
+        _sc  = _fs.get(_t)
+        _b   = _m.get("beta")
+        _tilt = (2.0 * (_sc - 0.5) * 0.02 * 100) if _sc is not None else None
+        _rows.append({
+            "Holding":    _t,
+            "Weight":     f"{_w*100:.1f}%",
+            "Sector":     _SECTOR_LOOKUP.get(_t, opt.get("sector_map", {}).get(_t, "—")),
+            "Factor score": f"{_sc:.2f}" if _sc is not None else "—",
+            "Tilt vs CAPM": f"{_tilt:+.1f}%" if _tilt is not None else "—",
+            "Beta":       f"{_b:.2f}" if _b is not None else "—",
+            "Exp. return": f"{_m.get('capm_return'):.1f}%" if _m.get("capm_return") is not None else "—",
+            "Volatility": f"{_m.get('ann_vol'):.1f}%" if _m.get("ann_vol") is not None else "—",
+        })
+    if _rows:
+        st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+        st.caption(
+            "**Factor score** is the selection composite (momentum 30% · quality 30% · "
+            "low-volatility 20% · risk-adjusted return 20%), percentile-ranked within "
+            "sector for momentum and quality. **Tilt vs CAPM** is how much that score "
+            "moves the expected return the optimiser sees, capped at ±2%/yr so a factor "
+            "reading can influence weights without dominating them. **Weight** then comes "
+            "from mean-variance optimisation on those expected returns and a "
+            "shrinkage-estimated covariance matrix."
+            + (f"  ·  Rankings computed {_meta.get('computed_at', 'unknown')}."
+               if _meta.get("computed_at") else "")
+        )
+        if _meta.get("partial"):
+            st.warning(
+                f"Rankings are partial — {_meta.get('tickers_done','?')} of "
+                f"{_meta.get('tickers_total','?')} tickers were scored when the "
+                f"nightly job last ran. Selection used what was available.")
 
     _section_header("Portfolio Overview")
     cols = st.columns(5)

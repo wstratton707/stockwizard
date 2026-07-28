@@ -110,6 +110,45 @@ def capm_expected_returns(betas, rf=None, erp=None):
     return {t: rf + b * erp for t, b in betas.items()}
 
 
+# Maximum annual return, in decimal, that the factor tilt may add or subtract on
+# top of CAPM. Deliberately small. Mean-variance optimisation is an error
+# maximiser — it loads onto whatever looks best — so the spread of mu directly
+# controls how extreme the weights get. CAPM alone spans roughly 8.5-12% here;
+# +/-2% keeps the factor view influential without letting it dominate, and means
+# a bad factor reading degrades the portfolio rather than wrecking it.
+FACTOR_ALPHA_MAX = 0.02
+
+
+def factor_tilted_expected_returns(betas, factor_scores, rf=None, erp=None,
+                                   alpha_max=None):
+    """E(R) = Rf + beta*ERP + alpha(factor score).
+
+    The whole point of the exercise: without the alpha term, expected return is a
+    monotone function of beta, so "maximise return" is literally "maximise beta"
+    and the optimiser cannot tell a 0.97-scoring name from a 0.61-scoring one
+    with the same market sensitivity. Every factor the selector computed was
+    thrown away at exactly the moment it mattered.
+
+    `factor_scores` is {ticker: composite in [0,1]} straight from the ranking
+    step. It is mapped to [-alpha_max, +alpha_max] around 0.5, so a median name
+    gets no tilt at all and only genuine outliers move much. Names without a
+    score are untilted rather than penalised.
+
+    Additive rather than a replacement: proposals to set mu = Rf + score*8%
+    discard the beta term and widen the spread severalfold, which makes weights
+    more extreme, not less.
+    """
+    base = capm_expected_returns(betas, rf=rf, erp=erp)
+    if not factor_scores:
+        return base
+    a_max = FACTOR_ALPHA_MAX if alpha_max is None else alpha_max
+    out = {}
+    for t, mu in base.items():
+        s = factor_scores.get(t)
+        out[t] = mu + (2.0 * (float(s) - 0.5) * a_max) if s is not None else mu
+    return out
+
+
 def portfolio_beta(weights, betas):
     """Weighted-average beta of a portfolio. Beta is linear, so this equals
     regressing the blended portfolio's returns on the market."""
