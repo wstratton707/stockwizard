@@ -829,9 +829,7 @@ elif _page == "analysis":
 
         # ── Market movers ─────────────────────────────────────────────────────
         st.markdown("""
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
-                    margin-bottom:1rem">Market Movers · Last Close</div>
+        <div class="section-header">Market Movers · Last Close</div>
         """, unsafe_allow_html=True)
 
         with st.spinner("Loading market data..."):
@@ -870,9 +868,7 @@ elif _page == "analysis":
 
         # ── Problem section ───────────────────────────────────────────────────
         st.markdown("""
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
-                    margin-bottom:1rem;margin-top:2rem">Why QuantWizard</div>
+        <div class="section-header">Why QuantWizard</div>
         """, unsafe_allow_html=True)
 
         p1, p2, p3 = st.columns(3)
@@ -897,9 +893,7 @@ elif _page == "analysis":
 
         # ── Feature cards ─────────────────────────────────────────────────────
         st.markdown("""
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
-                    margin-bottom:1rem;margin-top:2rem">What's Included</div>
+        <div class="section-header">What's Included</div>
         """, unsafe_allow_html=True)
 
         fc1, fc2 = st.columns(2)
@@ -948,9 +942,7 @@ elif _page == "analysis":
 
         # ── How it works ──────────────────────────────────────────────────────
         st.markdown("""
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
-                    margin-bottom:1.5rem;margin-top:2rem">How It Works</div>
+        <div class="section-header">How It Works</div>
         """, unsafe_allow_html=True)
 
         h1, h2, h3 = st.columns(3)
@@ -974,9 +966,7 @@ elif _page == "analysis":
 
         # ── Methodology & Data ────────────────────────────────────────────────
         st.markdown("""
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
-                    margin-bottom:1rem;margin-top:2rem">Methodology &amp; Data</div>
+        <div class="section-header">Methodology &amp; Data</div>
         <div style="color:#64748b;font-size:0.84rem;line-height:1.6;margin-bottom:1.25rem;max-width:680px">
             We show our work. Every number below is computed with standard, citable formulas —
             and we're upfront about the data and its limits.
@@ -1028,9 +1018,7 @@ elif _page == "analysis":
 
         # ── Pricing ───────────────────────────────────────────────────────────
         st.markdown("""
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
-                    margin-bottom:1.5rem;margin-top:2rem">Pricing</div>
+        <div class="section-header">Pricing</div>
         """, unsafe_allow_html=True)
 
         pr1, pr2 = st.columns(2)
@@ -1078,9 +1066,7 @@ elif _page == "analysis":
 
         # ── Team ──────────────────────────────────────────────────────────────
         st.markdown("""
-        <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-                    color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:0.5rem;
-                    margin-bottom:1.5rem;margin-top:2rem">Built By</div>
+        <div class="section-header">Built By</div>
         """, unsafe_allow_html=True)
 
         _fc, _ = st.columns([3, 2])

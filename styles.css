@@ -17,11 +17,17 @@
 }
 
 :root {
-  /* ── Surfaces ── */
-  --bg:        #f1f5f9;
+  /* ── Surfaces ──
+     The canvas is white, not grey. Measured before this change, 56% of the
+     page was bare #f1f5f9 and only 6% was white: once the cards came off,
+     every paragraph and table was sitting on a background colour rather than
+     a reading surface, which is what made it look washed out. Grey is now an
+     accent used in deliberate bands, not the default state of the page. */
+  --bg:        #ffffff;
   --surface:   #ffffff;
-  --surface2:  #f8fafc;
-  --surface3:  #f0f4f8;
+  --surface2:  #f6f8fb;   /* section bands, table zebra, hover */
+  --surface3:  #eef2f7;   /* pressed / heavier fill */
+  --band:      #f7f9fc;   /* full-bleed section tint */
 
   /* ── Borders ── */
   --border:    #e2e8f0;
@@ -574,13 +580,30 @@ footer { visibility: hidden; }
 .section-header {
   font-family: var(--font-sans); font-size: 0.68rem; font-weight: 700;
   letter-spacing: 0.9px; text-transform: uppercase; color: var(--text3);
-  padding: 0 0 0.6rem 0.75rem;
+  padding: 0.85rem 0 0.6rem 0;
   border-bottom: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  margin-bottom: 1.1rem; margin-top: 2rem;
+  margin-bottom: 1.1rem; margin-top: 2.4rem;
   display: flex; align-items: center; gap: 0.6rem;
 }
 .section-header::before { content: none; }
+
+/* ── Section headers ──
+   With a white canvas the page needs stronger section marks than a hairline.
+   A short accent rule above a small-caps label gives each block a visible
+   start without wrapping anything in a box. */
+.section-header,
+.home-section-title {
+  position: relative;
+  padding-top: 0.85rem;
+}
+.section-header::after,
+.home-section-title::after {
+  content: "";
+  position: absolute; top: 0; left: 0;
+  width: 34px; height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
 
 /* ── Editorial index rows (replaces the 3-up feature card grid) ──
    Rules and whitespace do the separating instead of another rounded box. */

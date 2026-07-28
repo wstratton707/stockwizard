@@ -8,8 +8,8 @@
 [theme]
 base = "light"
 primaryColor = "#1d4ed8"            # brand blue (--accent)
-backgroundColor = "#f1f5f9"         # app canvas (--bg)
-secondaryBackgroundColor = "#ffffff" # cards / code / dataframes (--surface)
+backgroundColor = "#ffffff"         # app canvas (--bg) — white paper, not grey
+secondaryBackgroundColor = "#f6f8fb" # bands / code / dataframes (--surface2)
 textColor = "#0f172a"               # primary text (--text)
 font = "sans serif"
 
