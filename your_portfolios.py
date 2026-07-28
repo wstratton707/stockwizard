@@ -131,7 +131,7 @@ def _parse_holdings_text(raw: str) -> dict:
 
 
 def _render_create(email, api_key):
-    with st.expander("➕  New tracked portfolio", expanded=False):
+    with st.expander("New tracked portfolio", expanded=False):
         with st.form("yp_new"):
             name = st.text_input("Name", placeholder="My Roth IRA")
             raw  = st.text_area(
@@ -165,7 +165,7 @@ def _render_create(email, api_key):
 
 def _render_edit(pid, holdings, api_key):
     """Add a new lot (today) or sell an existing position (removed_date = today)."""
-    with st.expander("✏️  Edit holdings"):
+    with st.expander("Edit holdings"):
         active = [l for l in holdings if not l.get("removed_date")]
         if active:
             st.caption("Current positions")
@@ -216,7 +216,7 @@ def _render_card(p, api_key):
 
     if "error" in res:
         st.warning(res["error"])
-        if st.button("🗑 Delete", key=f"del_err_{pid}"):
+        if st.button("Delete", key=f"del_err_{pid}"):
             delete_tracked_portfolio(pid)
             st.rerun()
         return
@@ -260,11 +260,11 @@ def _render_card(p, api_key):
         st.dataframe(hdf[show], use_container_width=True, hide_index=True)
 
     for w in res.get("warnings", []):
-        st.caption(f"⚠ {w}")
+        st.caption(f"{w}")
 
     _render_edit(pid, holdings, api_key)
 
-    if st.button("🗑 Delete portfolio", key=f"del_{pid}"):
+    if st.button("Delete portfolio", key=f"del_{pid}"):
         delete_tracked_portfolio(pid)
         st.cache_data.clear()
         st.rerun()
@@ -286,12 +286,12 @@ def render_your_portfolios(api_key, is_pro=False):
 
     _status = _storage_status()
     if _status == "no_creds":
-        st.warning("⚠ Storage isn't configured on this app instance — Supabase keys "
+        st.warning("Storage isn't configured on this app instance — Supabase keys "
                    "(`SUPABASE_URL` / `SUPABASE_KEY`) are missing. On Streamlit Cloud, add "
                    "them in **Settings → Secrets**. Portfolios won't save until then.")
     elif _status == "no_table":
         from database import supabase_project_url
-        st.warning(f"⚠ Connected to Supabase, but the **tracked_portfolios** table isn't in "
+        st.warning(f"Connected to Supabase, but the **tracked_portfolios** table isn't in "
                    f"this project:\n\n`{supabase_project_url()}`\n\nRun the DDL from "
                    f"`database.py` in **that** project's SQL editor (not your local one).")
 
@@ -299,7 +299,7 @@ def render_your_portfolios(api_key, is_pro=False):
 
     portfolios = load_tracked_portfolios(email)
     if not portfolios:
-        st.info("No tracked portfolios yet. Use **➕ New tracked portfolio** above to "
+        st.info("No tracked portfolios yet. Use **New tracked portfolio** above to "
                 "start tracking one from today (or any past date).")
         return
 

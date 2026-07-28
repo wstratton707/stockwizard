@@ -86,7 +86,7 @@ def render_inline(text: str = SHORT) -> str:
     <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;
                 padding:0.65rem 1rem;font-size:0.76rem;color:#92400e;
                 margin-top:0.75rem;line-height:1.55">
-        ⚠ {text}
+        {text}
     </div>"""
 
 

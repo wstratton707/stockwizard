@@ -243,7 +243,7 @@ FMP_API_KEY      = os.environ.get("FMP_API_KEY", "").strip()
 SHOW_PRICING     = False  # Set True when ready to accept payments
 
 if not POLYGON_API_KEY:
-    st.error("❌ POLYGON_API_KEY is not configured. Contact support or check your environment variables.")
+    st.error("POLYGON_API_KEY is not configured. Contact support or check your environment variables.")
     st.stop()
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -461,7 +461,7 @@ with st.sidebar:
             </div>
             """, unsafe_allow_html=True)
         else:
-            if st.button("⚡ Upgrade to Pro — $9.99/mo", use_container_width=True):
+            if st.button("Upgrade to Pro — $9.99/mo", use_container_width=True):
                 st.session_state["show_payment"] = True
                 st.rerun()
     else:
@@ -1120,7 +1120,7 @@ elif _page == "analysis":
             # Only hard-stop if the ticker looks obviously wrong (non-alphanumeric)
             import re
             if not re.match(r'^[A-Z0-9.\-]{1,10}$', ticker_input):
-                st.error(f"❌ Ticker '{ticker_input}' not found. Check the symbol and try again.")
+                st.error(f"Ticker '{ticker_input}' not found. Check the symbol and try again.")
                 st.stop()
             # Otherwise continue — fetch_stock_data will raise if the ticker is truly invalid
 
@@ -1529,7 +1529,7 @@ elif _page == "analysis":
                 else:
                     # Clean message for users; full traces go to the server logs,
                     # not the screen (a stack trace in the UI looks broken).
-                    st.error(f"❌ Couldn't complete the analysis for **{ticker_input}**: {_msg}")
+                    st.error(f"Couldn't complete the analysis for **{ticker_input}**: {_msg}")
                 import traceback as _tb
                 print(_tb.format_exc())   # server-side log for debugging
                 st.stop()
@@ -1550,7 +1550,7 @@ elif _page == "analysis":
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     _ready = st.session_state.get("_excel_id") == _report_id
-                    if not _ready and st.button("⬇  Export to Excel",
+                    if not _ready and st.button("Export to Excel",
                                                 use_container_width=True,
                                                 key=f"gen_excel_{suffix}"):
                         with st.spinner("Building your Excel workbook…"):
@@ -1570,7 +1570,7 @@ elif _page == "analysis":
                     if _ready:
                         st.session_state["_excel_buf"].seek(0)
                         st.download_button(
-                            "⬇  Download Excel (.xlsx)",
+                            "Download Excel (.xlsx)",
                             data=st.session_state["_excel_buf"],
                             file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1579,7 +1579,7 @@ elif _page == "analysis":
                 with c2:
                     if PPTX_AVAILABLE:
                         _readyp = st.session_state.get("_pptx_id") == _report_id
-                        if not _readyp and st.button("⬇  Export to PowerPoint",
+                        if not _readyp and st.button("Export to PowerPoint",
                                                      use_container_width=True,
                                                      key=f"gen_pptx_{suffix}"):
                             with st.spinner("Building your PowerPoint deck…"):
@@ -1600,7 +1600,7 @@ elif _page == "analysis":
                             if _pb is not None:
                                 _pb.seek(0)
                                 st.download_button(
-                                    "⬇  Download PowerPoint (.pptx)", data=_pb,
+                                    "Download PowerPoint (.pptx)", data=_pb,
                                     file_name=f"{ticker_input}_{period_label}_Analysis.pptx",
                                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                     use_container_width=True, key=f"dl_pptx_{suffix}",
@@ -1610,7 +1610,7 @@ elif _page == "analysis":
                 with c3:
                     if DOCX_AVAILABLE:
                         _readyw = st.session_state.get("_word_id") == _report_id
-                        if not _readyw and st.button("⬇  Export to Word",
+                        if not _readyw and st.button("Export to Word",
                                                      use_container_width=True,
                                                      key=f"gen_word_{suffix}"):
                             with st.spinner("Writing your Word report…"):
@@ -1632,7 +1632,7 @@ elif _page == "analysis":
                             if _wb is not None:
                                 _wb.seek(0)
                                 st.download_button(
-                                    "⬇  Download Word (.docx)", data=_wb,
+                                    "Download Word (.docx)", data=_wb,
                                     file_name=f"{ticker_input}_{period_label}_Report.docx",
                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                     use_container_width=True, key=f"dl_word_{suffix}",

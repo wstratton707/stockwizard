@@ -233,7 +233,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
             st.markdown(
                 "<div style='background:#fffbeb;border:1px solid #fde68a;border-radius:8px;"
                 "padding:1rem 1.25rem;font-size:0.84rem;color:#92400e;line-height:1.55;"
-                "margin-bottom:1rem'>⚠ <b>Couldn’t run the stress test right now.</b> We need historical "
+                "margin-bottom:1rem'><b>Couldn’t run the stress test right now.</b> We need historical "
                 "prices for your tickers (and SPY), and the data came back empty — most likely a temporary "
                 "rate limit or an unrecognized symbol. Try again in a minute.</div>",
                 unsafe_allow_html=True,
@@ -390,7 +390,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
     # Sample CSV download
     sample_csv = "Ticker,Shares,Price\nAAPL,50,180.00\nMSFT,30,420.00\nNVDA,20,850.00\nAGG,100,95.00\n"
     st.download_button(
-        "⬇ Download sample CSV",
+        "Download sample CSV",
         data=sample_csv,
         file_name="sample_holdings.csv",
         mime="text/csv",
@@ -442,7 +442,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                         tickers, period_years=period_years, api_key=api_key,
                     )
                 except Exception as e:
-                    st.error(f"❌ Data fetch failed: {e}")
+                    st.error(f"Data fetch failed: {e}")
                     st.stop()
 
             if failed:
@@ -589,7 +589,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                     "Weight":             f"{w * 100:.1f}%",
                     "Return":             f"{pos_ret:+.2f}%",
                     "P&L Contribution":   f"{contrib:+.2f}%",
-                    "Verdict":            "✅ Helped" if contrib >= 0 else "❌ Hurt",
+                    "Verdict":            "Helped" if contrib >= 0 else "Hurt",
                 })
             st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
 
@@ -630,7 +630,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                         st.markdown(
                             f"<div style='background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;"
                             f"padding:0.75rem 1rem;font-size:0.82rem;margin-bottom:1rem'>"
-                            f"⚠ Highly correlated losing pairs: {chips}</div>",
+                            f"Highly correlated losing pairs: {chips}</div>",
                             unsafe_allow_html=True,
                         )
                     else:
@@ -662,7 +662,7 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                 st.plotly_chart(fig_corr, use_container_width=True)
 
         except Exception as e:
-            st.error(f"❌ Couldn't process that CSV — check the columns and try again. ({e})")
+            st.error(f"Couldn't process that CSV — check the columns and try again. ({e})")
             import traceback as _tb; print(_tb.format_exc())   # server log, not UI
 
     st.markdown(render_section("Stress Test Methodology", _disc.STRESS_TEST),

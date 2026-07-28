@@ -1,6 +1,7 @@
 import os
 import stripe
 import streamlit as st
+from icons import icon
 
 try:
     from dotenv import load_dotenv
@@ -86,8 +87,13 @@ def render_pricing_section():
 
     col1, col2 = st.columns(2)
 
+    # Inline SVG rather than the ✓ / ✗ characters these replaced: those are
+    # OS-rendered, so their weight and shape changed between platforms.
+    _ok = icon("check", 15)
+    _no = icon("cross", 15)
+
     with col1:
-        st.markdown("""
+        st.markdown(f"""
         <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:2rem">
             <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.5px;
                         text-transform:uppercase;color:#64748b;margin-bottom:0.75rem">Free</div>
@@ -95,15 +101,15 @@ def render_pricing_section():
                         color:#0f172a;margin-bottom:0.25rem">$0</div>
             <div style="font-size:0.85rem;color:#64748b;margin-bottom:1.5rem">Forever free</div>
             <div style="font-size:0.88rem;color:#334155;line-height:2.2">
-                ✓ &nbsp;Full Excel report download<br>
-                ✓ &nbsp;Monte Carlo simulation<br>
-                ✓ &nbsp;RSI, MACD, Bollinger Bands<br>
-                ✓ &nbsp;Support & resistance<br>
-                ✓ &nbsp;News headlines<br>
-                ✓ &nbsp;Up to 5 year history<br>
-                ✗ &nbsp;Intraday charts<br>
-                ✗ &nbsp;Day trader mode<br>
-                ✗ &nbsp;Intraday (15-min delayed) data
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">Full Excel report download</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">Monte Carlo simulation</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">RSI, MACD, Bollinger Bands</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">Support & resistance</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">News headlines</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">Up to 5 year history</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#cbd5e1;display:inline-flex;flex:0 0 auto">{_no}</span><span style="color:#94a3b8">Intraday charts</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#cbd5e1;display:inline-flex;flex:0 0 auto">{_no}</span><span style="color:#94a3b8">Day trader mode</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#cbd5e1;display:inline-flex;flex:0 0 auto">{_no}</span><span style="color:#94a3b8">Intraday (15-min delayed) data</span></div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -127,16 +133,22 @@ def render_pricing_section():
             <div style="font-size:0.85rem;color:#64748b;margin-bottom:1.5rem">
                 {"Billed annually · cancel anytime" if billing else "per month · cancel anytime"}
             </div>
-            <div style="font-size:0.88rem;color:#94a3b8;line-height:2.2">
-                ✓ &nbsp;Everything in Free<br>
-                ✓ &nbsp;<span style="color:#38bdf8">Intraday candlestick charts (15-min delayed)</span><br>
-                ✓ &nbsp;<span style="color:#38bdf8">Delayed quotes (~15 min)</span><br>
-                ✓ &nbsp;<span style="color:#38bdf8">Day trader mode</span><br>
-                ✓ &nbsp;<span style="color:#38bdf8">1min 5min 15min 1hr candles</span><br>
-                ✓ &nbsp;<span style="color:#38bdf8">Volume spike detection</span><br>
-                ✓ &nbsp;<span style="color:#38bdf8">Pre-market & after-hours</span><br>
-                ✓ &nbsp;<span style="color:#38bdf8">10 year history</span><br>
-                ✓ &nbsp;Priority support
+            <div style="font-size:0.88rem;color:#94a3b8;line-height:1.9">
+                {"".join(
+                    f'<div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0">'
+                    f'<span style="color:#38bdf8;display:inline-flex;flex:0 0 auto">{_ok}</span>'
+                    f'<span style="color:{_c}">{_t}</span></div>'
+                    for _t, _c in [
+                        ("Everything in Free", "#94a3b8"),
+                        ("Intraday candlestick charts (15-min delayed)", "#38bdf8"),
+                        ("Delayed quotes (~15 min)", "#38bdf8"),
+                        ("Day trader mode", "#38bdf8"),
+                        ("1min 5min 15min 1hr candles", "#38bdf8"),
+                        ("Volume spike detection", "#38bdf8"),
+                        ("Pre-market &amp; after-hours", "#38bdf8"),
+                        ("10 year history", "#38bdf8"),
+                        ("Priority support", "#94a3b8"),
+                    ])}
             </div>
         </div>
         """, unsafe_allow_html=True)

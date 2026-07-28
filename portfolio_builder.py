@@ -266,7 +266,7 @@ def _render_step_1(api_key):
                     _parts.append(f"Include — {', '.join(_inc_bad)}")
                 if _exc_bad:
                     _parts.append(f"Exclude — {', '.join(_exc_bad)}")
-                st.error(f"❌ Unrecognised ticker(s): {' · '.join(_parts)}. "
+                st.error(f"Unrecognised ticker(s): {' · '.join(_parts)}. "
                          f"Check the symbols and try again.")
             else:
                 prefs["user_tickers"]    = user_tickers
@@ -318,8 +318,8 @@ def _render_step_2(api_key):
                 computed_at = meta.get("computed_at", "unknown")
                 is_partial  = meta.get("partial", False)
                 n_ranked    = len(rankings)
-                freshness   = f"{'⚠ partial — ' + str(meta.get('tickers_done','?')) + '/' + str(meta.get('tickers_total','?')) + ' tickers · ' if is_partial else ''}{computed_at}"
-                log(f"   ⚡ Pre-computed rankings loaded — {n_ranked} tickers · computed {freshness}")
+                freshness   = f"{'partial — ' + str(meta.get('tickers_done','?')) + '/' + str(meta.get('tickers_total','?')) + ' tickers · ' if is_partial else ''}{computed_at}"
+                log(f"   Pre-computed rankings loaded — {n_ranked} tickers · computed {freshness}")
                 progress.progress(10, text=f"Selecting best stocks from {n_ranked}-ticker universe...")
 
                 # Group by sector, respecting user preferences
@@ -381,7 +381,7 @@ def _render_step_2(api_key):
                 log(f"   Selected {len(candidates)} candidates from full universe")
             else:
                 # ── Fallback: original candidate building (top 5 per sector) ──
-                log("   ℹ No pre-computed rankings — using live candidate building")
+                log("   No pre-computed rankings — using live candidate building")
                 log("   Tip: run precompute.py daily to enable full-universe selection")
                 candidates, sector_map, skipped_sectors = build_candidate_universe(
                     prefs, api_key, log=log)
@@ -522,20 +522,20 @@ def _render_step_2(api_key):
                     "Wait 30 seconds and try again — this happens during peak hours."
                 )
             elif "api key" in err_str or "missing" in err_str:
-                st.error("❌ API key error — contact support.")
+                st.error("API key error — contact support.")
             elif "no valid price" in err_str or "all" in err_str and "failed" in err_str:
                 st.error(
-                    "❌ Could not fetch price data for the selected tickers. "
+                    "Could not fetch price data for the selected tickers. "
                     "Check that your tickers are valid US stock symbols."
                 )
             elif "insufficient tickers" in err_str:
                 st.error(
-                    "❌ Not enough of the selected stocks had usable price history "
+                    "Not enough of the selected stocks had usable price history "
                     "to build a diversified portfolio. Add a few more well-known "
                     "tickers (or remove some exclusions) and try again."
                 )
             else:
-                st.error(f"❌ Something went wrong building your portfolio: {e}")
+                st.error(f"Something went wrong building your portfolio: {e}")
                 import traceback as _tb; print(_tb.format_exc())   # server log, not UI
             if st.button("← Back", key="step2_err_back"):
                 st.session_state[_K_STEP] = 1
@@ -558,11 +558,11 @@ def _render_step_2(api_key):
         _auto_failed = [t for t in opt["failed"] if t.upper() not in _user_tickers_req]
         if _user_failed:
             st.warning(
-                f"⚠ Your requested ticker(s) **{', '.join(_user_failed)}** could not be included — "
+                f"Your requested ticker(s) **{', '.join(_user_failed)}** could not be included — "
                 f"insufficient price history (less than 60 trading days). They have been excluded from the portfolio."
             )
         if _auto_failed:
-            st.warning(f"⚠ Could not load data for: {', '.join(_auto_failed)} — excluded from analysis")
+            st.warning(f"Could not load data for: {', '.join(_auto_failed)} — excluded from analysis")
 
     # Portfolio selector
     _section_header("Choose Your Portfolio")
@@ -633,7 +633,7 @@ def _render_step_2(api_key):
         with col:
             st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
 
-    with st.expander("ℹ️ About these numbers — methodology & assumptions"):
+    with st.expander("About these numbers — methodology & assumptions"):
         st.markdown("""
 **Expected Ann. Return** — CAPM estimate: risk-free rate + (portfolio beta × 5% equity risk premium).
 It reflects how much *market* risk the portfolio carries, not which stocks recently ran up — so it
@@ -703,7 +703,7 @@ concentration penalty for any single position above 25%.
             _is_sel  = (_crow["key"] == selected_key)
             _cborder = f"2px solid {BLUE}" if _is_sel else "1px solid #e2e8f0"
             _cbg     = "#eff6ff" if _is_sel else "#ffffff"
-            _clbl    = ("✓ " if _is_sel else "") + _crow["label"]
+            _clbl    = ("" if _is_sel else "") + _crow["label"]
             with _ccol:
                 st.markdown(f"""
                 <div style="background:{_cbg};border:{_cborder};border-radius:8px;
@@ -936,7 +936,7 @@ def _render_step_3():
                     "heatmap": heatmap_df,
                 }
             except Exception as e:
-                st.error(f"❌ Backtest failed: {e}")
+                st.error(f"Backtest failed: {e}")
                 import traceback as _tb; print(_tb.format_exc())   # server log, not UI
                 return
 
@@ -1337,7 +1337,7 @@ def _render_step_4():
                     "milestones": milestones,
                 }
             except Exception as e:
-                st.error(f"❌ Monte Carlo failed: {e}")
+                st.error(f"Monte Carlo failed: {e}")
                 import traceback as _tb; print(_tb.format_exc())   # server log, not UI
                 return
 
@@ -1405,7 +1405,7 @@ def _render_step_4():
         with col:
             st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
 
-    with st.expander("ℹ️ How Monte Carlo probabilities are calculated"):
+    with st.expander("How Monte Carlo probabilities are calculated"):
         st.markdown("""
 **What this simulation does:**
 Runs 1,000 independent scenarios for your portfolio using correlated daily returns
@@ -1435,7 +1435,7 @@ reflects that.
         """)
 
     st.caption(
-        "⚠️ Monte Carlo assumes log-normally distributed returns and stationary volatility. "
+        "Monte Carlo assumes log-normally distributed returns and stationary volatility. "
         "It does not model recessions, black-swan events, or regime changes. "
         "Probabilities are illustrative, not guaranteed. Not investment advice."
     )
@@ -1522,7 +1522,7 @@ reflects that.
 
     _gen_col1, _gen_col2 = st.columns(2)
     with _gen_col1:
-        if st.button("📊 Generate Excel Report", type="primary",
+        if st.button("Generate Excel Report", type="primary",
                      use_container_width=True, key="gen_excel"):
             with st.spinner("Building Excel report..."):
                 try:
@@ -1548,11 +1548,11 @@ reflects that.
                     )
                     st.session_state[_K_EXCEL] = excel_buf
                 except Exception as e:
-                    st.error(f"❌ Excel build failed: {e}")
+                    st.error(f"Excel build failed: {e}")
                     import traceback as _tb; print(_tb.format_exc())   # server log, not UI
 
     with _gen_col2:
-        if PPTX_AVAILABLE and st.button("📑 Generate PowerPoint Report", type="primary",
+        if PPTX_AVAILABLE and st.button("Generate PowerPoint Report", type="primary",
                                          use_container_width=True, key="gen_pptx"):
             with st.spinner("Building PowerPoint report..."):
                 try:
@@ -1577,14 +1577,14 @@ reflects that.
                     )
                     st.session_state[_K_PPTX] = pptx_buf
                 except Exception as e:
-                    st.error(f"❌ PowerPoint build failed: {e}")
+                    st.error(f"PowerPoint build failed: {e}")
                     import traceback as _tb; print(_tb.format_exc())   # server log, not UI
 
     _dl_col1, _dl_col2 = st.columns(2)
     with _dl_col1:
         if _K_EXCEL in st.session_state:
             st.download_button(
-                label="⬇  Download Portfolio Report (.xlsx)",
+                label="Download Portfolio Report (.xlsx)",
                 data=st.session_state[_K_EXCEL],
                 file_name=f"QuantWizard_Portfolio_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1594,7 +1594,7 @@ reflects that.
         if _K_PPTX in st.session_state:
             st.session_state[_K_PPTX].seek(0)
             st.download_button(
-                label="⬇  Download Portfolio Report (.pptx)",
+                label="Download Portfolio Report (.pptx)",
                 data=st.session_state[_K_PPTX],
                 file_name=f"QuantWizard_Portfolio_{datetime.now().strftime('%Y%m%d')}.pptx",
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -1610,7 +1610,7 @@ reflects that.
                 del st.session_state[_K_MC]
             st.rerun()
     with col2:
-        if st.button("🔄 Start New Portfolio", key="step4_restart"):
+        if st.button("Start New Portfolio", key="step4_restart"):
             for k in [_K_STEP, _K_PREFS, _K_OPTIMISED,
                       _K_WEIGHTS, _K_BACKTEST, _K_MC, _K_EXCEL, _K_RANKINGS]:
                 st.session_state.pop(k, None)
@@ -1628,7 +1628,7 @@ reflects that.
                                     key="save_port_email")
         _save_name  = st.text_input("Portfolio name", placeholder="My Growth Portfolio",
                                     key="save_port_name")
-        if st.button("💾  Save Portfolio", key="save_port_btn"):
+        if st.button("Save Portfolio", key="save_port_btn"):
             if _save_email.strip() and _save_name.strip():
                 _weights  = st.session_state.get(_K_WEIGHTS, {})
                 _prefs    = st.session_state.get(_K_PREFS, {})
@@ -1650,7 +1650,7 @@ reflects that.
 
         st.markdown("<div style='color:#94a3b8;font-size:0.8rem;margin:0.4rem 0'>— or —</div>",
                     unsafe_allow_html=True)
-        if st.button("📁  Track this forward", key="track_port_btn",
+        if st.button("Track this forward", key="track_port_btn",
                      help="Save to 'Your Portfolios' and track its real performance from today."):
             if _save_email.strip() and _save_name.strip():
                 _tw  = st.session_state.get(_K_WEIGHTS, {})
@@ -1684,7 +1684,7 @@ reflects that.
         st.markdown("**Load a saved portfolio**")
         _load_email = st.text_input("Your email", placeholder="you@example.com",
                                     key="load_port_email")
-        if st.button("🔍  Find My Portfolios", key="load_port_btn"):
+        if st.button("Find My Portfolios", key="load_port_btn"):
             if _load_email.strip():
                 _saved = load_portfolios(_load_email)
                 if _saved:
@@ -1732,7 +1732,7 @@ def render_portfolio_builder(api_key, is_pro=False):
         st.markdown("""
         <div style="background:#0f172a;border:1px solid #334155;border-radius:16px;
                     padding:2.5rem;text-align:center;margin:1rem 0">
-            <div style="font-size:1.75rem;margin-bottom:0.75rem">📊</div>
+            <div style="font-size:1.75rem;margin-bottom:0.75rem"></div>
             <div style="color:#fff;font-weight:600;font-size:1.2rem;margin-bottom:0.5rem">
                 Portfolio Builder is a Pro Feature
             </div>
