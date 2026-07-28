@@ -42,6 +42,7 @@ from data import (fetch_stock_data, fetch_company_details, fetch_financials,
 from analysis import (compute_fundamentals, dcf_valuation, run_monte_carlo,
                       build_correlation_matrix, detect_support_resistance,
                       generate_summary_paragraph)
+from market_data import get_financials_supplement
 from excel_builder import build_excel
 from constants import get_risk_free_rate
 
@@ -83,7 +84,9 @@ def main():
     sector = details.get("Sector") or details.get("sector")
 
     fin = fetch_financials(tk, key, log=log)
-    fundamentals = compute_fundamentals(fin, market_cap=details.get("Market Cap"))
+    supplement   = get_financials_supplement(tk)
+    fundamentals = compute_fundamentals(fin, market_cap=details.get("Market Cap"),
+                                        supplement=supplement)
     price = float(df["Close"].iloc[-1])
     try:
         dcf = dcf_valuation(fundamentals, price)

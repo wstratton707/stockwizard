@@ -117,11 +117,16 @@ def _altman_z(rev, ebit, ca, cl, assets, total_liab, retained, mcap):
     return round(z, 2), zone
 
 
-def compute_fundamentals(financials, market_cap=None, price=None):
+def compute_fundamentals(financials, market_cap=None, price=None, supplement=None):
     """
     Turn raw Polygon statements (from data.fetch_financials) + market cap into a
     structured analytics dict: margins, returns, leverage, growth, valuation
     multiples, a reverse-DCF implied growth, and 4-period trend arrays.
+
+    `supplement` is the optional dict from market_data.get_financials_supplement:
+    capex, free cash flow and the balance-sheet fields Polygon's endpoints don't
+    return. Passed in rather than fetched here so this stays a pure function.
+    Without it, FCF and Altman-Z simply remain None, as they did before.
 
     Pure function (no network) so it is cheap to test. Returns {"ok": False} when
     the income statement is missing.
@@ -182,8 +187,23 @@ def compute_fundamentals(financials, market_cap=None, price=None):
 
     # ── Free cash flow (the extra EDGAR fields are absent on the Polygon path,
     #     so every derived metric here degrades gracefully to None) ────────────
+    def _sup(field, i=0):
+        """Newest-first value from the yfinance supplement, or None."""
+        vals = (supplement or {}).get(field) or []
+        return vals[i] if i < len(vals) and vals[i] is not None else None
+
     capex = _fin_val(cf, "capex")
     fcf   = (ocf - capex) if (ocf is not None and capex is not None) else None
+    if fcf is None:
+        # Polygon's cash-flow endpoint has no capex line at all, so this is the
+        # normal path rather than a rare fallback. Prefer yfinance's own FCF
+        # figure; otherwise reconstruct it. Capex arrives negative there, hence
+        # the addition.
+        fcf = _sup("fcf")
+        if fcf is None:
+            _ocf, _cx = _sup("operating_cf"), _sup("capex")
+            if _ocf is not None and _cx is not None:
+                fcf = _ocf + _cx if _cx < 0 else _ocf - _cx
     fcf_block = {
         "fcf":        fcf,
         "fcf_margin": pct(fcf, rev),
@@ -202,9 +222,15 @@ def compute_fundamentals(financials, market_cap=None, price=None):
 
     # ── Quality scores ────────────────────────────────────────────────────────
     f_score, f_basis = _piotroski_f_score(inc, bal, cf)
-    z_score, z_zone  = _altman_z(rev, oi, ca, cl, asts,
-                                 _fin_val(bal, "liabilities"),
-                                 _fin_val(bal, "retained_earnings"), mcap)
+    # Retained earnings and total assets are absent from Polygon's balance sheet,
+    # so Z fell through to None for every ticker. Fill from the supplement.
+    z_score, z_zone  = _altman_z(rev, oi,
+                                 ca   if ca   is not None else _sup("current_assets"),
+                                 cl   if cl   is not None else _sup("current_liabilities"),
+                                 asts if asts is not None else _sup("total_assets"),
+                                 _fin_val(bal, "liabilities") or _sup("total_liabilities"),
+                                 _fin_val(bal, "retained_earnings") or _sup("retained_earnings"),
+                                 mcap)
     quality = {"f_score": f_score, "f_basis": f_basis,
                "z_score": z_score, "z_zone": z_zone}
 
@@ -214,7 +240,14 @@ def compute_fundamentals(financials, market_cap=None, price=None):
     def _fcf_at(i):
         o, c = (_fin_val(cf, "net_cash_flow_from_operating_activities", i),
                 _fin_val(cf, "capex", i))
-        return (o - c) if (o is not None and c is not None) else None
+        if o is not None and c is not None:
+            return o - c
+        # Both the Polygon frame and the supplement are newest-first, so `i`
+        # indexes the same period in each — no mirroring. (`order` reverses the
+        # iteration, not the frames.) Mirroring here reversed the FCF trend
+        # against the revenue and net-income series beside it.
+        vals = (supplement or {}).get("fcf") or []
+        return vals[i] if 0 <= i < len(vals) else None
 
     trend = {
         "periods":          [str(inc.iloc[i]["Period"])[:7] for i in order],

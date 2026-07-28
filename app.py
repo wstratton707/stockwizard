@@ -123,6 +123,17 @@ def _cached_market_pulse():
         return {"articles": [], "trending": []}
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _cached_fin_supplement(ticker):
+    """Capex / FCF / balance-sheet fields Polygon's endpoints don't return.
+    Cached a day — these only move on a filing."""
+    try:
+        from market_data import get_financials_supplement
+        return get_financials_supplement(ticker)
+    except Exception:
+        return None
+
+
 def _news_feed_html(articles, n=12):
     """Compact, linked news cards with a theme chip + sentiment dot."""
     import html as _html
@@ -1497,7 +1508,8 @@ elif _page == "analysis":
                                or cached_fetch_financials(ticker_input, POLYGON_API_KEY))
                         _fund_report = compute_fundamentals(
                             _fr, market_cap=company_details.get("Market Cap"),
-                            price=float(df["Close"].iloc[-1]))
+                            price=float(df["Close"].iloc[-1]),
+                            supplement=_cached_fin_supplement(ticker_input))
                     except Exception:
                         _fund_report = {"ok": False}
 
@@ -2031,6 +2043,7 @@ elif _page == "analysis":
                 fund = compute_fundamentals(
                     _fin_raw, market_cap=company_details.get("Market Cap"),
                     price=float(df["Close"].iloc[-1]),
+                    supplement=_cached_fin_supplement(ticker_input),
                 )
                 if fund.get("ok"):
                     def _fv(v, suffix="", na="N/A"):

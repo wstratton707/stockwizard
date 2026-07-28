@@ -328,3 +328,55 @@ def _polygon_bars(ticker: str, start: str, end: str, interval: str, key: str) ->
     except Exception:
         pass
     return None
+
+
+# ── Financial-statement supplement (yfinance) ─────────────────────────────────
+# Polygon's cash-flow endpoint returns only net_cash_flow_* aggregates — there is
+# no capital-expenditure line — so free cash flow (operating cash flow − capex)
+# cannot be derived from it, and every FCF metric came out N/A. Altman-Z fails
+# for the same reason: it needs retained earnings and total assets, which the
+# Polygon balance sheet doesn't carry either.
+#
+# yfinance has all of them, and is already a dependency, so it fills the gaps.
+# Everything here returns None on failure — a missing supplement must degrade to
+# the previous "N/A" behaviour, never break the report.
+
+def _yf_row(df, *names):
+    """First matching row from a yfinance statement frame, newest-first."""
+    if df is None or getattr(df, "empty", True):
+        return None
+    for want in names:
+        for idx in df.index:
+            if str(idx).strip().lower() == want.strip().lower():
+                vals = [None if v != v else float(v) for v in df.loc[idx].values]
+                return vals
+    return None
+
+
+def get_financials_supplement(ticker: str) -> dict | None:
+    """Capex / FCF / balance-sheet fields Polygon doesn't provide.
+
+    Returns newest-first lists so the caller can index [0] for the latest
+    period, matching how the Polygon frames are ordered.
+    """
+    try:
+        import yfinance as yf
+        t = yf.Ticker(to_yahoo_symbol(ticker))
+        cf, bs = t.cashflow, t.balance_sheet
+    except Exception:
+        return None
+
+    out = {
+        "fcf":               _yf_row(cf, "Free Cash Flow"),
+        "capex":             _yf_row(cf, "Capital Expenditure"),
+        "operating_cf":      _yf_row(cf, "Operating Cash Flow",
+                                     "Total Cash From Operating Activities"),
+        "retained_earnings": _yf_row(bs, "Retained Earnings"),
+        "total_assets":      _yf_row(bs, "Total Assets"),
+        "total_liabilities": _yf_row(bs, "Total Liabilities Net Minority Interest",
+                                     "Total Liab"),
+        "current_assets":    _yf_row(bs, "Current Assets", "Total Current Assets"),
+        "current_liabilities": _yf_row(bs, "Current Liabilities",
+                                       "Total Current Liabilities"),
+    }
+    return out if any(v for v in out.values()) else None
