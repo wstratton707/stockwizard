@@ -123,6 +123,16 @@ def _cached_market_pulse():
         return {"articles": [], "trending": []}
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_report_news(ticker, company):
+    """Report-shaped rows from the same multi-source pipeline the page uses."""
+    try:
+        from news_research import report_news_rows
+        return report_news_rows(ticker, POLYGON_API_KEY, company_name=company or None)
+    except Exception:
+        return []
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def _cached_fin_supplement(ticker):
     """Capex / FCF / balance-sheet fields Polygon's endpoints don't return.
@@ -1417,8 +1427,12 @@ elif _page == "analysis":
                 news_list = []
                 if do_news:
                     progress.progress(35, text="Fetching news...")
-                    news_list = cached_fetch_news(ticker_input, POLYGON_API_KEY,
-                                                  company_details.get("Name", ""))
+                    # The exported report gets the same multi-source feed as the
+                    # on-screen section — cached_fetch_news is Polygon-only, so a
+                    # report showed two publishers while the page beside it showed
+                    # fifteen, with none of the language or solicitation filtering.
+                    news_list = _cached_report_news(ticker_input,
+                                                    company_details.get("Name", ""))
 
                 peer_df       = None
                 peer_price_dfs = {}   # {ticker: df} with Cumulative_Index + Close

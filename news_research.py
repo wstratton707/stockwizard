@@ -625,3 +625,42 @@ def ai_news_brief(ticker, articles, company_name=None, api_key=None):
                              "source": a["source"]} for i, a in enumerate(used, 1)]}
     except Exception:
         return None
+
+
+# ── Report adapter ────────────────────────────────────────────────────────────
+def report_news_rows(ticker, api_key, company_name=None, limit=14):
+    """Rows shaped for the Excel/PowerPoint news sheet, from the same
+    multi-source pipeline the Analysis page uses.
+
+    The exports previously called data.fetch_news, which is Polygon-only — so a
+    report showed two publishers while the web page beside it showed fifteen,
+    and none of the language, solicitation or per-publisher-cap filtering
+    applied. This routes both through aggregate_news so they agree.
+
+    Adds Theme, which the old path had no concept of: it's the thing that makes
+    the sheet read as analysed rather than scraped.
+    """
+    try:
+        arts = aggregate_news(ticker, api_key, company_name=company_name, limit=limit)
+    except Exception:
+        return []
+
+    name_tokens = [w.lower() for w in re.split(r"\W+", company_name or "")
+                   if len(w) > 3][:2]
+    tk = (ticker or "").lower()
+    rows = []
+    for a in arts:
+        title_l = (a.get("title") or "").lower()
+        named   = tk in title_l or any(t in title_l for t in name_tokens)
+        rows.append({
+            "Date":      a.get("date", ""),
+            "Headline":  a.get("title", ""),
+            "Publisher": a.get("source", ""),
+            "Sentiment": a.get("sentiment", "Neutral"),
+            "Theme":     a.get("theme", "General"),
+            # An SEC filing is by definition about the issuer; otherwise High
+            # means the company is named in the headline, not just the body.
+            "Relevance": "High" if (named or a.get("provider") == "sec") else "Medium",
+            "URL":       a.get("url", ""),
+        })
+    return rows

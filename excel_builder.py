@@ -954,7 +954,9 @@ def _build_news_sheet(wb, news_list):
     if not news_list:
         return
     ws_n = wb.create_sheet("News_Headlines")
-    cols = ["Date", "Headline", "Publisher", "Sentiment", "Relevance", "URL"]
+    # Theme comes from news_research's classifier — it's what makes this read
+    # as analysed rather than scraped. Absent on the legacy path, hence .get().
+    cols = ["Date", "Headline", "Publisher", "Theme", "Sentiment", "Relevance", "URL"]
     ws_n.append(cols)
     style_header_row(ws_n)
     sent_fill = {"Positive": ("C6EFCE", "006100"), "Negative": ("FFC7CE", "9C0006"),

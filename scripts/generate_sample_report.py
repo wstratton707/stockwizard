@@ -101,7 +101,11 @@ def main():
         log(f"monte carlo skipped: {e}")
 
     try:
-        news = fetch_news(tk, key, company_name=details.get("Name"), log=log)
+        # Same pipeline the Analysis page uses — multi-source, language and
+        # solicitation filtered, capped per publisher. data.fetch_news is
+        # Polygon-only and would put two publishers in the report.
+        from news_research import report_news_rows
+        news = report_news_rows(tk, key, company_name=details.get("Name"))
     except Exception:
         news = None
     try:
