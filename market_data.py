@@ -45,6 +45,11 @@ def to_yahoo_symbol(ticker: str) -> str:
     t = (ticker or "").upper()
     if t.startswith("X:") and t.endswith("USD"):
         return f"{t[2:-3]}-USD"          # X:BTCUSD -> BTC-USD
+    # Share-class tickers: most sources write BRK.B / BF.B, Yahoo wants BRK-B.
+    # Without this the request 404s and the ticker is silently dropped — BF.B sat
+    # in SECTOR_UNIVERSE looking like a delisting when it trades perfectly well.
+    if "." in t:
+        return t.replace(".", "-")
     return t
 
 

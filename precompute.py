@@ -42,52 +42,68 @@ from constants import get_risk_free_rate
 TODAY     = datetime.today().strftime("%Y-%m-%d")
 CACHE_KEY = f"sharpe_rankings_{TODAY}"
 
+# Widen the universe beyond the hand-typed SECTOR_UNIVERSE. Practical only because
+# the fetch is batched now (~16 tickers/sec): 4,000 names is ~4 min, where the old
+# serial Polygon loop took 10-20 min for 341. Set False to pin to the static list.
+USE_DYNAMIC_UNIVERSE = True
+MAX_UNIVERSE         = 4000
+
 
 # ── Price fetch ────────────────────────────────────────────────────────────────
 
-def _fetch_year(ticker: str) -> tuple:
-    """Fetch ~1 year of daily closes. Returns (ticker, pd.Series | None)."""
-    import requests
+_FETCH_BATCH = 120     # tickers per batched download
+
+
+def _fetch_year_batch(tickers: list) -> dict:
+    """{ticker: close Series} for ~1 year of daily bars, fetched in batches.
+
+    Replaces a per-ticker Polygon loop that ran at ThreadPoolExecutor(max_workers=1)
+    — serial by necessity, because the free tier rate-limits hard — and took
+    10-20 minutes for 341 tickers. market_data.get_bars_batch issues one threaded
+    yfinance download per batch and benchmarks at ~16 tickers/sec, i.e. ~20s for
+    the same universe and ~3 min for 3,000. This is what makes a large,
+    dynamically-built universe practical at all.
+
+    Falls back to Polygon per-ticker only for names the batch missed.
+    """
+    from market_data import get_bars, get_bars_batch
 
     end     = datetime.today()
     start   = end - timedelta(days=400)   # buffer for weekends/holidays
     end_s   = end.strftime("%Y-%m-%d")
     start_s = start.strftime("%Y-%m-%d")
-    url     = f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start_s}/{end_s}"
-    params  = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": POLYGON_API_KEY}
 
-    # 4 total attempts: initial + 3 retries at 30s / 60s / 90s
-    retry_waits = [30, 60, 90]
-    for attempt in range(len(retry_waits) + 1):
+    out: dict = {}
+    for i in range(0, len(tickers), _FETCH_BATCH):
+        chunk = tickers[i:i + _FETCH_BATCH]
         try:
-            r = requests.get(url, params=params, timeout=20)
+            got = get_bars_batch(chunk, start_s, end_s, "day")
         except Exception as e:
-            print(f"   ⚠ {ticker}: {e}")
-            return ticker, None
+            print(f"   ⚠ batch {i//_FETCH_BATCH + 1} failed ({e}) — per-ticker fallback")
+            got = {}
+        for t, df in got.items():
+            if df is not None and len(df) >= 60:
+                out[t] = df.set_index("Date")      # full frame — volume feeds the
+                                                   # liquidity screen downstream
 
-        if r.status_code == 200:
-            results = r.json().get("results", [])
-            if len(results) >= 60:
-                df = pd.DataFrame(results)
-                df["Date"]  = pd.to_datetime(df["t"], unit="ms")
-                prices = df.set_index("Date")["c"]
-                return ticker, prices
-            return ticker, None  # valid response but not enough data
+        # Anything the batch didn't return: one retry each via the router
+        # (yfinance → Polygon). A delisted ticker legitimately returns nothing.
+        # Only worth doing for a small miss list — on a 4,000-name universe the
+        # misses are mostly genuinely dead symbols, not transient failures.
+        missed = [t for t in chunk if t not in out]
+        if len(missed) <= 25:
+            for t in missed:
+                try:
+                    df = get_bars(t, start_s, end_s, interval="day",
+                                  polygon_key=POLYGON_API_KEY)
+                    if df is not None and len(df) >= 60:
+                        out[t] = df.set_index("Date")
+                except Exception:
+                    pass
+        print(f"   batch {i//_FETCH_BATCH + 1}: {len(chunk)} requested, "
+              f"{sum(1 for t in chunk if t in out)} with data")
 
-        if r.status_code == 429:
-            if attempt < len(retry_waits):
-                wait = retry_waits[attempt]
-                print(f"   ⏳ {ticker} rate limited — waiting {wait}s "
-                      f"(attempt {attempt + 1}/{len(retry_waits) + 1})...")
-                time.sleep(wait)
-            else:
-                print(f"   ✗ {ticker} — rate limited after {len(retry_waits) + 1} attempts")
-                return ticker, None
-        else:
-            print(f"   ⚠ {ticker} HTTP {r.status_code}")
-            return ticker, None
-
-    return ticker, None
+    return out
 
 
 # ── Factor computations ────────────────────────────────────────────────────────
@@ -208,11 +224,21 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
     full universe.
     """
 
-    # Build ticker → sector map from entire universe
+    # Build ticker → sector map. The hand-typed SECTOR_UNIVERSE supplies sector
+    # labels (Polygon's SIC descriptions are too granular to bucket cleanly); the
+    # dynamic list widens the cross-section beyond it. Names not in the static map
+    # get "Unknown" and are still scored — percentile ranks over thousands of names
+    # are far more informative than over 341.
     universe: dict[str, str] = {}
     for sector, tickers in SECTOR_UNIVERSE.items():
         for t in tickers:
             universe[t] = sector
+
+    if USE_DYNAMIC_UNIVERSE and not sector_filter:
+        from portfolio_data import build_dynamic_universe
+        dyn = build_dynamic_universe(POLYGON_API_KEY, max_tickers=MAX_UNIVERSE)
+        for t in dyn:
+            universe.setdefault(t, "Unknown")
     for category, etf in BOND_ETFS.items():
         universe[etf] = f"Bond-{category}"
     for t, s in {"SPY": "Market", "QQQ": "Market", "GLD": "Commodities",
@@ -248,42 +274,62 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
     print(f"Computing multi-factor rankings for {len(run_tickers)} tickers...")
     print(f"Factors: Momentum (30%) · Quality (30%) · Low-Vol (20%) · Sharpe (20%)\n")
 
+    CHECKPOINT_EVERY = 200  # write partial results to Supabase every N tickers
+
+    # Prices first, in batches — this is now seconds rather than minutes.
+    print("Fetching prices...")
+    frames = _fetch_year_batch(run_tickers)
+    dead = [t for t in run_tickers if t not in frames]
+    if dead:
+        # Delisted / renamed / bad symbols. Worth surfacing: on the old hardcoded
+        # universe this silently shrank the effective candidate pool.
+        print(f"\n   {len(dead)} ticker(s) returned no usable data "
+              f"(delisted, renamed, or too short): {', '.join(dead[:20])}"
+              f"{' …' if len(dead) > 20 else ''}")
+
+    # Tradability screen — free, since volume arrived with the prices.
+    from portfolio_data import apply_liquidity_screen
+    frames    = apply_liquidity_screen(frames, log=print)
+    price_map = {t: df["Close"] for t, df in frames.items()}
+
+    print(f"\nComputing factors for {len(price_map)} tickers...")
     done = 0
-    CHECKPOINT_EVERY = 50  # write partial results to Supabase every N tickers
-
-    with ThreadPoolExecutor(max_workers=1) as ex:
-        futures = {ex.submit(_fetch_year, t): t for t in run_tickers}
+    # Quality needs one SEC call per ticker, so it stays threaded — but at a real
+    # pool size now that price fetching isn't the bottleneck.
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        futures = {ex.submit(_fetch_quality, t): t for t in price_map}
+        quality_map = {}
         for future in as_completed(futures):
-            ticker = futures[future]
-            done  += 1
+            t = futures[future]
             try:
-                _, prices = future.result()
-                if prices is not None:
-                    factors = _compute_factors(prices)
-                    if factors:
-                        # Additive fundamental-quality factor; None (neutral) for
-                        # ETFs/non-filers or any fetch miss — never blocks the batch.
-                        factors["quality"] = _fetch_quality(ticker)
-                        raw[ticker] = {"ticker": ticker, "sector": universe[ticker], **factors}
-                        _q = factors["quality"]
-                        print(f"  [{done:>3}/{len(run_tickers)}] ✓ {ticker:<6}  "
-                              f"Sharpe={factors['sharpe']:+.2f}  "
-                              f"12M={factors['mom_12m']:+.1f}%  "
-                              f"Q={('%.2f' % _q) if _q is not None else '—'}")
-                    else:
-                        print(f"  [{done:>3}/{len(run_tickers)}] ⚠ {ticker} — insufficient data")
-                else:
-                    print(f"  [{done:>3}/{len(run_tickers)}] ✗ {ticker} — fetch failed")
-            except Exception as e:
-                print(f"  [{done:>3}/{len(run_tickers)}] ✗ {ticker} — {e}")
+                quality_map[t] = future.result()
+            except Exception:
+                quality_map[t] = None
 
-            # Checkpoint: save partial results so a killed run isn't wasted
-            if done % CHECKPOINT_EVERY == 0 and raw:
-                partial = _add_combined_scores(dict(raw))
-                partial["_meta"] = {"computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
-                                    "partial": True, "tickers_done": done, "tickers_total": len(run_tickers)}
-                cache_set(CACHE_KEY, partial, ttl_hours=26)
-                print(f"  💾 Checkpoint saved — {len(partial) - 1} tickers ranked so far")
+    for ticker, prices in price_map.items():
+        done += 1
+        factors = _compute_factors(prices)
+        if not factors:
+            print(f"  [{done:>4}/{len(price_map)}] ⚠ {ticker} — insufficient data")
+            continue
+        # Additive fundamental-quality factor; None (neutral) for ETFs/non-filers
+        # or any fetch miss — never blocks the run.
+        factors["quality"] = quality_map.get(ticker)
+        raw[ticker] = {"ticker": ticker, "sector": universe.get(ticker, "Unknown"), **factors}
+        if done % 25 == 0 or done <= 5:
+            _q = factors["quality"]
+            print(f"  [{done:>4}/{len(price_map)}] ✓ {ticker:<6}  "
+                  f"Sharpe={factors['sharpe']:+.2f}  "
+                  f"12M={factors['mom_12m']:+.1f}%  "
+                  f"Q={('%.2f' % _q) if _q is not None else '—'}")
+
+        # Checkpoint: save partial results so a killed run isn't wasted
+        if done % CHECKPOINT_EVERY == 0 and raw:
+            partial = _add_combined_scores(dict(raw))
+            partial["_meta"] = {"computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+                                "partial": True, "tickers_done": done, "tickers_total": len(price_map)}
+            cache_set(CACHE_KEY, partial, ttl_hours=26)
+            print(f"  💾 Checkpoint saved — {len(partial) - 1} tickers ranked so far")
 
     # Add normalised combined score
     return _add_combined_scores(raw)

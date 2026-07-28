@@ -30,7 +30,7 @@ from portfolio_analysis import (
     backtest_portfolio, compute_backtest_metrics,
     compute_monthly_heatmap, run_portfolio_monte_carlo,
     compute_diversification_score, get_rebalancing_recommendations,
-    compute_betas, capm_expected_returns, portfolio_beta,
+    compute_betas, capm_expected_returns, portfolio_beta, shrunk_covariance,
 )
 from portfolio_excel import build_portfolio_excel
 from pptx_builder import build_portfolio_pptx, PPTX_AVAILABLE
@@ -611,7 +611,7 @@ def _render_step_2(api_key):
     if tickers_in:
         w_arr   = np.array([selected_weights[t] for t in tickers_in])
         w_arr  /= w_arr.sum()
-        cov     = returns_df[tickers_in].cov().values * 252
+        cov     = shrunk_covariance(returns_df[tickers_in])
         ann_vol = np.sqrt(w_arr @ cov @ w_arr) * 100
         # Expected return is CAPM (Rf + portfolio-beta × ERP) — driven by how much
         # market risk the portfolio carries, NOT the raw 2-yr mean (which over-
@@ -678,7 +678,7 @@ concentration penalty for any single position above 25%.
             continue
         _cwa = np.array([_cw[t] for t in _ct2]); _cwa /= _cwa.sum()
         _car  = returns_df[_ct2].mean().values @ _cwa * 252 * 100   # historical (fallback)
-        _ccov = returns_df[_ct2].cov().values * 252
+        _ccov = shrunk_covariance(returns_df[_ct2])
         _cvol = np.sqrt(_cwa @ _ccov @ _cwa) * 100
         # Headline return + Sharpe use CAPM expected returns — the SAME basis the
         # optimizer maximises. On a historical basis the "Max Sharpe" card could show

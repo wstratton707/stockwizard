@@ -50,6 +50,33 @@ def compute_correlation_matrix(returns_df):
     return returns_df.corr()
 
 
+# ── Covariance estimation ─────────────────────────────────────────────────────
+
+def shrunk_covariance(returns_df, annualise=True):
+    """Annualised covariance via Ledoit-Wolf shrinkage, falling back to the
+    sample estimate if sklearn is unavailable or the fit fails.
+
+    The sample covariance of ~18 assets over ~1,250 daily observations is noisy,
+    and mean-variance optimisation is an error-maximiser: it systematically loads
+    onto whichever pairwise covariances happen to be *understated* by estimation
+    noise, which is exactly the wrong bias. Ledoit-Wolf pulls the estimate toward
+    a structured target, which shrinks that noise and — the point of the exercise
+    — makes the resulting weights far less sensitive to the sample window.
+
+    Returns a plain ndarray so callers can drop it in wherever `.cov().values`
+    was used.
+    """
+    X = returns_df.dropna()
+    scale = 252 if annualise else 1
+    try:
+        from sklearn.covariance import LedoitWolf
+        # assume_centered=False → LW estimates and removes the mean itself.
+        lw = LedoitWolf(assume_centered=False).fit(X.values)
+        return lw.covariance_ * scale
+    except Exception:
+        return X.cov().values * scale
+
+
 # ── CAPM expected returns ───────────────────────────────────────────────────────
 # Expected return comes from each asset's market risk (beta), NOT its own past
 # return — so a stock that merely ran up recently doesn't get a sky-high forecast.
@@ -97,7 +124,7 @@ def portfolio_beta(weights, betas):
 def portfolio_metrics(weights, returns_df):
     weights      = np.array(weights)
     port_ret     = returns_df.mean().values @ weights * 252
-    port_vol     = np.sqrt(weights @ (returns_df.cov().values * 252) @ weights)
+    port_vol     = np.sqrt(weights @ shrunk_covariance(returns_df) @ weights)
     sharpe       = (port_ret - get_risk_free_rate()) / port_vol if port_vol > 0 else 0
     return port_ret, port_vol, sharpe
 
@@ -143,7 +170,8 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
         _mu = np.array([expected_returns.get(c, get_risk_free_rate()) for c in cols])
     else:
         _mu = returns_df.mean().values * 252
-    _cov = returns_df.cov().values * 252
+    # Shrunk, not sample — this matrix drives every weight the optimiser picks.
+    _cov = shrunk_covariance(returns_df)
     _rfr = get_risk_free_rate()
 
     def _obj_sharpe(w):
@@ -161,15 +189,38 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
         sector_indices: dict = defaultdict(list)
         for i, ticker in enumerate(cols):
             sector = sector_map.get(ticker, "Unknown")
-            # Don't cap Market/benchmark tickers (SPY, QQQ) or single-ticker sectors
-            if sector not in ("Market", "Commodities", "User"):
+            # Don't cap benchmarks, user picks, or "Unknown". Unknown is not a
+            # sector — it's the absence of a label, and with a dynamically-built
+            # universe most names carry it. Treating it as one bucket makes the
+            # cap infeasible (its members must sum to ~100% but are capped at 40%),
+            # SLSQP then fails, and the code silently falls back to equal weights.
+            if sector not in ("Market", "Commodities", "User", "Unknown"):
                 sector_indices[sector].append(i)
         for sector, indices in sector_indices.items():
-            if len(indices) > 1:
-                constraints.append({
-                    "type": "ineq",
-                    "fun": lambda w, idx=indices: max_sector_weight - sum(w[i] for i in idx),
-                })
+            k = len(indices)
+            if k <= 1:
+                continue
+            # Feasibility, both directions. Capping sector S at max_sector_weight
+            # forces everything outside S to carry (1 - max_sector_weight), which
+            # it can only do if there are enough names outside at max_weight each.
+            # And S itself must be able to fit under the cap given its members'
+            # minimum weights. Adding an unsatisfiable constraint makes SLSQP fail,
+            # and the failure path silently returns equal weights — a broken
+            # portfolio that looks like a deliberate one.
+            outside_capacity = (n - k) * max_weight
+            inside_floor     = k * min_w
+            if outside_capacity < (1.0 - max_sector_weight) or inside_floor > max_sector_weight:
+                continue
+            constraints.append({
+                "type": "ineq",
+                "fun": lambda w, idx=indices: max_sector_weight - sum(w[i] for i in idx),
+            })
+
+    # Budget + sector caps, without any return floor. Minimum-volatility is
+    # defined as "lowest risk available", so forcing it to also clear a return
+    # target would change what it means — but it should still respect
+    # concentration limits.
+    base_constraints = list(constraints)
 
     # Add target return constraint if specified
     if target_return is not None:
@@ -184,10 +235,14 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
     res_sharpe = minimize(_obj_sharpe, init,
                           method="SLSQP", bounds=bounds, constraints=constraints)
 
-    # 2. Minimum volatility
+    # 2. Minimum volatility — same constraint set as the others. Previously this
+    #    was solved with only the budget constraint, so the sector cap didn't
+    #    apply: minimising variance reliably piles into whichever sector was
+    #    calmest over the window (Utilities/Staples), and the "lowest risk"
+    #    portfolio could come back almost entirely one sector. Concentration is
+    #    a risk the volatility number doesn't see.
     res_minvol = minimize(_obj_vol, init,
-                          method="SLSQP", bounds=bounds,
-                          constraints=[{"type":"eq","fun":lambda w: np.sum(w)-1}])
+                          method="SLSQP", bounds=bounds, constraints=base_constraints)
 
     # 3. Maximum expected return (= maximum beta under CAPM) — the aggressive anchor.
     res_maxret = minimize(lambda w: -float(_mu @ w), init,
@@ -258,7 +313,8 @@ def generate_efficient_frontier(returns_df, n_portfolios=8000, expected_returns=
         mu = np.array([expected_returns.get(c, get_risk_free_rate()) for c in cols])
     else:
         mu = returns_df.mean().values * 252
-    cov  = returns_df.cov().values  * 252
+    cov  = shrunk_covariance(returns_df)   # same estimator as the optimiser,
+                                           # so the cloud and the marker agree
 
     rng  = np.random.default_rng(42)   # local RNG — no global-state pollution
     W    = rng.dirichlet(np.ones(n), size=n_portfolios)         # (n_portfolios, n)

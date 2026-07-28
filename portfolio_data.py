@@ -623,3 +623,96 @@ def get_sharpe_rankings(api_key: str = "") -> dict:
         if rankings:
             return rankings
     return {}
+
+
+# ── Dynamic, rules-based universe ─────────────────────────────────────────────
+# SECTOR_UNIVERSE above is a hand-typed list, and it rots: as of 2026-07-28, 10 of
+# its 328 names no longer trade (ANSS, HES, K, SEE, IPG, PARA, FI, CTRA, MPW, and
+# BF.B via a symbol-format bug). Dead tickers are silently dropped downstream, so
+# the effective universe shrinks with nobody noticing.
+#
+# This builds the universe from Polygon's reference endpoint instead — active US
+# common stock on a major exchange — so delistings disappear and new listings
+# appear on their own. It does NOT fix survivorship bias in *backtests*: that
+# needs point-in-time constituent history, which is a paid product. It fixes rot.
+
+_MAJOR_EXCHANGES = {"XNYS", "XNAS", "ARCX", "BATS"}   # NYSE, Nasdaq, NYSE Arca, Cboe BZX
+
+
+def build_dynamic_universe(api_key, max_tickers=4000, log=print) -> list:
+    """Active US common stock on a major exchange, from Polygon reference data.
+
+    Cached a week — listings change slowly, and this is a paginated crawl.
+    Returns [] on failure so callers can fall back to SECTOR_UNIVERSE.
+    """
+    CK = "dynamic_universe_v1"
+    try:
+        hit = cache_get(CK)
+        if hit:
+            log(f"   Universe from cache: {len(hit)} tickers")
+            return hit
+    except Exception:
+        pass
+
+    out, url = [], f"{POLYGON_BASE}/v3/reference/tickers"
+    params = {"market": "stocks", "type": "CS", "active": "true",
+              "limit": 1000, "apiKey": api_key}
+    pages = 0
+    try:
+        while url and len(out) < max_tickers and pages < 12:
+            r = requests.get(url, params=params if pages == 0 else {"apiKey": api_key},
+                             timeout=30)
+            if r.status_code != 200:
+                log(f"   ⚠ universe fetch HTTP {r.status_code}")
+                break
+            data = r.json()
+            for it in data.get("results", []):
+                if it.get("primary_exchange") in _MAJOR_EXCHANGES:
+                    t = it.get("ticker", "")
+                    # Skip warrants/units/preferreds that slip through as CS, and
+                    # anything with a class suffix our symbol mapping can't route.
+                    if t and t.isalpha() and len(t) <= 5:
+                        out.append(t)
+            url   = data.get("next_url")
+            pages += 1
+        out = sorted(set(out))[:max_tickers]
+        log(f"   Universe built: {len(out)} active US common stocks ({pages} pages)")
+        if out:
+            try:
+                cache_set(CK, out, ttl_hours=168)   # one week
+            except Exception:
+                pass
+        return out
+    except Exception as e:
+        log(f"   ⚠ universe build failed ({e}) — falling back to static list")
+        return []
+
+
+def apply_liquidity_screen(price_map, min_dollar_volume=5_000_000, min_price=5.0,
+                           log=print) -> dict:
+    """Drop names that aren't realistically tradable.
+
+    Uses median daily dollar volume (close × volume) over the fetched window, so
+    it costs no extra API calls — the volume already arrived with the prices.
+    This is a better tradability test than market cap, and it only becomes
+    relevant once the universe is dynamic: the old hand-picked list was all
+    mega-caps, which is why a liquidity screen would have been pointless there.
+    """
+    kept, dropped = {}, []
+    for t, df in price_map.items():
+        try:
+            if "Volume" not in df.columns or "Close" not in df.columns:
+                kept[t] = df           # can't judge — keep rather than lose it
+                continue
+            dv = float((df["Close"] * df["Volume"]).median())
+            px = float(df["Close"].iloc[-1])
+            if dv >= min_dollar_volume and px >= min_price:
+                kept[t] = df
+            else:
+                dropped.append(t)
+        except Exception:
+            kept[t] = df
+    if dropped:
+        log(f"   Liquidity screen: dropped {len(dropped)} of {len(price_map)} "
+            f"(< ${min_dollar_volume/1e6:.0f}M median daily volume or < ${min_price:.0f})")
+    return kept
