@@ -963,7 +963,7 @@ button[kind^="primary"]:active,
 .topnav-mark-img { height: 30px; width: auto; display: block; flex-shrink: 0; }
 .topnav-word {
   font-family: var(--font-sans); font-weight: 700; font-size: 1.16rem;
-  color: #eaf1ff; letter-spacing: 0.2px; line-height: 1;
+  color: #ffffff; letter-spacing: 0.2px; line-height: 1;
 }
 .topnav-word b { color: var(--cyan-bright); font-weight: 700; }
 
@@ -972,16 +972,25 @@ button[kind^="primary"]:active,
   background: transparent !important;
   border: 1px solid transparent !important;
   box-shadow: none !important;
-  /* #9fb0c6 measured 3.92:1 against the lighter end of the nav gradient —
-     below the 4.5:1 body-text threshold, so inactive links read as disabled
-     rather than merely quiet. #b3c3d6 clears it at 4.82:1. */
-  color: #b3c3d6 !important;
+  /* White. The active tab is still distinguishable by its filled pill, so the
+     links don't need to be dimmed to carry that state — and dimming them was
+     what made the bar look grey. (Contrast is 8.7:1 at the lightest point of
+     the gradient, well clear of the 4.5:1 threshold.) */
+  color: #ffffff !important;
   font-weight: 600 !important; font-size: 0.9rem !important;
   border-radius: 8px !important;
   transition: color 0.15s ease, background 0.15s ease !important;
 }
 .st-key-topnav button:not([data-testid*="primary"]):hover {
   color: #ffffff !important; background: rgba(255,255,255,0.06) !important;
+}
+/* Streamlit puts the label in an inner <p>, and the global
+   `[data-testid="stMarkdownContainer"] p` rule paints that slate with
+   !important — so colouring the <button> alone does nothing visible. The
+   active tab already had this; every tab needs it. */
+.st-key-topnav button p,
+.st-key-topnav button [data-testid="stMarkdownContainer"] p {
+  color: #ffffff !important;
 }
 .st-key-topnav [data-testid="stBaseButton-primary"],
 .st-key-topnav [data-testid="stBaseButton-primary"] * { color: #ffffff !important; }
