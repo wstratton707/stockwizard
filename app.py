@@ -627,6 +627,31 @@ if _page == "home":
         if st.button("Generate one →", type="primary", use_container_width=True, key="cta_report"):
             _goto("analysis")
 
+    # ── Pre-built sample ──────────────────────────────────────────────────────
+    # A real workbook, generated ahead of time by scripts/generate_sample_report.py
+    # and served as a static file. Someone can hold the actual output without
+    # waiting on a live run — no API call, no rate limit, no cold start. Served
+    # over HTTP rather than st.download_button so it costs no rerun and no memory.
+    # The date is read from the sidecar the generator writes, so the label can't
+    # drift away from the file.
+    try:
+        import json as _json
+        from icons import icon as _icon
+        _sm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "static", "sample_report.json")
+        with open(_sm_path, encoding="utf-8") as _f:
+            _sm = _json.load(_f)
+        _sm_size = f"{_sm.get('bytes', 0) / 1_048_576:.1f} MB"
+        _sm_date = datetime.strptime(_sm["generated"], "%Y-%m-%d").strftime("%d %b %Y")
+        st.markdown(
+            f'<a class="sample-dl" href="app/static/{_sm["file"]}" download>'
+            f'{_icon("download", 17)}'
+            f'<span><b>See a real one — {_sm["ticker"]} research report'
+            f'</b><span class="sample-dl-sub">Excel · {_sm["period"]} · {_sm_size} · '
+            f'generated {_sm_date}</span></span></a>', unsafe_allow_html=True)
+    except Exception:
+        pass   # no sample built yet — the section simply doesn't appear
+
     st.markdown('<div class="home-footer">QuantWizard · For informational purposes only · '
                 'Not investment advice</div>', unsafe_allow_html=True)
 

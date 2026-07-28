@@ -605,6 +605,31 @@ footer { visibility: hidden; }
   border-radius: 1px;
 }
 
+/* ── Sample-report download ──
+   A real workbook, not a screenshot. Reads as a document link rather than a
+   marketing button: rule above, accent icon, the file's own facts as the
+   subtitle so nobody has to guess what they're about to download. */
+.sample-dl {
+  display: flex; align-items: center; gap: 0.8rem;
+  border-top: 1px solid var(--border);
+  padding: 1.05rem 0.15rem;
+  margin-top: 1.4rem;
+  text-decoration: none !important;
+  color: var(--text) !important;
+  transition: background 0.14s ease;
+}
+.sample-dl:hover { background: var(--surface2); }
+.sample-dl svg { color: var(--accent); flex: 0 0 auto; }
+.sample-dl b {
+  display: block; font-size: 0.95rem; font-weight: 600;
+  color: var(--text); letter-spacing: -0.1px;
+}
+.sample-dl-sub {
+  display: block; font-family: var(--font-data);
+  font-size: 0.74rem; color: var(--muted); margin-top: 0.2rem;
+  letter-spacing: 0.2px;
+}
+
 /* ── Editorial index rows (replaces the 3-up feature card grid) ──
    Rules and whitespace do the separating instead of another rounded box. */
 .index-rule { border-top: 1px solid var(--border); height: 0; }
