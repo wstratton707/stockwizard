@@ -208,6 +208,39 @@ def _relative_performance_rows(df):
     return rows
 
 
+def _relative_performance_periods(df, bench="SPY"):
+    """[(label, stock_ret, bench_ret, diff)] over 1M / 3M / 6M / 1Y / full.
+
+    The whole-period figure above answers "how did this do over five years",
+    which hides everything that happened inside it — a stock can beat the index
+    over five years while lagging it for the last twelve months. Trading-day
+    windows (21/63/126/252) rather than calendar dates, since the frame is
+    already indexed by session.
+    """
+    col = f"{bench}_Cumulative"
+    if "Cumulative_Index" not in df.columns or col not in df.columns:
+        return []
+    t = df["Cumulative_Index"].dropna()
+    b = df[col].dropna()
+    n = min(len(t), len(b))
+    if n < 2:
+        return []
+    t, b = t.iloc[-n:], b.iloc[-n:]
+
+    out = []
+    for label, back in [("1 month", 21), ("3 months", 63), ("6 months", 126),
+                        ("1 year", 252), ("Full period", n - 1)]:
+        if back < 1 or back >= n:
+            continue                      # not enough history for this window
+        t0, t1 = float(t.iloc[-1 - back]), float(t.iloc[-1])
+        b0, b1 = float(b.iloc[-1 - back]), float(b.iloc[-1])
+        if t0 <= 0 or b0 <= 0:
+            continue
+        tr, br = t1 / t0 - 1, b1 / b0 - 1
+        out.append((label, tr, br, tr - br))
+    return out
+
+
 def _technical_posture(df):
     """Descriptive read of the current technical indicators — NOT a recommendation.
 
@@ -590,6 +623,34 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
                                     height=26, italic=False)
         row_cursor += 1
 
+        # Broken out by window: the single whole-period number hides a stock that
+        # beat the index over five years while lagging it over the last twelve
+        # months, which is usually the more decision-relevant fact.
+        periods = _relative_performance_periods(df)
+        if periods:
+            hdr = ["Window", ticker, "S&P 500", "Relative"]
+            for ci, htxt in enumerate(hdr, 1):
+                c = ws.cell(row=row_cursor, column=ci, value=htxt)
+                c.font   = Font(name="Calibri", size=9, bold=True, color=WHITE)
+                c.fill   = PatternFill("solid", fgColor=DARK_BLUE)
+                c.border = _border()
+                c.alignment = Alignment(horizontal="center" if ci > 1 else "left")
+            row_cursor += 1
+            for label, tr, br, diff in periods:
+                vals = [label, tr, br, diff]
+                for ci, v in enumerate(vals, 1):
+                    c = ws.cell(row=row_cursor, column=ci, value=v)
+                    c.font   = Font(name="Calibri", size=10,
+                                    bold=(ci == 4),
+                                    color=(GREEN_OK if ci == 4 and diff >= 0
+                                           else RED_BAD if ci == 4 else "000000"))
+                    c.border = _border()
+                    if ci > 1:
+                        c.number_format = "+0.0%;-0.0%"
+                        c.alignment = Alignment(horizontal="right")
+                row_cursor += 1
+            row_cursor += 1
+
     # ── Technical Posture — descriptive read of the indicators, NOT advice ──────
     if posture:
         sec_hdr(row_cursor, "Technical Posture")
@@ -798,18 +859,25 @@ def _build_annual_summary(wb, df):
 
 # ── Price & Indicators sheet ──────────────────────────────────────────────────
 def _build_price_sheet(wb, df, bar_size="day"):
-    price_cols = ["Date",
-                  "Daily_Return","Cumulative_Index","MA20","MA50","MA200",
-                  "Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
-                  "Vol_MA20","Volume_vs_Avg",
-                  "Volatility_20d","Drawdown_20d","Drawdown_60d",
-                  "52W_High","52W_Low","Pct_From_52W_High","Pct_From_52W_Low"]
+    # This sheet was 30 columns and did not include the price. It carried MA20,
+    # Close_vs_MA20/50/200, four Bollinger columns and three MACD columns, but no
+    # Open/High/Low/Close/Volume — so you could read "2% above the 20-day MA"
+    # without being able to see what the stock actually closed at. BB_Middle was
+    # also a duplicate: the middle Bollinger band IS the 20-day moving average.
+    #
+    # Kept: the raw data, plus one column per question rather than one per
+    # formula. MACD_Hist is the signal (it already encodes MACD vs its own
+    # signal line); the 52-week percentages are what gets read, not the raw
+    # high/low; MA20 is recoverable from the price and rarely traded off.
+    price_cols = [c for c in
+                  ["Date", "Open", "High", "Low", "Close", "Volume",
+                   "Daily_Return", "Cumulative_Index",
+                   "MA50", "MA200",
+                   "Volatility_20d", "Drawdown_60d", "Pct_From_52W_High"]
+                  if c in df.columns]
     if "RSI14" in df.columns:
-        price_cols += ["RSI14","MACD","MACD_Signal","MACD_Hist"]
-    if "BB_Upper" in df.columns:
-        price_cols += ["BB_Upper","BB_Middle","BB_Lower","BB_Width","BB_Pct"]
-    if "Rolling_Beta_60d" in df.columns:
-        price_cols += ["Rolling_Beta_60d"]
+        price_cols += [c for c in ["RSI14", "MACD_Hist"] if c in df.columns]
+    # Benchmark comparison stays — it's the one thing here a price chart can't show.
     price_cols += [c for c in df.columns if c.endswith("_Cumulative")]
 
     full_df   = df[[c for c in price_cols if c in df.columns]].copy()
@@ -848,7 +916,9 @@ def _build_price_sheet(wb, df, bar_size="day"):
 
     col_map    = {c[0].column_letter: c[0].value
                   for c in ws_p.iter_cols(1, ws_p.max_column, hdr_row, hdr_row)}
-    price_hdrs = {"MA20","MA50","MA200","BB_Upper","BB_Middle","BB_Lower","52W_High","52W_Low"}
+    price_hdrs = {"Open","High","Low","Close",
+                  "MA20","MA50","MA200","BB_Upper","BB_Middle","BB_Lower",
+                  "52W_High","52W_Low"}
     pct_hdrs   = {"Daily_Return","Close_vs_MA20","Close_vs_MA50","Close_vs_MA200",
                   "Volatility_20d","Drawdown_20d","Drawdown_60d","BB_Pct","Volume_vs_Avg",
                   "Pct_From_52W_High","Pct_From_52W_Low"}
