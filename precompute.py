@@ -32,6 +32,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# This module's progress output is full of ✓ ⚠ ✗ ⏳ 💾 → characters. A Windows
+# console defaults to cp1252, which cannot encode any of them, so a *print* —
+# not the computation — raised UnicodeEncodeError and killed the whole run
+# partway through the factor loop. Force UTF-8 and degrade rather than raise.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 POLYGON_BASE    = "https://api.polygon.io"
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
 
@@ -161,7 +171,33 @@ def _fetch_quality(ticker: str):
     fetch): blends net margin, ROE, revenue growth, and the Piotroski F-Score.
     Returns None on any miss so the caller can treat quality as neutral — this
     factor is purely additive and never breaks or penalises a name for missing data.
+
+    Cached 30 days. Now that prices are batched, this SEC call is the whole
+    runtime: 579 tickers took 172s and ~150s of that was here, so a 4,000-name
+    universe would be ~27 minutes of mostly re-fetching statements that only
+    change on a quarterly filing. With the cache, only names new to the universe
+    pay the cost.
     """
+    _ck = f"quality_{ticker.upper()}"
+    try:
+        hit = cache_get(_ck)
+        if hit is not None:
+            # Stored as {"q": value_or_None} so a cached "no data" result is
+            # distinguishable from a cache miss and isn't re-fetched daily.
+            return hit.get("q") if isinstance(hit, dict) else hit
+    except Exception:
+        pass
+
+    _val = _compute_quality(ticker)
+    try:
+        cache_set(_ck, {"q": _val}, ttl_hours=720)
+    except Exception:
+        pass
+    return _val
+
+
+def _compute_quality(ticker: str):
+    """Uncached quality computation — see _fetch_quality."""
     try:
         from data import fetch_sec_financials
         from analysis import compute_fundamentals
