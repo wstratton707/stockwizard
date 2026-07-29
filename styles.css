@@ -1,9 +1,16 @@
-/* Newsreader (display) + Public Sans (UI) + JetBrains Mono (numerics).
+/* Newsreader (display) + Public Sans (UI) + JetBrains Mono (numerics)
+   + IBM Plex Sans (charts).
    Deliberately NOT DM Sans or Inter: those are the default fintech-SaaS pairing,
    and a direct competitor (tradeframe.io) ships the identical DM Sans +
    JetBrains Mono combination. An editorial serif for display is rare in retail
-   finance and matches what this product actually is — research, not a dashboard. */
-@import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Public+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+   finance and matches what this product actually is — research, not a dashboard.
+
+   IBM Plex Sans carries chart text only. Charts need a face with true tabular
+   figures so digits sit in fixed-width columns — a data grid whose columns
+   shift as values change reads as broken. Every chart previously asked for
+   "DM Sans", which is never loaded here, so they were all silently falling back
+   to the browser default and did not match the surrounding UI. */
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Public+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap');
 
 /* Professional line-art icons (replaces emoji in custom HTML sections) */
@@ -93,7 +100,9 @@
   --font-display: 'Newsreader', Georgia, 'Times New Roman', serif;
   --font-sans:  'Public Sans', system-ui, -apple-system, sans-serif;
   --font-data:  'JetBrains Mono', ui-monospace, monospace;
-  --font-chart: 'Public Sans', system-ui, sans-serif;
+  /* Charts and anything column-aligned to them. Must match chart_tokens.font.data
+     exactly, or the HTML fact panel and the Plotly grids will disagree. */
+  --font-chart: 'IBM Plex Sans', system-ui, sans-serif;
 
   /* ── Layout ── */
   --page-gutter: 2.5rem;
@@ -105,6 +114,7 @@
      and is the single clearest tell of a generated UI. */
   --r-chrome: 0;      /* nav, full-bleed bars — anchored, never floating */
   --r-panel: 10px;    /* large surfaces: banners, page panels */
+  --r-chart: 2px;     /* data views — near-square, never above 4 */
   --r-sm:  5px;
   --r-md:  8px;
   --r-lg:  10px;
@@ -893,24 +903,98 @@ button[kind^="primary"]:active,
   fill:  #ffffff !important;
 }
 
-/* ── Valuation Lens facts sidebar ── */
+/* ── Valuation Lens: header, controls and fact panel ──
+   Dense by design. The previous panel used an airy label/value stack with a
+   divider under every row, which spent vertical space on rules instead of on
+   numbers. Rules now mark section boundaries only; rows sit on a fixed 28px
+   rhythm so the column of values scans as a single block.
+
+   Type here is --font-chart (IBM Plex Sans), matching the Plotly grids exactly —
+   the panel sits beside them and any mismatch is visible at a glance. */
+.chart-head{
+  display:flex; align-items:baseline; justify-content:space-between;
+  gap:1rem; flex-wrap:wrap; margin:0 0 0.35rem;
+}
+.chart-head-id{ display:flex; align-items:baseline; gap:0.5rem; }
+.chart-head-name{
+  font-family:var(--font-display); font-size:20px; font-weight:600;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.chart-head-tkr{
+  font-family:var(--font-chart); font-size:12px; font-weight:600;
+  letter-spacing:0.06em; color:var(--muted);
+}
+.chart-head-quote{
+  display:flex; align-items:baseline; gap:0.6rem;
+  font-family:var(--font-chart); font-variant-numeric:tabular-nums;
+}
+.chart-head-px{ font-size:22px; font-weight:500; color:var(--text); }
+.chart-head-chg{ font-size:12px; font-weight:500; }
+.chart-head-chg.pos{ color:#067647; }
+.chart-head-chg.neg{ color:#B42318; }
+.chart-head-asof{ font-size:11px; color:var(--dim); font-weight:400; }
+
 .val-facts{
-  border:1px solid #e2e8f0; border-radius:8px; padding:4px 13px 12px;
-  background:#ffffff;
+  border:1px solid var(--border); border-radius:var(--r-chart);
+  padding:2px 14px 10px; background:var(--surface);
+  font-family:var(--font-chart);
 }
 .vf-group{
-  font-size:0.62rem; text-transform:uppercase; letter-spacing:0.07em;
-  color:#94a3b8; font-weight:700; margin:14px 0 3px;
+  font-size:10px; text-transform:uppercase; letter-spacing:0.08em;
+  color:var(--muted); font-weight:600;
+  margin:20px 0 6px; padding-bottom:5px;
+  border-bottom:1px solid var(--border);
 }
-.vf-group:first-child{ margin-top:6px; }
+.vf-group:first-child{ margin-top:8px; }
+/* Label left, value right, one 28px row. Never stacked. */
 .vf-row{
   display:flex; justify-content:space-between; align-items:center;
-  padding:4px 0; font-size:0.82rem; border-bottom:1px solid #f1f5f9;
+  gap:0.75rem; height:28px; font-size:12px;
 }
-.vf-row:last-child{ border-bottom:none; }
-.vf-row span{ color:#64748b; }
-.vf-row b{ color:#0f172a; font-weight:700; font-variant-numeric:tabular-nums; }
-.vf-badge{ padding:2px 9px; border-radius:20px; font-weight:700; font-size:0.74rem; }
+.vf-row span{ color:var(--muted); white-space:nowrap; }
+.vf-row b{
+  color:var(--text); font-weight:500; font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+/* Soft pill for a highlighted figure — 10% tint of its own series colour. */
+.vf-pill{
+  padding:1px 6px; border-radius:4px; font-weight:500; font-size:12px;
+  font-variant-numeric:tabular-nums;
+}
+.vf-pill.value{ color:#D98324; background:rgba(217,131,36,0.10); }
+.vf-pill.income{ color:#B4870F; background:rgba(224,179,65,0.14); }
+/* Assessment badge: 12% tint, solid colour as text, 2px radius — not a chip. */
+.vf-badge{
+  padding:2px 7px; border-radius:2px; font-weight:600; font-size:12px;
+  letter-spacing:0.01em; white-space:nowrap;
+}
+
+/* ── Valuation Lens, narrow viewports ──
+   The Lens is a [1, 3.2] st.columns split. Streamlit keeps those side by side
+   well below the width the fact panel needs: at 768px the panel is 153px, which
+   clipped the assessment badge and the sector name mid-word. Below 992px the
+   panel goes full width above the chart and its rows run in two columns, so the
+   labels get their space back instead of the chart losing its. */
+@media (max-width: 992px){
+  [data-testid="stHorizontalBlock"]:has(.val-facts){ flex-direction:column; }
+  [data-testid="stHorizontalBlock"]:has(.val-facts) > [data-testid="stColumn"]{
+    width:100% !important; flex:1 1 100% !important; min-width:0 !important;
+  }
+  .val-facts{
+    display:grid; grid-template-columns:1fr 1fr;
+    column-gap:1.75rem; padding-bottom:14px;
+  }
+  /* Section headers rule the full width, not just their own column. */
+  .vf-group{ grid-column:1 / -1; }
+  .vf-group:first-child{ margin-top:10px; }
+}
+/* One column again once two would be narrower than the longest label pair. */
+@media (max-width: 560px){
+  .val-facts{ grid-template-columns:1fr; }
+}
+.vf-badge.over{ color:#B42318; background:rgba(180,35,24,0.12); }
+.vf-badge.under{ color:#067647; background:rgba(6,118,71,0.12); }
+.vf-badge.fair{ color:#6B7280; background:rgba(107,114,128,0.12); }
 
 /* ── Fundamentals table (replaces the card grid) ── */
 .fund-table{
@@ -1106,7 +1190,19 @@ button[kind^="primary"]:active,
   padding-left: 1rem;
   padding-right: 1rem;
   border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-chart);
+}
+
+/* Motion is a distraction in a data view, and a hard requirement for anyone who
+   has asked the OS to stop it. Plotly's own transitions are disabled in
+   chart_theme.style(); this covers the surrounding chrome. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ── Input focus rings (main content) ── */

@@ -9,26 +9,46 @@ price disagree at every split boundary).
     from valuation import get_valuation_data, build_valuation_figure
     data = get_valuation_data("AAPL")
     fig  = build_valuation_figure(data)      # a Plotly figure, or None
+
+Chart anatomy
+-------------
+`build_valuation_figure` returns a single figure of three stacked, x-linked
+bands:
+
+    ┌────────────────────────────────────────┐
+    │ RANGE TABLE     Year / High / Low      │   row 1
+    ├────────────────────────────────────────┤
+    │ PLOT AREA       price vs fair value    │   row 2
+    ├────────────────────────────────────────┤
+    │ FUNDAMENTALS    FY / EPS / Chg / Div   │   row 3
+    └────────────────────────────────────────┘
+
+The two data grids are subplots sharing the plot's x-axis rather than HTML
+tables beside it. That is deliberate: the columns must line up with the year
+ticks exactly, and any layout computed independently of Plotly's internal
+margins will drift. Sharing the axis makes the alignment structural.
+
+Data density is the point. A valuation chart surrounded by numbers reads as
+research; the same chart alone reads as decoration.
 """
 import numpy as np
 import pandas as pd
 import requests
 
 from data import _sec_load_cik_map, SEC_HEADERS, _sec_fy_series, _SEC_TAGS_EPS
+import chart_theme as ct
+from chart_tokens import color, stroke, marker, font, layout
 
 _DIV_TAGS = ["CommonStockDividendsPerShareDeclared",
              "CommonStockDividendsPerShareCashPaid"]
 
-# Palette tuned close to the FAST Graphs reference: vivid orange fair-value line,
-# a solid green earnings wedge with a lighter premium band, black price, gold divs.
-INK        = "#0f172a"
-FAIR       = "#f28e1c"                 # earnings-justified value line (orange)
-GREEN_DARK = "rgba(82,168,110,.55)"    # earnings-justified value fill
-GREEN_LITE = "rgba(150,206,170,.42)"   # premium band
-GREEN_BAR  = "#4ca66a"                 # solid green for the earnings bars
-GOLD       = "#d9a520"                 # dividend line / bars
-GRID       = "#e2e8f0"
-MUTED      = "#94a3b8"
+# Premium band ceiling, as a multiple of the earnings-justified line.
+PREMIUM_MULTIPLE = 1.4
+# Yield used to convert a dividend into an implied value (~5%).
+DIVIDEND_YIELD_BASIS = 0.05
+
+# US recessions that can fall inside a ~15-year EPS window.
+RECESSIONS = [("2020-02-01", "2020-04-30")]
 
 
 def _cum_split_factor(splits, when):
@@ -46,6 +66,14 @@ def _cum_split_factor(splits, when):
         except Exception:
             continue
     return f or 1.0
+
+
+def _naive_index(idx):
+    """Drop timezone so EDGAR fiscal years and yfinance bars compare cleanly."""
+    try:
+        return pd.to_datetime(idx).tz_localize(None)
+    except (TypeError, AttributeError):
+        return pd.to_datetime(idx)
 
 
 def get_valuation_data(ticker, min_years=6):
@@ -69,7 +97,7 @@ def get_valuation_data(ticker, min_years=6):
     if len(eps_raw) < min_years:
         return None
 
-    # 2) yfinance: long monthly UNADJUSTED close + split history
+    # 2) yfinance: long monthly UNADJUSTED OHLC + split history
     try:
         t = yf.Ticker(tk)
         hist = t.history(period="max", interval="1mo", auto_adjust=False)
@@ -78,11 +106,9 @@ def get_valuation_data(ticker, min_years=6):
         return None
     if hist is None or hist.empty or "Close" not in hist.columns:
         return None
+    hist = hist.copy()
+    hist.index = _naive_index(hist.index)
     px = hist["Close"].dropna()
-    try:
-        px.index = pd.to_datetime(px.index).tz_localize(None)
-    except (TypeError, AttributeError):
-        px.index = pd.to_datetime(px.index)
 
     # 3) put EPS / dividends / price on today's split basis
     years = sorted(eps_raw)
@@ -104,12 +130,30 @@ def get_valuation_data(ticker, min_years=6):
     if len(price_vals) < 12:
         return None
 
-    # 4) normal P/E = median of each year's (avg price / EPS), positive EPS only
-    pe_samples = []
+    # 3b) annual high/low for the range table. The OHLC frame is already in
+    # hand — previously only Close survived and the rest was discarded, so this
+    # costs no extra network call. Monthly bars carry intra-month extremes, so
+    # a yearly max/min over them is a true annual high/low.
+    high_by_y, low_by_y = {}, {}
+    if {"High", "Low"}.issubset(hist.columns):
+        try:
+            gh = hist["High"].dropna().groupby(hist["High"].dropna().index.year).max()
+            gl = hist["Low"].dropna().groupby(hist["Low"].dropna().index.year).min()
+            high_by_y = {int(k): float(v) for k, v in gh.items()}
+            low_by_y = {int(k): float(v) for k, v in gl.items()}
+        except Exception:
+            high_by_y, low_by_y = {}, {}
+
+    # 4) normal P/E = median of each year's (avg price / EPS), positive EPS only.
+    #    The per-year samples are kept this time — they are what makes the
+    #    fundamentals grid worth reading.
+    pe_samples, pe_by_year = [], {}
     for y in years:
         yr = [v for d, v in zip(price_dates, price_vals) if d.year == y]
         if yr and eps[y] and eps[y] > 0:
-            pe_samples.append(float(np.mean(yr)) / eps[y])
+            p = float(np.mean(yr)) / eps[y]
+            pe_samples.append(p)
+            pe_by_year[y] = p
     normal_pe = float(np.median(pe_samples)) if pe_samples else 15.0
     normal_pe = max(6.0, min(45.0, normal_pe))
 
@@ -128,6 +172,15 @@ def get_valuation_data(ticker, min_years=6):
         return out
     eps_core = _med3(eps_list)
 
+    # Year-over-year EPS change. Undefined off a non-positive base: a swing from
+    # -$1.00 to +$0.50 is not "+150% growth", and printing it as such is worse
+    # than printing nothing.
+    eps_chg = [None]
+    for i in range(1, len(eps_list)):
+        prev, cur_e = eps_list[i - 1], eps_list[i]
+        eps_chg.append((cur_e / prev - 1) * 100
+                       if (prev and prev > 0 and cur_e is not None) else None)
+
     cur = price_vals[-1]
     cur_eps = next((eps[y] for y in reversed(years) if eps[y] and eps[y] > 0), None)
     return {
@@ -135,7 +188,11 @@ def get_valuation_data(ticker, min_years=6):
         "years": years,
         "eps": eps_list,
         "eps_core": eps_core,
+        "eps_chg": eps_chg,
         "div": [div.get(y) for y in years],
+        "high": [high_by_y.get(y) for y in years],
+        "low": [low_by_y.get(y) for y in years],
+        "pe_by_year": [pe_by_year.get(y) for y in years],
         "price_dates": price_dates,
         "price_vals": price_vals,
         "normal_pe": round(normal_pe, 1),
@@ -144,102 +201,236 @@ def get_valuation_data(ticker, min_years=6):
     }
 
 
-def build_valuation_figure(data):
-    """Plotly figure for the valuation series, in the app's house style.
-    Returns None if data is missing."""
+# ── Figure construction ──────────────────────────────────────────────────────
+
+def _fy_anchors(years):
+    """Mid-year timestamps — annual figures belong at the centre of their year,
+    not at a boundary where they would appear to belong to either side."""
+    return [pd.Timestamp(f"{y}-06-30") for y in years]
+
+
+def _grid_font_size(n_years):
+    """Shrink grid type rather than dropping columns when history is long.
+    Losing years would defeat the density the grid exists to provide."""
+    return font.size.grid if n_years <= 16 else 9
+
+
+def _text_row(fig, xs, labels, y, row, size, color_):
+    """One row of a data grid, positioned on the shared x-axis."""
+    import plotly.graph_objects as go
+    fig.add_trace(go.Scatter(
+        x=xs, y=[y] * len(xs), mode="text", text=labels,
+        textposition="middle center",
+        textfont=dict(size=size, color=color_, family=font.data),
+        hoverinfo="skip", showlegend=False), row=row, col=1)
+
+
+def _row_label(fig, text, y, yref, size):
+    """Left-gutter label for a grid row."""
+    fig.add_annotation(
+        x=0, xref="paper", xanchor="right", xshift=-8,
+        y=y, yref=yref, yanchor="middle",
+        text=text, showarrow=False,
+        font=dict(size=size, color=color.ink_muted, family=font.data))
+
+
+def _fmt(v, dp=2, dash="—"):
+    return dash if v is None else f"{v:,.{dp}f}"
+
+
+def _fmt_pct(v, dash="—"):
+    if v is None:
+        return dash
+    v = max(-999, min(999, v))          # keep a blowout from widening the column
+    return f"{v:+.0f}%"
+
+
+def window_data(data, years_back=None):
+    """Trim the series to the last `years_back` fiscal years for display.
+
+    Display-only. `normal_pe` is deliberately NOT recomputed: it is the stock's
+    own long-run multiple, and rebasing it to a 3-year window would redefine
+    "fair value" every time the user changed the zoom.
+    """
+    if not data or not years_back:
+        return data
+    yrs = data["years"]
+    if years_back >= len(yrs):
+        return data
+    keep = yrs[-years_back:]
+    first = keep[0]
+    out = dict(data)
+    idx = len(yrs) - years_back
+    for k in ("years", "eps", "eps_core", "eps_chg", "div", "high", "low",
+              "pe_by_year"):
+        if isinstance(data.get(k), list):
+            out[k] = data[k][idx:]
+    pd_, pv_ = [], []
+    for d, v in zip(data["price_dates"], data["price_vals"]):
+        if d.year >= first:
+            pd_.append(d)
+            pv_.append(v)
+    if pd_:
+        out["price_dates"], out["price_vals"] = pd_, pv_
+    return out
+
+
+def build_valuation_figure(data, years_back=None):
+    """Price vs. earnings-justified fair value, with the range table above and
+    the fundamentals grid below. Returns None if data is missing."""
     if not data or not data.get("years"):
         return None
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
 
-    yrs   = data["years"]
-    eps   = data["eps"]
-    core  = data.get("eps_core") or eps
-    npe   = data["normal_pe"]
-    xyr   = [pd.Timestamp(f"{y}-06-30") for y in yrs]            # mid-year anchor
-    fair  = [(e * npe) if (e and e > 0) else None for e in core]
-    over  = [(f * 1.4) if f else None for f in fair]
-    divln = [(d / 0.05) if d else None for d in data["div"]]     # ~5% yield-implied
+    data = window_data(data, years_back)
+    yrs = data["years"]
+    core = data.get("eps_core") or data["eps"]
+    npe = data["normal_pe"]
+    xyr = _fy_anchors(yrs)
+    fair = [(e * npe) if (e and e > 0) else None for e in core]
+    over = [(f * PREMIUM_MULTIPLE) if f else None for f in fair]
+    divln = [(d / DIVIDEND_YIELD_BASIS) if d else None for d in data["div"]]
 
-    fig = go.Figure()
+    fs = _grid_font_size(len(yrs))
+    # Row 1 holds Year/High/Low, row 3 holds FY/EPS/Chg/Div.
+    h_top, h_bot = 3 * layout.grid_row_h, 4 * layout.grid_row_h
+    h_plot = ct.plot_height()
+    total = h_top + h_plot + h_bot
 
-    # Earnings-justified value (green wedge under the fair-value line)
+    fig = make_subplots(
+        rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.012,
+        row_heights=[h_top / total, h_plot / total, h_bot / total])
+
+    # Pad the x range by half a column each side. The grid labels are centred on
+    # their year anchor and the final anchor sits on the last price date, so
+    # without this half the label falls outside the axis and Plotly clips it
+    # there ("2026" rendered as "202"). A wider figure margin does not help: the
+    # clip is at the axis boundary, not the figure edge.
+    #
+    # Pad the x range 10% each side so the outermost grid labels clear the clip.
+    #
+    # This is derived, not guessed. Plotly positions these text traces against
+    # `xaxis._length` but draws and clips the plot area a CONSTANT ~33px
+    # narrower (measured 767 vs 734 at 1440px, and 733 vs 700 after changing the
+    # margin — the gap does not move with the margin, so margin is not the
+    # lever). A centred label also needs ~11px of its own. So the last anchor
+    # must land within `1 - 44/_length` of the range: 0.940 at 1440px, 0.922 at
+    # 768px. With pad p on a span s the anchor sits at (s+p)/(s+2p), and p = 0.1s
+    # gives 0.917 — inside both.
+    #
+    # Do not shrink this without re-checking in a browser at BOTH widths. 2%
+    # dropped the final column, and half- and full-column pads (geometrically
+    # more generous) rendered worse, not better.
+    _x_lo = min(data["price_dates"][0], xyr[0])
+    _x_hi = max(data["price_dates"][-1], xyr[-1])
+    _pad = (_x_hi - _x_lo) * 0.10
+    _x_range = [_x_lo - _pad, _x_hi + _pad]
+
+    # ── Band 3: range table ─────────────────────────────────────────────────
+    _text_row(fig, xyr, [str(y) for y in yrs], 2.5, 1, fs, color.ink_muted)
+    _text_row(fig, xyr, [_fmt(v, 1) for v in data.get("high") or []], 1.5, 1, fs, color.ink)
+    _text_row(fig, xyr, [_fmt(v, 1) for v in data.get("low") or []], 0.5, 1, fs, color.ink)
+    for lbl, yv in (("Year", 2.5), ("High", 1.5), ("Low", 0.5)):
+        _row_label(fig, lbl, yv, "y", fs)
+
+    # ── Band 4: the plot ────────────────────────────────────────────────────
+    # z-order runs bottom to top: context, then bands, then lines.
+    if data["price_dates"]:
+        ct.add_no_coverage(fig, data["price_dates"][0], xyr[0], label=None,
+                           row=2, col=1)
+    ct.add_recession(fig, RECESSIONS, row=2, col=1)
+    ct.add_fy_hairlines(fig, [pd.Timestamp(f"{y}-01-01") for y in yrs],
+                        row=2, col=1)
+
+    # Base band: zero to the normal-multiple line, solid, hard top edge.
     fig.add_trace(go.Scatter(
-        x=xyr, y=fair, mode="lines", line=dict(width=0),
-        fill="tozeroy", fillcolor=GREEN_DARK,
-        name="Earnings value", hoverinfo="skip", showlegend=False))
-    # Premium band (lighter green between fair and 1.4x fair)
+        x=xyr, y=fair, mode="lines", line=dict(width=0, shape="linear"),
+        fill="tozeroy", fillcolor=color.corridor_base,
+        hoverinfo="skip", showlegend=False), row=2, col=1)
+    # Upper band: normal multiple to the premium ceiling, lighter, no stroke.
     fig.add_trace(go.Scatter(
-        x=xyr, y=over, mode="lines", line=dict(width=0),
-        fill="tonexty", fillcolor=GREEN_LITE,
-        name="Premium band", hoverinfo="skip", showlegend=False))
-
-    # Monthly price (black)
+        x=xyr, y=over, mode="lines", line=dict(width=0, shape="linear"),
+        fill="tonexty", fillcolor=color.corridor_high,
+        hoverinfo="skip", showlegend=False), row=2, col=1)
+    # The hard edge between them — this is what separates two bands from one blob.
     fig.add_trace(go.Scatter(
-        x=data["price_dates"], y=data["price_vals"], mode="lines",
-        line=dict(color=INK, width=1.6), name="Price",
-        hovertemplate="%{x|%b %Y}<br>$%{y:,.2f}<extra>Price</extra>"))
+        x=xyr, y=fair, mode="lines",
+        line=dict(color=color.corridor_edge, width=1, shape="linear"),
+        hoverinfo="skip", showlegend=False), row=2, col=1)
 
-    # Dividend-implied value (gold)
     if any(v is not None for v in divln):
         fig.add_trace(go.Scatter(
-            x=xyr, y=divln, mode="lines",
-            line=dict(color=GOLD, width=1.6), name="Dividend value",
-            hovertemplate="%{x|%Y}<br>$%{y:,.0f}<extra>Dividend value</extra>"))
+            x=xyr, y=divln, mode="lines+markers", name="Dividend value",
+            line=dict(color=color.income_line, width=stroke.income, shape="linear"),
+            marker=dict(size=3, color=color.income_line),
+            hovertemplate="%{x|%Y}<br>$%{y:,.0f}<extra>Dividend value</extra>"),
+            row=2, col=1)
 
-    # Earnings-justified value line (orange) + year markers
     fig.add_trace(go.Scatter(
         x=xyr, y=fair, mode="lines+markers",
-        line=dict(color=FAIR, width=2.4),
-        marker=dict(symbol="triangle-up", size=7, color="#ffffff",
-                    line=dict(color=FAIR, width=1.4)),
         name=f"Fair value (EPS &times; {npe:g})",
+        line=dict(color=color.value_line, width=stroke.value, shape="linear"),
+        marker=dict(symbol="triangle-up", size=marker.size, color=marker.fill,
+                    line=dict(color=color.value_line, width=marker.stroke_width)),
         customdata=core,
         hovertemplate="%{x|%Y}<br>Fair value $%{y:,.0f}"
-                      "<br>Core EPS $%{customdata:.2f}<extra></extra>"))
+                      "<br>Core EPS $%{customdata:.2f}<extra></extra>"),
+        row=2, col=1)
 
-    # US recession shading (COVID 2020; 2008 predates the EPS window)
-    fig.add_vrect(x0="2020-02-01", x1="2020-04-30",
-                  fillcolor="rgba(100,116,139,.12)", line_width=0, layer="below")
+    # Price last, on top, unsmoothed and marker-free. The jaggedness is the
+    # point — smoothing a price series is the clearest tell of a chart built by
+    # someone who does not work with market data.
+    fig.add_trace(go.Scatter(
+        x=data["price_dates"], y=data["price_vals"], mode="lines", name="Price",
+        line=dict(color=color.ink, width=stroke.price, shape="linear"),
+        hovertemplate="%{x|%b %Y}<br>$%{y:,.2f}<extra>Price</extra>"),
+        row=2, col=1)
 
-    fig.update_layout(
-        height=440, template=None,
-        plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=10, r=16, t=30, b=30),
-        hovermode="x unified",
-        font=dict(family="DM Sans, system-ui, sans-serif"),
-        hoverlabel=dict(bgcolor=INK, bordercolor="#334155",
-                        font=dict(color="white", size=12, family="DM Sans")),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
-                    font=dict(size=11, family="DM Sans", color="#64748b"),
-                    bgcolor="rgba(0,0,0,0)"),
-        xaxis=dict(type="date", tickformat="%Y", dtick="M24",
-                   tickfont=dict(size=11, color=MUTED, family="DM Sans"),
-                   gridcolor=GRID, showline=True, linecolor=GRID, zeroline=False),
-        yaxis=dict(tickprefix="$", tickformat=",.0f", side="right",
-                   tickfont=dict(size=11, color=MUTED, family="DM Sans"),
-                   gridcolor=GRID, showline=False, zeroline=False, rangemode="tozero"),
+    # ── Band 5: fundamentals grid ───────────────────────────────────────────
+    _text_row(fig, xyr, [f"FY{str(y)[-2:]}" for y in yrs], 3.5, 3, fs, color.ink_muted)
+    _text_row(fig, xyr, [_fmt(v) for v in data["eps"]], 2.5, 3, fs, color.ink)
+    _text_row(fig, xyr, [_fmt_pct(v) for v in data.get("eps_chg") or []], 1.5, 3, fs, color.ink_muted)
+    _text_row(fig, xyr, [_fmt(v) for v in data["div"]], 0.5, 3, fs, color.ink)
+    for lbl, yv in (("FY", 3.5), ("EPS", 2.5), ("Chg/Yr", 1.5), ("Div", 0.5)):
+        _row_label(fig, lbl, yv, "y3", fs)
+
+    # ── Chrome ──────────────────────────────────────────────────────────────
+    ct.style(
+        fig,
+        height=total + 52,
+        y=ct.value_axis(),
+        legend="bottom",
+        # Margin is back to the token default: widening it does NOT fix the
+        # label clipping (the position/clip gap is a constant 33px that does not
+        # move with the margin) — the x-range padding above is what handles it.
+        margin=dict(l=layout.plot_padding["left"], r=layout.plot_padding["right"],
+                    t=layout.plot_padding["top"], b=42),
     )
+    # `legend_inline("bottom")` offsets by 16% of the plot area, which is tuned
+    # for a single plot. Here the area spans all three bands, so that becomes a
+    # ~100px dead gap. Sit the legend just under the fundamentals grid instead.
+    fig.layout.legend.update(y=-0.045)
+    # Grid rows: no axes, no interaction, fixed scale so the text stays put.
+    for ax in ("yaxis", "yaxis3"):
+        fig.layout[ax].update(visible=False, fixedrange=True,
+                              range=[0, 3] if ax == "yaxis" else [0, 4])
+    for ax in ("xaxis", "xaxis3"):
+        fig.layout[ax].update(showgrid=False, showline=False, zeroline=False,
+                              showticklabels=False, fixedrange=True, ticks="",
+                              range=_x_range)
+    # The plot's own x labels are redundant — both grids carry the years. The
+    # crosshair belongs here, not on row 1, which is where `style()` puts it.
+    fig.layout.xaxis2.update(showticklabels=False, showgrid=False, showline=False,
+                             range=_x_range, **ct.spike_config())
+    fig.layout.yaxis2.update(ct.value_axis())
+
+    # Hairline rules separating the three bands.
+    for y_pos in (fig.layout.yaxis.domain[0], fig.layout.yaxis3.domain[1]):
+        fig.add_shape(type="line", xref="paper", yref="paper",
+                      x0=0, x1=1, y0=y_pos, y1=y_pos,
+                      line=dict(color=color.rule, width=stroke.rule), layer="below")
     return fig
-
-
-def _bar_layout(title_suffix=""):
-    return dict(
-        height=440, template=None,
-        plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=10, r=16, t=30, b=30),
-        hovermode="x unified",
-        font=dict(family="DM Sans, system-ui, sans-serif"),
-        hoverlabel=dict(bgcolor=INK, bordercolor="#334155",
-                        font=dict(color="white", size=12, family="DM Sans")),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
-                    font=dict(size=11, family="DM Sans", color="#64748b"),
-                    bgcolor="rgba(0,0,0,0)"),
-        xaxis=dict(type="category", tickfont=dict(size=11, color=MUTED, family="DM Sans"),
-                   gridcolor="rgba(0,0,0,0)", showline=True, linecolor=GRID),
-        yaxis=dict(tickprefix="$", side="right",
-                   tickfont=dict(size=11, color=MUTED, family="DM Sans"),
-                   gridcolor=GRID, showline=False, zeroline=True, zerolinecolor=GRID),
-    )
 
 
 def build_eps_figure(data):
@@ -247,19 +438,23 @@ def build_eps_figure(data):
     if not data or not data.get("years"):
         return None
     import plotly.graph_objects as go
-    yrs  = [str(y) for y in data["years"]]
-    eps  = data["eps"]
+    yrs = [f"FY{str(y)[-2:]}" for y in data["years"]]
+    eps = data["eps"]
     core = data.get("eps_core") or eps
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=yrs, y=eps, name="Reported EPS", marker_color=GREEN_BAR, opacity=0.85,
+        x=yrs, y=eps, name="Reported EPS", marker_color=color.corridor_base,
+        marker_line_width=0,
         hovertemplate="%{x}<br>EPS $%{y:.2f}<extra></extra>"))
     fig.add_trace(go.Scatter(
         x=yrs, y=core, name="Core EPS (3-yr median)", mode="lines+markers",
-        line=dict(color=FAIR, width=2.4),
-        marker=dict(size=6, color="#ffffff", line=dict(color=FAIR, width=1.4)),
+        line=dict(color=color.value_line, width=stroke.value, shape="linear"),
+        marker=dict(size=marker.size, color=marker.fill,
+                    line=dict(color=color.value_line, width=marker.stroke_width)),
         hovertemplate="%{x}<br>Core EPS $%{y:.2f}<extra></extra>"))
-    fig.update_layout(**_bar_layout())
+    ct.style(fig, height=ct.plot_height(), x=ct.category_axis(),
+             y=ct.value_axis(tick_format=",.2f", zero=False), legend="bottom",
+             crosshair=False)
     return fig
 
 
@@ -271,11 +466,12 @@ def build_dividend_figure(data):
     if not any(v for v in div):
         return None
     import plotly.graph_objects as go
-    yrs = [str(y) for y in data["years"]]
+    yrs = [f"FY{str(y)[-2:]}" for y in data["years"]]
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=yrs, y=[v or 0 for v in div], name="Dividends / share",
-        marker_color=GOLD, opacity=0.9,
+        marker_color=color.income_line, marker_line_width=0,
         hovertemplate="%{x}<br>Dividend $%{y:.2f}<extra></extra>"))
-    fig.update_layout(**_bar_layout())
+    ct.style(fig, height=ct.plot_height(), x=ct.category_axis(),
+             y=ct.value_axis(tick_format=",.2f"), legend=None, crosshair=False)
     return fig

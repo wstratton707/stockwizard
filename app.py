@@ -7,6 +7,10 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import time
 
+# One chart style for the whole app. Every figure below routes its layout
+# through ct.style() — see chart_theme.py for why that replaced inline styling.
+import chart_theme as ct
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -1217,40 +1221,30 @@ elif _page == "analysis":
                     x=intraday_df["Time"],
                     open=intraday_df["Open"], high=intraday_df["High"],
                     low=intraday_df["Low"],   close=intraday_df["Close"],
-                    increasing_line_color="#059669", decreasing_line_color="#dc2626",
+                    increasing_line_color=ct.color.positive,
+                    decreasing_line_color=ct.color.negative,
                     name=ticker_input,
                 )])
                 fig_candle.add_trace(go.Bar(
                     x=intraday_df["Time"], y=intraday_df["Volume"], name="Volume",
-                    marker_color=["#059669" if c >= o else "#dc2626"
+                    marker_color=[ct.color.positive if c >= o else ct.color.negative
                                   for c, o in zip(intraday_df["Close"], intraday_df["Open"])],
-                    opacity=0.4, yaxis="y2",
+                    marker_line_width=0, opacity=0.4, yaxis="y2",
                 ))
-                fig_candle.update_layout(
+                ct.style(
+                    fig_candle,
+                    height=500,
+                    margin=dict(l=64, r=20, t=44, b=40),
+                    x=ct.time_axis(fy_ticks=False, title=None,
+                                   rangeslider=dict(visible=False)),
+                    y=ct.value_axis(tick_format=",.2f", zero=False, title="Price ($)"),
+                    y2=dict(title="Volume", overlaying="y", side="right",
+                            showgrid=False, showticklabels=False,
+                            range=[0, intraday_df["Volume"].max() * 5]),
                     title=dict(text=f"{ticker_input} — Intraday Candlestick",
-                               font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left",
-                               y=0.97, yanchor="top"),
-                    height=500, template=None,
-                    plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=60, r=90, t=58, b=50),
-                    xaxis_rangeslider_visible=False,
-                    hovermode="x unified",
-                    font=dict(family="DM Sans, system-ui, sans-serif"),
-                    hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                    font=dict(color="white", size=12, family="DM Sans")),
-                    yaxis=dict(title="Price ($)", showgrid=True, gridcolor="#e2e8f0",
-                               showline=True, linecolor="#e2e8f0", linewidth=1,
-                               tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                               title_font=dict(size=12, color="#64748b", family="DM Sans"),
-                               tickprefix="$", tickformat=",.2f",
-                               side="right"),
-                    yaxis2=dict(title="Volume", overlaying="y", side="left",
-                                showgrid=False, range=[0, intraday_df["Volume"].max() * 5]),
-                    legend=dict(
-                        orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                        font=dict(size=11, family="DM Sans", color="#374151"),
-                        bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
-                    ),
+                               font=dict(size=13, color=ct.color.ink,
+                                         family=ct.font.data),
+                               x=0, xanchor="left", y=0.97, yanchor="top"),
                 )
                 st.plotly_chart(fig_candle, use_container_width=True)
 
@@ -1269,34 +1263,28 @@ elif _page == "analysis":
                             st.markdown('<div class="section-header">RSI (14)</div>', unsafe_allow_html=True)
                             fig_rsi = go.Figure()
                             fig_rsi.add_trace(go.Scatter(x=intraday_df["Time"], y=intraday_df["RSI"],
-                                                         line=dict(color="#4a9eff", width=1.5), name="RSI"))
-                            fig_rsi.add_hline(y=70, line_dash="dash", line_color="#dc2626", opacity=0.6)
-                            fig_rsi.add_hline(y=30, line_dash="dash", line_color="#059669", opacity=0.6)
-                            fig_rsi.add_hrect(y0=70, y1=100, fillcolor="rgba(220,38,38,0.06)", line_width=0)
-                            fig_rsi.add_hrect(y0=0,  y1=30,  fillcolor="rgba(5,150,105,0.06)",  line_width=0)
+                                                         line=dict(color=ct.color.brand, width=ct.stroke.price), name="RSI"))
+                            fig_rsi.add_hline(y=70, line_dash="dash", line_color=ct.color.negative, opacity=0.6)
+                            fig_rsi.add_hline(y=30, line_dash="dash", line_color=ct.color.positive, opacity=0.6)
+                            fig_rsi.add_hrect(y0=70, y1=100, fillcolor=ct._rgba(ct.color.negative, 0.06), line_width=0)
+                            fig_rsi.add_hrect(y0=0,  y1=30,  fillcolor=ct._rgba(ct.color.positive, 0.06), line_width=0)
                             fig_rsi.add_annotation(x=intraday_df["Time"].iloc[-1], y=73, text="Overbought",
-                                showarrow=False, font=dict(size=10, color="#dc2626"), xanchor="right")
+                                showarrow=False, font=dict(size=10, color=ct.color.negative,
+                                                           family=ct.font.data), xanchor="right")
                             fig_rsi.add_annotation(x=intraday_df["Time"].iloc[-1], y=27, text="Oversold",
-                                showarrow=False, font=dict(size=10, color="#059669"), xanchor="right")
-                            fig_rsi.update_layout(
-                                title=dict(text="RSI (14)", font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                                height=200, template=None,
-                                plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(l=60, r=90, t=50, b=50),
-                                hovermode="x unified",
-                                font=dict(family="DM Sans, system-ui, sans-serif"),
-                                hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                                font=dict(color="white", size=12, family="DM Sans")),
-                                xaxis=dict(title=None, gridcolor="#e2e8f0", showline=True,
-                                           linecolor="#e2e8f0", linewidth=1,
-                                           tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                           title_font=dict(size=12, color="#64748b", family="DM Sans")),
-                                yaxis=dict(range=[0, 100], title="RSI (0–100)",
-                                           tickvals=[0, 30, 50, 70, 100],
-                                           gridcolor="#e2e8f0", showline=True,
-                                           linecolor="#e2e8f0", linewidth=1,
-                                           tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                           title_font=dict(size=12, color="#64748b", family="DM Sans")),
+                                showarrow=False, font=dict(size=10, color=ct.color.positive,
+                                                           family=ct.font.data), xanchor="right")
+                            ct.style(
+                                fig_rsi,
+                                height=200, legend=None,
+                                margin=dict(l=56, r=20, t=44, b=30),
+                                x=ct.time_axis(fy_ticks=False, title=None),
+                                y=ct.plain_axis(range=[0, 100], title="RSI (0–100)",
+                                                tickvals=[0, 30, 50, 70, 100]),
+                                title=dict(text="RSI (14)",
+                                           font=dict(size=13, color=ct.color.ink,
+                                                     family=ct.font.data),
+                                           x=0, xanchor="left"),
                             )
                             st.plotly_chart(fig_rsi, use_container_width=True)
 
@@ -1304,35 +1292,25 @@ elif _page == "analysis":
                             st.markdown('<div class="section-header">MACD</div>', unsafe_allow_html=True)
                             fig_macd = go.Figure()
                             fig_macd.add_trace(go.Scatter(x=intraday_df["Time"], y=intraday_df["MACD"],
-                                                          line=dict(color="#4a9eff", width=1.5), name="MACD"))
+                                                          line=dict(color=ct.color.ink, width=ct.stroke.price), name="MACD"))
                             fig_macd.add_trace(go.Scatter(x=intraday_df["Time"], y=intraday_df["MACD_Signal"],
-                                                          line=dict(color="#1d4ed8", width=1.5), name="Signal"))
-                            hist_colors = ["#059669" if v >= 0 else "#dc2626" for v in intraday_df["MACD_Hist"]]
+                                                          line=dict(color=ct.color.brand, width=ct.stroke.price), name="Signal"))
+                            hist_colors = [ct.color.positive if v >= 0 else ct.color.negative
+                                           for v in intraday_df["MACD_Hist"]]
                             fig_macd.add_trace(go.Bar(x=intraday_df["Time"], y=intraday_df["MACD_Hist"],
-                                                      marker_color=hist_colors, name="Histogram", opacity=0.6))
-                            fig_macd.update_layout(
-                                title=dict(text="MACD", font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                                height=200, template=None,
-                                plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(l=60, r=90, t=50, b=50),
-                                hovermode="x unified",
-                                font=dict(family="DM Sans, system-ui, sans-serif"),
-                                hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                                font=dict(color="white", size=12, family="DM Sans")),
-                                legend=dict(
-                                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                                    font=dict(size=11, family="DM Sans", color="#374151"),
-                                    bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
-                                ),
-                                xaxis=dict(title=None, gridcolor="#e2e8f0", showline=True,
-                                           linecolor="#e2e8f0", linewidth=1,
-                                           tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                           title_font=dict(size=12, color="#64748b", family="DM Sans")),
-                                yaxis=dict(title="MACD Value", tickformat=".4f",
-                                           gridcolor="#e2e8f0", showline=True,
-                                           linecolor="#e2e8f0", linewidth=1,
-                                           tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                           title_font=dict(size=12, color="#64748b", family="DM Sans")),
+                                                      marker_color=hist_colors, marker_line_width=0,
+                                                      name="Histogram", opacity=0.6))
+                            ct.style(
+                                fig_macd,
+                                height=200,
+                                margin=dict(l=64, r=20, t=44, b=30),
+                                x=ct.time_axis(fy_ticks=False, title=None),
+                                y=ct.plain_axis(tick_format=".4f", title="MACD Value",
+                                                zeroline=True, zerolinecolor=ct.color.rule),
+                                title=dict(text="MACD",
+                                           font=dict(size=13, color=ct.color.ink,
+                                                     family=ct.font.data),
+                                           x=0, xanchor="left"),
                             )
                             st.plotly_chart(fig_macd, use_container_width=True)
                 except Exception:
@@ -1924,14 +1902,16 @@ elif _page == "analysis":
                     _div_last  = next((v for v in reversed(_vdata.get("div") or []) if v), None)
                     _dyield    = (_div_last / _cur * 100) if (_div_last and _cur) else None
                     _epsyield  = (100.0 / _bpe) if _bpe else None
+                    # Verdict colour now comes from a CSS class, not inline hex,
+                    # so the badge tracks the chart palette (see .vf-badge).
                     if _disc_pct is None:
-                        _verd, _vcol, _vbg = "—", "#475569", "#f1f5f9"
+                        _verd, _vcls = "—", "fair"
                     elif _disc_pct > 15:
-                        _verd, _vcol, _vbg = "Overvalued", "#b91c1c", "#fee2e2"
+                        _verd, _vcls = "Overvalued", "over"
                     elif _disc_pct < -15:
-                        _verd, _vcol, _vbg = "Undervalued", "#15803d", "#dcfce7"
+                        _verd, _vcls = "Undervalued", "under"
                     else:
-                        _verd, _vcol, _vbg = "Near fair value", "#475569", "#f1f5f9"
+                        _verd, _vcls = "Near fair value", "fair"
                     _mcap   = company_details.get("Market Cap")
                     _mcap_s = (f"${_mcap/1e12:.2f}T" if _mcap and _mcap >= 1e12 else
                                f"${_mcap/1e9:.1f}B"  if _mcap and _mcap >= 1e9  else
@@ -1943,6 +1923,7 @@ elif _page == "analysis":
                     _fair_s = f"${_fair_last:,.2f}" if _fair_last else "—"
                     _sector = company_details.get("Sector") or "—"
 
+                    _prem_s = f"{_disc_pct:+.0f}%" if _disc_pct is not None else "—"
                     _fcol, _mcol = st.columns([1, 3.2])
                     with _fcol:
                         st.markdown(f"""<div class="val-facts">
@@ -1952,17 +1933,36 @@ elif _page == "analysis":
                           <div class="vf-row"><span>EPS yield</span><b>{_eps_s}</b></div>
                           <div class="vf-row"><span>Dividend yield</span><b>{_dy_s}</b></div>
                           <div class="vf-group">Valuation</div>
-                          <div class="vf-row"><span>Normal P/E</span><b>{_npe:g}x</b></div>
-                          <div class="vf-row"><span>Fair value</span><b style="color:#f28e1c">{_fair_s}</b></div>
-                          <div class="vf-row"><span>Assessment</span><span class="vf-badge" style="color:{_vcol};background:{_vbg}">{_verd}</span></div>
+                          <div class="vf-row"><span>Normal P/E</span><span class="vf-pill value">{_npe:g}x</span></div>
+                          <div class="vf-row"><span>Fair value</span><b>{_fair_s}</b></div>
+                          <div class="vf-row"><span>Premium / discount</span><b>{_prem_s}</b></div>
+                          <div class="vf-row"><span>Assessment</span><span class="vf-badge {_vcls}">{_verd}</span></div>
                           <div class="vf-group">Company</div>
                           <div class="vf-row"><span>Sector</span><b>{_sector}</b></div>
                           <div class="vf-row"><span>Market cap</span><b>{_mcap_s}</b></div>
                         </div>""", unsafe_allow_html=True)
                     with _mcol:
+                        # Display window. Deliberately does NOT recompute the
+                        # normal P/E — that is the stock's long-run multiple, and
+                        # rebasing it per zoom level would redefine fair value
+                        # every time the user changed the range.
+                        _n_yrs   = len(_vdata["years"])
+                        _ranges  = [("MAX", None), ("15Y", 15), ("10Y", 10),
+                                    ("5Y", 5), ("3Y", 3)]
+                        _ranges  = [r for r in _ranges if r[1] is None or r[1] < _n_yrs]
+                        _labels  = [r[0] for r in _ranges]
+                        try:
+                            _pick = st.segmented_control(
+                                "Range", _labels, default="MAX", key="lens_range",
+                                label_visibility="collapsed")
+                        except Exception:
+                            _pick = st.radio("Range", _labels, index=0, horizontal=True,
+                                             key="lens_range", label_visibility="collapsed")
+                        _yb = dict(_ranges).get(_pick or "MAX")
+
                         _tab_v, _tab_e, _tab_d = st.tabs(["Valuation", "Earnings", "Dividends"])
                         with _tab_v:
-                            _vfig = build_valuation_figure(_vdata)
+                            _vfig = build_valuation_figure(_vdata, years_back=_yb)
                             if _vfig is not None:
                                 st.plotly_chart(_vfig, use_container_width=True)
                         with _tab_e:
@@ -2190,34 +2190,37 @@ elif _page == "analysis":
                         fig_fund = go.Figure()
                         fig_fund.add_trace(go.Bar(
                             x=_t["periods"], y=[(x or 0) / 1e9 for x in _t["revenue"]],
-                            name="Revenue ($B)", marker_color="#1d4ed8", opacity=0.85))
+                            name="Revenue ($B)", marker_color=ct.color.brand,
+                            marker_line_width=0, opacity=0.9))
                         fig_fund.add_trace(go.Bar(
                             x=_t["periods"], y=[(x or 0) / 1e9 for x in _t["net_income"]],
-                            name="Net Income ($B)", marker_color="#93c5fd", opacity=0.9))
+                            name="Net Income ($B)", marker_color=ct._rgba(ct.color.brand, 0.38),
+                            marker_line_width=0))
                         fig_fund.add_trace(go.Scatter(
                             x=_t["periods"], y=_t["operating_margin"], name="Operating Margin (%)",
-                            yaxis="y2", line=dict(color="#059669", width=2.5), mode="lines+markers"))
-                        fig_fund.update_layout(
-                            barmode="group", height=330, template=None,
-                            plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                            margin=dict(l=55, r=60, t=58, b=40),
+                            yaxis="y2", line=dict(color=ct.color.value_line, width=ct.stroke.value),
+                            marker=dict(size=ct.marker.size, color=ct.marker.fill,
+                                        line=dict(color=ct.color.value_line,
+                                                  width=ct.marker.stroke_width)),
+                            mode="lines+markers"))
+                        ct.style(
+                            fig_fund,
+                            barmode="group", height=330, crosshair=False,
+                            margin=dict(l=56, r=56, t=44, b=34),
+                            x=ct.category_axis(),
+                            y=ct.value_axis(prefix="", tick_format=",.1f", title="$ Billions"),
+                            y2=dict(title="Op. Margin %", overlaying="y", side="right",
+                                    showgrid=False,
+                                    tickfont=dict(size=ct.font.size.axis,
+                                                  color=ct.color.value_line,
+                                                  family=ct.font.data),
+                                    title_font=dict(size=ct.font.size.fact_label,
+                                                    color=ct.color.value_line,
+                                                    family=ct.font.data)),
                             title=dict(text="Revenue, Net Income & Operating Margin",
-                                       font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left",
-                                       y=0.97, yanchor="top"),
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                                        font=dict(size=11, family="DM Sans", color="#374151")),
-                            font=dict(family="DM Sans, system-ui, sans-serif"),
-                            hovermode="x unified",
-                            hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                            font=dict(color="white", size=12, family="DM Sans")),
-                            xaxis=dict(tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                       gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0"),
-                            yaxis=dict(title="$ Billions", gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
-                                       tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                       title_font=dict(size=12, color="#64748b", family="DM Sans")),
-                            yaxis2=dict(title="Op. Margin %", overlaying="y", side="right", showgrid=False,
-                                        tickfont=dict(size=11, color="#059669", family="DM Sans"),
-                                        title_font=dict(size=12, color="#059669", family="DM Sans")),
+                                       font=dict(size=13, color=ct.color.ink,
+                                                 family=ct.font.data),
+                                       x=0, xanchor="left", y=0.97, yanchor="top"),
                         )
                         st.plotly_chart(fig_fund, use_container_width=True)
 
@@ -2227,24 +2230,26 @@ elif _page == "analysis":
                         fig_fcf = go.Figure()
                         fig_fcf.add_trace(go.Bar(
                             x=_t["periods"], y=[(x or 0) / 1e9 for x in _tf],
-                            marker_color=["#059669" if (x or 0) >= 0 else "#dc2626" for x in _tf],
+                            marker_color=[ct.color.positive if (x or 0) >= 0 else ct.color.negative
+                                          for x in _tf],
+                            marker_line_width=0,
                             name="Free Cash Flow ($B)",
                             hovertemplate="%{x}: $%{y:.1f}B<extra>Free Cash Flow</extra>"))
-                        fig_fcf.update_layout(
-                            height=240, template=None,
-                            plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                            margin=dict(l=55, r=20, t=42, b=40), showlegend=False,
+                        # zero=False + an explicit zero line: FCF is signed, so
+                        # the meaningful reference is the axis crossing, not a
+                        # floor pinned under the most negative year.
+                        ct.style(
+                            fig_fcf,
+                            height=240, legend=None, crosshair=False,
+                            margin=dict(l=56, r=20, t=38, b=34),
+                            x=ct.category_axis(),
+                            y=ct.value_axis(prefix="", tick_format=",.1f", zero=False,
+                                            title="$ Billions", zeroline=True,
+                                            zerolinecolor=ct.color.rule),
                             title=dict(text="Free Cash Flow",
-                                       font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                            font=dict(family="DM Sans, system-ui, sans-serif"), hovermode="x unified",
-                            hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                            font=dict(color="white", size=12, family="DM Sans")),
-                            xaxis=dict(tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                       gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0"),
-                            yaxis=dict(title="$ Billions", gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
-                                       zeroline=True, zerolinecolor="#cbd5e1",
-                                       tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                       title_font=dict(size=12, color="#64748b", family="DM Sans")),
+                                       font=dict(size=13, color=ct.color.ink,
+                                                 family=ct.font.data),
+                                       x=0, xanchor="left"),
                         )
                         st.plotly_chart(fig_fcf, use_container_width=True)
 
@@ -2321,27 +2326,24 @@ elif _page == "analysis":
                                 x=[w for _, w in holdings],
                                 y=[t for t, _ in holdings],
                                 orientation="h",
-                                marker_color="#4a9eff",
+                                marker_color=ct.color.brand, marker_line_width=0,
                                 text=[f"{w:.1f}%" for _, w in holdings],
                                 textposition="outside",
+                                textfont=dict(size=ct.font.size.grid, family=ct.font.data,
+                                              color=ct.color.ink_muted),
                             ))
-                            fig_h.update_layout(
+                            # Horizontal bars: the value axis is x here, so the
+                            # gridlines belong to x and the category axis is y.
+                            ct.style(
+                                fig_h,
+                                height=300, legend=None, crosshair=False,
+                                margin=dict(l=64, r=32, t=38, b=34),
+                                x=ct.pct_axis(tick_format=".1f", title="Weight (%)", zero=True),
+                                y=ct.category_axis(autorange="reversed"),
                                 title=dict(text="Top Holdings by Weight",
-                                           font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                                height=300, template=None,
-                                plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(l=60, r=90, t=50, b=50),
-                                font=dict(family="DM Sans, system-ui, sans-serif"),
-                                hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                                font=dict(color="white", size=12, family="DM Sans")),
-                                xaxis=dict(title="Weight (%)", ticksuffix="%", tickformat=".1f",
-                                           gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                           tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                           title_font=dict(size=12, color="#64748b", family="DM Sans")),
-                                yaxis=dict(autorange="reversed",
-                                           gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                           tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                           title_font=dict(size=12, color="#64748b", family="DM Sans")),
+                                           font=dict(size=13, color=ct.color.ink,
+                                                     family=ct.font.data),
+                                           x=0, xanchor="left"),
                             )
                             st.plotly_chart(fig_h, use_container_width=True)
 
@@ -2425,14 +2427,14 @@ elif _page == "analysis":
                     x=df["Date"], open=df["Open"], high=df["High"],
                     low=df["Low"], close=df["Close"],
                     name="Price",
-                    increasing_line_color="#059669", decreasing_line_color="#dc2626",
-                    increasing_fillcolor="#059669", decreasing_fillcolor="#dc2626",
+                    increasing_line_color=ct.color.positive, decreasing_line_color=ct.color.negative,
+                    increasing_fillcolor=ct.color.positive, decreasing_fillcolor=ct.color.negative,
                 ))
             elif _chart_type == "Line":
                 fig.add_trace(go.Scatter(
                     x=df["Date"], y=df["Close"],
                     name="Price",
-                    line=dict(color="#1d4ed8", width=2.5),
+                    line=dict(color=ct.color.ink, width=ct.stroke.price),
                     hovertemplate="$%{y:,.2f}<extra>Price</extra>",
                 ))
             else:  # Area (default)
@@ -2445,17 +2447,23 @@ elif _page == "analysis":
                 fig.add_trace(go.Scatter(
                     x=df["Date"], y=df["Close"],
                     name="Price",
-                    line=dict(color="#1d4ed8", width=2.5),
+                    line=dict(color=ct.color.ink, width=ct.stroke.price),
                     fill="tonexty",
-                    fillcolor="rgba(37,99,235,0.05)",
+                    # A brand tint, not an ink tint: ink at 5% on white renders as
+                    # flat grey, which is the exact bland look this redesign is
+                    # meant to remove.
+                    fillcolor=ct._rgba(ct.color.brand, 0.06),
                     hovertemplate="$%{y:,.2f}<extra>Price</extra>",
                 ))
 
             # ── Moving averages — gated by checkboxes ─────────────────────────
             _ma_cfg = [
-                (20,  "#f59e0b", 1.0,  "dot",      "MA 20",  _show_ma20),
-                (50,  "#8b5cf6", 1.2,  "dash",     "MA 50",  _show_ma50),
-                (200, "#f97316", 1.5,  "longdash", "MA 200", _show_ma200),
+                # Moving averages are supporting series: hairline, and separated
+                # mostly by dash length rather than by colour. Three saturated
+                # hues here would compete with the price line for attention.
+                (20,  ct.color.ink_faint,  1.0, "dot",      "MA 20",  _show_ma20),
+                (50,  ct.color.value_line, 1.0, "dash",     "MA 50",  _show_ma50),
+                (200, ct.color.brand,      1.0, "longdash", "MA 200", _show_ma200),
             ]
             for ma, color, width, dash, label, enabled in _ma_cfg:
                 if enabled and f"MA{ma}" in df.columns:
@@ -2495,15 +2503,15 @@ elif _page == "analysis":
                 for _i, r in enumerate(_res_above):
                     fig.add_shape(type="line", x0=0, x1=1, xref="paper",
                                   y0=r, y1=r,
-                                  line=dict(color="#ef4444", width=1, dash="dash"),
+                                  line=dict(color=ct.color.negative, width=1, dash="dash"),
                                   opacity=0.4, layer="below")
                     fig.add_annotation(
                         x=1.005, xref="paper", y=r, yref="y",
                         text=f"Resist ${r:,.0f}",
                         showarrow=False, xanchor="left",
-                        font=dict(color="#ef4444", size=10, family="DM Sans"),
+                        font=dict(color=ct.color.negative, size=10, family=ct.font.data),
                         bgcolor="rgba(255,255,255,0.9)",
-                        bordercolor="#fecaca", borderwidth=1,
+                        bordercolor=ct._rgba(ct.color.negative, 0.35), borderwidth=1,
                         borderpad=3,
                     )
 
@@ -2514,15 +2522,15 @@ elif _page == "analysis":
                 for _i, s in enumerate(_sup_below):
                     fig.add_shape(type="line", x0=0, x1=1, xref="paper",
                                   y0=s, y1=s,
-                                  line=dict(color="#16a34a", width=1, dash="dash"),
+                                  line=dict(color=ct.color.positive, width=1, dash="dash"),
                                   opacity=0.4, layer="below")
                     fig.add_annotation(
                         x=1.005, xref="paper", y=s, yref="y",
                         text=f"Support ${s:,.0f}",
                         showarrow=False, xanchor="left",
-                        font=dict(color="#16a34a", size=10, family="DM Sans"),
+                        font=dict(color=ct.color.positive, size=10, family=ct.font.data),
                         bgcolor="rgba(255,255,255,0.9)",
-                        bordercolor="#bbf7d0", borderwidth=1,
+                        bordercolor=ct._rgba(ct.color.positive, 0.35), borderwidth=1,
                         borderpad=3,
                     )
 
@@ -2531,47 +2539,29 @@ elif _page == "analysis":
                 _last = df["Close"].iloc[-1]
                 fig.add_shape(type="line", x0=0, x1=1, xref="paper",
                               y0=_last, y1=_last,
-                              line=dict(color="#94a3b8", width=1, dash="dot"),
+                              line=dict(color=ct.color.ink_muted, width=1, dash="dot"),
                               opacity=0.7, layer="above")
                 fig.add_annotation(
                     x=1.005, xref="paper", y=_last, yref="y",
                     text=f"<b>${_last:,.2f}</b>",
                     showarrow=False, xanchor="left",
-                    font=dict(color="white", size=11, family="DM Sans"),
-                    bgcolor="#2563eb",
+                    font=dict(color=ct.color.paper, size=11, family=ct.font.data),
+                    bgcolor=ct.color.ink,
                     borderpad=4,
                 )
 
-            fig.update_layout(
-                height=480, template=None,
-                plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-                # Right margin holds both the y-axis labels and the S/R + price
-                # tags (anchored just past the plot); keep it wide enough that the
-                # widest "Resist $000" / price box isn't clipped by the card edge.
-                margin=dict(l=10, r=124, t=70, b=30),
-                hovermode="x unified",
-                font=dict(family="DM Sans, system-ui, sans-serif"),
-                hoverlabel=dict(
-                    bgcolor="#0f172a", bordercolor="#334155",
-                    font=dict(color="white", size=12, family="DM Sans"),
-                    namelength=-1,
-                ),
-                # Legend: horizontal strip ABOVE the plot area, transparent
-                legend=dict(
-                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0,
-                    font=dict(size=11, family="DM Sans", color="#64748b"),
-                    bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
-                    itemsizing="constant",
-                ),
-                xaxis=dict(
-                    title=None,
-                    type="date",
-                    tickformat="%b '%y",
-                    tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                    gridcolor="#e2e8f0",
-                    showline=True, linecolor="#e2e8f0", linewidth=1,
-                    zeroline=False,
+            ct.style(
+                fig,
+                height=480,
+                # Left gutter carries the value axis. The right margin still holds
+                # the S/R and last-price tags, which are anchored just past the
+                # plot — keep it wide enough that "Resist $000" isn't clipped.
+                margin=dict(l=52, r=112, t=70, b=30),
+                x=ct.time_axis(
+                    fy_ticks=False, title=None, tickformat="%b '%y",
                     rangeslider=dict(visible=False),
+                    # Range buttons: square, hairline border, transparent fill;
+                    # the active one fills brand. No pill shapes.
                     rangeselector=dict(
                         buttons=[
                             dict(count=1,  label="1M", step="month", stepmode="backward"),
@@ -2581,25 +2571,16 @@ elif _page == "analysis":
                             dict(count=3,  label="3Y", step="year",  stepmode="backward"),
                             dict(step="all", label="All"),
                         ],
-                        bgcolor="#f8fafc", bordercolor="#e2e8f0", borderwidth=1,
-                        font=dict(family="DM Sans", size=11, color="#475569"),
-                        activecolor="#2563eb",
+                        bgcolor="rgba(0,0,0,0)", bordercolor=ct.color.rule, borderwidth=1,
+                        font=dict(family=ct.font.data, size=11, color=ct.color.ink_muted),
+                        activecolor=ct.color.brand,
                         x=0.0, xanchor="left", y=1.02, yanchor="bottom",
                     ),
                 ),
-                yaxis=dict(
-                    title=None,
-                    side="right",
-                    tickformat="$,.2f",
-                    tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                    gridcolor="#e2e8f0",
-                    showline=False,
-                    zeroline=False,
-                    autorange=True,
-                    rangemode="normal",
-                    nticks=6,
-                ),
-                xaxis_rangeslider_visible=False,
+                y=ct.value_axis(tick_format=",.2f", zero=False, title=None, nticks=6),
+                # namelength=-1 keeps long trace names from being truncated in the
+                # unified tooltip.
+                hoverlabel=dict(namelength=-1, **ct.hover()),
             )
             if _show_vol and "Volume" in df.columns:
                 fig.update_layout(yaxis2=dict(
@@ -2631,48 +2612,35 @@ elif _page == "analysis":
                 st.markdown('<div class="section-header">RSI (14)</div>', unsafe_allow_html=True)
                 fig_rsi = go.Figure()
                 fig_rsi.add_trace(go.Scatter(x=df["Date"], y=df["RSI14"],
-                                             line=dict(color="#4a9eff", width=1.5), name="RSI",
+                                             line=dict(color=ct.color.ink, width=ct.stroke.price), name="RSI",
                                              hovertemplate="RSI: %{y:.1f}<extra></extra>"))
                 fig_rsi.add_hrect(y0=70, y1=100, fillcolor="rgba(239,68,68,0.08)", line_width=0)
                 fig_rsi.add_hrect(y0=0, y1=30, fillcolor="rgba(22,163,74,0.08)", line_width=0)
-                fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ef4444", line_width=1, opacity=0.6)
-                fig_rsi.add_hline(y=50, line_dash="dot",  line_color="#94a3b8", line_width=1, opacity=0.5)
-                fig_rsi.add_hline(y=30, line_dash="dash", line_color="#16a34a", line_width=1, opacity=0.6)
+                fig_rsi.add_hline(y=70, line_dash="dash", line_color=ct.color.negative, line_width=1, opacity=0.6)
+                fig_rsi.add_hline(y=50, line_dash="dot",  line_color=ct.color.ink_muted, line_width=1, opacity=0.5)
+                fig_rsi.add_hline(y=30, line_dash="dash", line_color=ct.color.positive, line_width=1, opacity=0.6)
                 # Anchor zone labels INSIDE the plot at the left edge so they
                 # don't float in the right margin.
                 fig_rsi.add_annotation(
                     xref="paper", x=0.005, y=85, text="Overbought",
                     showarrow=False, xanchor="left",
-                    font=dict(size=10, color="#ef4444", family="DM Sans"),
+                    font=dict(size=10, color=ct.color.negative, family=ct.font.data),
                 )
                 fig_rsi.add_annotation(
                     xref="paper", x=0.005, y=15, text="Oversold",
                     showarrow=False, xanchor="left",
-                    font=dict(size=10, color="#16a34a", family="DM Sans"),
+                    font=dict(size=10, color=ct.color.positive, family=ct.font.data),
                 )
-                fig_rsi.update_layout(
-                    height=200, template=None,
-                    plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=10, r=95, t=20, b=30),
-                    hovermode="x unified",
-                    showlegend=False,
-                    font=dict(family="DM Sans, system-ui, sans-serif"),
-                    hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                    font=dict(color="white", size=12, family="DM Sans")),
-                    xaxis=dict(
-                        type="date", tickformat="%b '%y", title=None,
-                        tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                        gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
-                        zeroline=False,
-                    ),
-                    yaxis=dict(
-                        range=[0, 100], side="right",
-                        tickvals=[30, 50, 70],
-                        title=None,
-                        tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                        gridcolor="#e2e8f0", showline=False,
-                        zeroline=False,
-                    ),
+                # Margins match the price chart above so the two plot areas line
+                # up: a stacked indicator whose x-axis is offset from the price
+                # it explains is worse than no indicator at all.
+                ct.style(
+                    fig_rsi,
+                    height=200,
+                    margin=dict(l=52, r=112, t=20, b=30),
+                    legend=None,
+                    x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
+                    y=ct.plain_axis(range=[0, 100], tickvals=[30, 50, 70], title=None),
                 )
                 st.plotly_chart(fig_rsi, use_container_width=True)
 
@@ -2680,42 +2648,21 @@ elif _page == "analysis":
                 st.markdown('<div class="section-header">Bollinger Bands</div>', unsafe_allow_html=True)
                 fig_bb = go.Figure()
                 fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["BB_Upper"],
-                                            line=dict(color="#cbd5e1", width=1), name="Upper Band"))
+                                            line=dict(color=ct.color.ink_muted, width=1), name="Upper Band"))
                 fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["BB_Lower"],
-                                            line=dict(color="#cbd5e1", width=1), name="Lower Band",
+                                            line=dict(color=ct.color.ink_muted, width=1), name="Lower Band",
                                             fill="tonexty", fillcolor="rgba(147,197,253,0.15)"))
                 fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["BB_Middle"],
-                                            line=dict(color="#3b82f6", width=1.5, dash="dash"), name="Middle (SMA)"))
+                                            line=dict(color=ct.color.value_line, width=ct.stroke.price, dash="dash"), name="Middle (SMA)"))
                 fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["Close"],
-                                            line=dict(color="#1d4ed8", width=2), name="Price",
+                                            line=dict(color=ct.color.ink, width=ct.stroke.price), name="Price",
                                             hovertemplate="$%{y:,.2f}<extra>Price</extra>"))
-                fig_bb.update_layout(
-                    height=320, template=None,
-                    plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=10, r=95, t=40, b=30),
-                    hovermode="x unified",
-                    font=dict(family="DM Sans, system-ui, sans-serif"),
-                    hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                    font=dict(color="white", size=12, family="DM Sans")),
-                    # Legend OUTSIDE the plot — top-right strip, transparent
-                    legend=dict(
-                        orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0,
-                        font=dict(size=11, family="DM Sans", color="#64748b"),
-                        bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
-                    ),
-                    xaxis=dict(
-                        type="date", tickformat="%b '%y", title=None,
-                        tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                        gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
-                        zeroline=False,
-                    ),
-                    yaxis=dict(
-                        tickformat="$,.2f",
-                        title=None, side="right",
-                        tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                        gridcolor="#e2e8f0", showline=False,
-                        zeroline=False, autorange=True, rangemode="normal",
-                    ),
+                ct.style(
+                    fig_bb,
+                    height=320,
+                    margin=dict(l=52, r=112, t=40, b=30),
+                    x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
+                    y=ct.value_axis(tick_format=",.2f", zero=False, title=None),
                 )
                 st.plotly_chart(fig_bb, use_container_width=True)
 
@@ -2724,38 +2671,25 @@ elif _page == "analysis":
                 fig_macd = go.Figure()
                 fig_macd.add_trace(go.Scatter(
                     x=df["Date"], y=df["MACD"], name="MACD",
-                    line=dict(color="#4a9eff", width=1.5),
+                    line=dict(color=ct.color.ink, width=ct.stroke.price),
                     hovertemplate="MACD: %{y:.3f}<extra></extra>"))
                 fig_macd.add_trace(go.Scatter(
                     x=df["Date"], y=df["MACD_Signal"], name="Signal",
-                    line=dict(color="#1d4ed8", width=1.5),
+                    line=dict(color=ct.color.value_line, width=ct.stroke.price),
                     hovertemplate="Signal: %{y:.3f}<extra></extra>"))
-                _hist_colors = ["#059669" if (v or 0) >= 0 else "#dc2626"
+                _hist_colors = [ct.color.positive if (v or 0) >= 0 else ct.color.negative
                                 for v in df["MACD_Hist"].fillna(0)]
                 fig_macd.add_trace(go.Bar(
                     x=df["Date"], y=df["MACD_Hist"], name="Histogram",
                     marker_color=_hist_colors, opacity=0.5,
                     hovertemplate="Hist: %{y:.3f}<extra></extra>"))
-                fig_macd.update_layout(
-                    height=240, template=None,
-                    plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=10, r=95, t=20, b=30),
-                    hovermode="x unified",
-                    font=dict(family="DM Sans, system-ui, sans-serif"),
-                    hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                    font=dict(color="white", size=12, family="DM Sans")),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                xanchor="right", x=1.0,
-                                font=dict(size=11, family="DM Sans", color="#64748b"),
-                                bgcolor="rgba(0,0,0,0)"),
-                    xaxis=dict(type="date", tickformat="%b '%y", title=None,
-                               tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                               gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
-                               zeroline=False),
-                    yaxis=dict(title=None, side="right",
-                               tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                               gridcolor="#e2e8f0", showline=False,
-                               zeroline=True, zerolinecolor="#e2e8f0"),
+                ct.style(
+                    fig_macd,
+                    height=240,
+                    margin=dict(l=52, r=112, t=20, b=30),
+                    x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
+                    y=ct.plain_axis(title=None, zeroline=True,
+                                    zerolinecolor=ct.color.rule),
                 )
                 st.plotly_chart(fig_macd, use_container_width=True)
 
@@ -2806,52 +2740,34 @@ elif _page == "analysis":
                 if pcts is not None:
                     x      = list(range(len(pcts[0])))
                     fig_mc = go.Figure()
-                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[4], name="P95", line=dict(color="#059669", width=1.5),
+                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[4], name="P95",
+                                                line=dict(color=ct.color.positive, width=1.25),
                                                 hovertemplate="Day %{x} — Best: $%{y:,.2f}<extra></extra>"))
-                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[3], name="P75", line=dict(color="#4a9eff", width=1),
-                                                fill="tonexty", fillcolor="rgba(59,130,246,0.1)",
+                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[3], name="P75",
+                                                line=dict(color=ct.color.brand, width=1),
+                                                fill="tonexty", fillcolor=ct._rgba(ct.color.brand, 0.10),
                                                 hovertemplate="Day %{x} — Bull: $%{y:,.2f}<extra></extra>"))
-                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[2], name="Median", line=dict(color="#0f172a", width=2),
+                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[2], name="Median",
+                                                line=dict(color=ct.color.ink, width=1.75),
                                                 hovertemplate="Day %{x} — Median: $%{y:,.2f}<extra></extra>"))
-                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[1], name="P25", line=dict(color="#1d4ed8", width=1),
-                                                fill="tonexty", fillcolor="rgba(29,78,216,0.06)",
+                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[1], name="P25",
+                                                line=dict(color=ct.color.brand, width=1),
+                                                fill="tonexty", fillcolor=ct._rgba(ct.color.brand, 0.06),
                                                 hovertemplate="Day %{x} — Low: $%{y:,.2f}<extra></extra>"))
-                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[0], name="P5", line=dict(color="#dc2626", width=1.5),
+                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[0], name="P5",
+                                                line=dict(color=ct.color.negative, width=1.25),
                                                 hovertemplate="Day %{x} — Bear: $%{y:,.2f}<extra></extra>"))
-                    fig_mc.update_layout(
-                        height=370, template=None,
-                        plot_bgcolor="#ffffff", paper_bgcolor="rgba(0,0,0,0)",
-                        # r wide enough that the right-side "$000" y labels aren't
-                        # clipped by the chart card's edge.
-                        margin=dict(l=10, r=78, t=30, b=40),
-                        hovermode="x unified",
-                        font=dict(family="DM Sans, system-ui, sans-serif"),
-                        hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                        font=dict(color="white", size=12, family="DM Sans")),
-                        legend=dict(
-                            orientation="h", yanchor="top", y=0.99, xanchor="left", x=0.01,
-                            font=dict(size=11, family="DM Sans", color="#374151"),
-                            bgcolor="rgba(255,255,255,0.85)", bordercolor="#e2e8f0", borderwidth=1,
-                        ),
-                        xaxis=dict(
-                            title="Trading Days",
-                            tickvals=[0, 50, 100, 150, 200, 250],
-                            tickformat=",d",
-                            tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                            title_font=dict(size=12, color="#64748b", family="DM Sans"),
-                            gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
-                            zeroline=False,
-                        ),
-                        yaxis=dict(
-                            tickprefix="$", tickformat=",.0f",
-                            title=None,
-                            side="right",
-                            autorange=True,
-                            rangemode="normal",
-                            zeroline=False,
-                            tickfont=dict(size=11, color="#94a3b8", family="DM Sans"),
-                            gridcolor="#e2e8f0", showline=False,
-                        ),
+                    # Legend moves OUTSIDE the plot: a legend floating over the
+                    # data in a white box covers the fan it is describing.
+                    ct.style(
+                        fig_mc,
+                        height=370,
+                        margin=dict(l=52, r=20, t=30, b=40),
+                        legend="top-left",
+                        x=ct.linear_axis(title="Trading Days",
+                                         tickvals=[0, 50, 100, 150, 200, 250],
+                                         tickformat=",d"),
+                        y=ct.value_axis(zero=False, title=None),
                     )
                     st.plotly_chart(fig_mc, use_container_width=True)
 
@@ -2872,41 +2788,31 @@ elif _page == "analysis":
                             x=_garch_x, y=_ann_vols,
                             name="Ann. Vol (%)",
                             mode="lines",
-                            line=dict(color="#4a9eff", width=2.5),
-                            fill="tozeroy", fillcolor="rgba(74,158,255,0.18)",
+                            line=dict(color=ct.color.brand, width=ct.stroke.value),
+                            fill="tozeroy", fillcolor=ct._rgba(ct.color.brand, 0.10),
                             hovertemplate="Day %{x}: %{y:.2f}%<extra></extra>",
                         ))
                         # long-run mean reference line
                         fig_gv.add_hline(
                             y=_vol_mean,
-                            line_dash="dot", line_color="#1d4ed8", line_width=1.5,
+                            line_dash="dot", line_color=ct.color.ink_muted, line_width=1,
                             annotation_text=f"Mean {_vol_mean:.1f}%",
-                            annotation_font=dict(color="#1d4ed8", size=10),
+                            annotation_font=dict(color=ct.color.ink_muted, size=10,
+                                                 family=ct.font.data),
                             annotation_position="top right",
                         )
-                        fig_gv.update_layout(
+                        ct.style(
+                            fig_gv,
+                            height=250,
+                            margin=dict(l=52, r=20, t=44, b=44),
+                            legend=None,
+                            crosshair=False,
+                            x=ct.linear_axis(title="Trading Days"),
+                            y=ct.pct_axis(tick_format=".1f", title="Ann. Volatility (%)"),
                             title=dict(text="GARCH Volatility Forecast",
-                                       font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                            height=250, template=None,
-                            plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                            margin=dict(l=60, r=90, t=50, b=50),
-                            font=dict(family="DM Sans, system-ui, sans-serif"),
-                            hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                            font=dict(color="white", size=12, family="DM Sans")),
-                            xaxis=dict(
-                                title="Trading Days",
-                                gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                title_font=dict(size=12, color="#64748b", family="DM Sans"),
-                            ),
-                            yaxis=dict(
-                                title="Ann. Volatility (%)",
-                                ticksuffix="%", tickformat=".1f",
-                                gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                title_font=dict(size=12, color="#64748b", family="DM Sans"),
-                            ),
-                            showlegend=False,
+                                       font=dict(size=13, color=ct.color.ink,
+                                                 family=ct.font.data),
+                                       x=0, xanchor="left"),
                         )
                         st.plotly_chart(fig_gv, use_container_width=True)
 
@@ -2934,7 +2840,8 @@ elif _page == "analysis":
                         </div>""", unsafe_allow_html=True)
 
             st.markdown('<div class="section-header">Volume</div>', unsafe_allow_html=True)
-            vol_colors = ["#22c55e" if r >= 0 else "#ef4444" for r in df["Daily_Return"].fillna(0)]
+            vol_colors = [ct.color.positive if r >= 0 else ct.color.negative
+                          for r in df["Daily_Return"].fillna(0)]
             fig_vol = go.Figure()
             fig_vol.add_trace(go.Bar(x=df["Date"], y=df["Volume"], marker_color=vol_colors, opacity=0.85,
                                      name="Volume",
@@ -2943,37 +2850,17 @@ elif _page == "analysis":
                 _vol_ma20 = df["Volume"].rolling(20, min_periods=5).mean()
                 fig_vol.add_trace(go.Scatter(
                     x=df["Date"], y=_vol_ma20, name="20d Avg",
-                    line=dict(color="#2563eb", width=1.5, dash="dot"),
+                    line=dict(color=ct.color.brand, width=1.25, dash="dot"),
                     hovertemplate="20d Avg: %{y:,.0f}<extra></extra>",
                 ))
-            fig_vol.update_layout(
-                title=dict(text="Volume", font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                height=260, template=None,
-                plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=60, r=90, t=50, b=50),
-                showlegend=True,
-                font=dict(family="DM Sans, system-ui, sans-serif"),
-                hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                font=dict(color="white", size=12, family="DM Sans")),
-                legend=dict(
-                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                    font=dict(size=11, family="DM Sans", color="#374151"),
-                    bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
-                ),
-                xaxis=dict(
-                    type="date", tickformat="%b '%y", title=None,
-                    tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                    title_font=dict(size=12, color="#64748b", family="DM Sans"),
-                    gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
-                ),
-                yaxis=dict(
-                    tickformat=".2s",
-                    title="Volume",
-                    tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                    title_font=dict(size=12, color="#64748b", family="DM Sans"),
-                    gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
-                    zeroline=False,
-                ),
+            # No in-chart title: the "Volume" section header directly above
+            # already says it, and printing it twice is just noise.
+            ct.style(
+                fig_vol,
+                height=260,
+                margin=dict(l=52, r=112, t=26, b=30),
+                x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
+                y=ct.value_axis(prefix="", tick_format=".2s", title=None),
             )
             st.plotly_chart(fig_vol, use_container_width=True)
 
@@ -2982,37 +2869,34 @@ elif _page == "analysis":
                 fig_corr = px.imshow(
                     corr_matrix,
                     text_auto=".2f",
-                    color_continuous_scale=["#dc2626", "#ffffff", "#1d4ed8"],
+                    color_continuous_scale=ct.color.diverging,
                     zmin=-1, zmax=1,
                     aspect="equal",
                 )
                 fig_corr.update_traces(
                     xgap=2, ygap=2,
                     hovertemplate="<b>%{x} vs %{y}</b><br>Correlation: %{z:.2f}<extra></extra>",
-                    textfont=dict(size=11, family="DM Sans"),
+                    textfont=dict(size=11, family=ct.font.data),
                 )
-                fig_corr.update_layout(
-                    title=dict(text="Correlation Matrix — Daily Returns",
-                        font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
+                ct.style(
+                    fig_corr,
                     height=320,
-                    font=dict(family="DM Sans"),
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="#f8fafc",
-                    margin=dict(l=60, r=90, t=50, b=50),
-                    hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                        font=dict(color="white", size=12, family="DM Sans")),
+                    margin=dict(l=52, r=20, t=26, b=30),
+                    legend=None, grid=False, crosshair=False,
+                    x=ct.category_axis(tickfont=dict(size=12, color=ct.color.ink,
+                                                     family=ct.font.data)),
+                    y=ct.category_axis(tickfont=dict(size=12, color=ct.color.ink,
+                                                     family=ct.font.data)),
                     coloraxis_colorbar=dict(
                         title="Correlation",
                         tickvals=[-1, -0.5, 0, 0.5, 1],
                         ticktext=["-1.0", "-0.5", "0.0", "0.5", "1.0"],
-                        tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                        title_font=dict(size=12, color="#64748b", family="DM Sans"),
+                        tickfont=dict(size=11, color=ct.color.ink_muted,
+                                      family=ct.font.data),
+                        title_font=dict(size=12, color=ct.color.ink_muted,
+                                        family=ct.font.data),
                         thickness=14, len=0.8,
                     ),
-                    xaxis=dict(tickfont=dict(size=12, color="#374151", family="DM Sans"),
-                               showline=False, gridcolor="#e2e8f0"),
-                    yaxis=dict(tickfont=dict(size=12, color="#374151", family="DM Sans"),
-                               showline=False, gridcolor="#e2e8f0"),
                 )
                 st.plotly_chart(fig_corr, use_container_width=True)
 
@@ -3039,18 +2923,9 @@ elif _page == "analysis":
             if peer_df is not None and not peer_df.empty:
                 st.markdown('<div class="section-header">Peer Comparison</div>', unsafe_allow_html=True)
 
-                _peer_colors = ["#2E75B6", "#00B0F0", "#FFC000", "#FF4136", "#2ECC71"]
-                _chart_layout = dict(
-                    plot_bgcolor="#ffffff",
-                    paper_bgcolor="#f8fafc",
-                    font=dict(color="#0f172a", family="DM Sans"),
-                    xaxis=dict(gridcolor="#e2e8f0", showgrid=True, color="#6b7a8d"),
-                    yaxis=dict(gridcolor="#e2e8f0", showgrid=True, color="#6b7a8d"),
-                    legend=dict(orientation="h", y=1.04, x=0,
-                                bgcolor="rgba(0,0,0,0)", font=dict(size=11, color="#0f172a")),
-                    margin=dict(l=60, r=20, t=50, b=50),
-                    hovermode="x unified",
-                )
+                # `_chart_layout` used to be defined here and was never applied to
+                # anything — every peer chart below re-specified its layout inline.
+                # ct.style() is the real shared layout now, so it is gone.
 
                 # ── 1. Cumulative Return Overlay ──────────────────────────────
                 if peer_price_dfs:
@@ -3066,35 +2941,22 @@ elif _page == "analysis":
                             name=_pt,
                             mode="lines",
                             line=dict(
-                                color=_peer_colors[_ci % len(_peer_colors)],
-                                width=2.5 if _is_main else 1.8,
+                                # The analysed ticker is always ink and always
+                                # solid; peers take the categorical ramp. The
+                                # subject should never be mistakable for a peer.
+                                color=ct.color.ink if _is_main else ct.series_color(_ci),
+                                width=ct.stroke.value if _is_main else ct.stroke.price,
                                 dash="solid" if _is_main else "dot" if _ci > 0 else "solid",
                             ),
                             hovertemplate=f"<b>{_pt}</b>: %{{y:.1f}}<extra></extra>",
                         ))
-                    fig_cum.update_layout(
-                        title=dict(text="Cumulative Return Comparison (Base = 100)",
-                                   font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
+                    ct.style(
+                        fig_cum,
                         height=380,
-                        plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                        margin=dict(l=60, r=90, t=50, b=50),
-                        hovermode="x unified",
-                        font=dict(family="DM Sans, system-ui, sans-serif"),
-                        hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                        font=dict(color="white", size=12, family="DM Sans")),
-                        legend=dict(
-                            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                            font=dict(size=11, family="DM Sans", color="#374151"),
-                            bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
-                        ),
-                        xaxis=dict(type="date", tickformat="%b '%y", title=None,
-                                   gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                   tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                   title_font=dict(size=12, color="#64748b", family="DM Sans")),
-                        yaxis=dict(title="Index (Start = 100)", tickformat=".0f",
-                                   gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                   tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                   title_font=dict(size=12, color="#64748b", family="DM Sans")),
+                        margin=dict(l=52, r=20, t=26, b=30),
+                        x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
+                        y=ct.value_axis(prefix="", tick_format=".0f", zero=False,
+                                        title="Index (Start = 100)"),
                     )
                     st.plotly_chart(fig_cum, use_container_width=True)
 
@@ -3141,41 +3003,30 @@ elif _page == "analysis":
                                 x=_ticks,
                                 y=_mdf["Ann. Return (%)"],
                                 marker_color=[
-                                    "#2ECC71" if v >= 0 else "#FF4136"
+                                    ct.color.positive if v >= 0 else ct.color.negative
                                     for v in _mdf["Ann. Return (%)"]
                                 ],
+                                marker_line_width=0,
                                 hovertemplate="%{x}: %{y:.2f}%<extra>Ann. Return</extra>",
                             ))
                             fig_rv.add_trace(go.Bar(
                                 name="Volatility (%)",
                                 x=_ticks,
                                 y=_mdf["Volatility (%)"],
-                                marker_color="#FFC000",
+                                marker_color=ct.color.value_line, marker_line_width=0,
                                 hovertemplate="%{x}: %{y:.2f}%<extra>Volatility</extra>",
                             ))
-                            fig_rv.update_layout(
-                                barmode="group",
+                            ct.style(
+                                fig_rv,
+                                height=300, barmode="group", crosshair=False,
+                                margin=dict(l=52, r=20, t=26, b=40),
+                                x=ct.category_axis(title="Ticker"),
+                                y=ct.pct_axis(tick_format=".1f", title="Percent (%)",
+                                              zeroline=True, zerolinecolor=ct.color.rule),
                                 title=dict(text="Ann. Return vs Volatility",
-                                           font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                                height=300,
-                                plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(l=60, r=90, t=50, b=50),
-                                hovermode="x unified",
-                                font=dict(family="DM Sans, system-ui, sans-serif"),
-                                hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                                font=dict(color="white", size=12, family="DM Sans")),
-                                legend=dict(
-                                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                                    font=dict(size=11, family="DM Sans", color="#374151"),
-                                    bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
-                                ),
-                                xaxis=dict(title="Ticker", gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                           tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                           title_font=dict(size=12, color="#64748b", family="DM Sans")),
-                                yaxis=dict(title="Percent (%)", ticksuffix="%", tickformat=".1f",
-                                           gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                           tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                           title_font=dict(size=12, color="#64748b", family="DM Sans")),
+                                           font=dict(size=13, color=ct.color.ink,
+                                                     family=ct.font.data),
+                                           x=0, xanchor="left"),
                             )
                             st.plotly_chart(fig_rv, use_container_width=True)
 
@@ -3185,29 +3036,24 @@ elif _page == "analysis":
                                 x=_ticks,
                                 y=_mdf["Sharpe Ratio"],
                                 marker_color=[
-                                    "#2ECC71" if v >= 1 else "#FFC000" if v >= 0 else "#FF4136"
+                                    ct.color.positive if v >= 1 else
+                                    ct.color.value_line if v >= 0 else ct.color.negative
                                     for v in _mdf["Sharpe Ratio"]
                                 ],
+                                marker_line_width=0,
                                 hovertemplate="%{x}: %{y:.2f}<extra>Sharpe</extra>",
                             ))
-                            fig_sh.update_layout(
+                            ct.style(
+                                fig_sh,
+                                height=300, legend=None, crosshair=False,
+                                margin=dict(l=52, r=20, t=26, b=40),
+                                x=ct.category_axis(title="Ticker"),
+                                y=ct.plain_axis(tick_format=".2f", title="Sharpe Ratio",
+                                                zeroline=True, zerolinecolor=ct.color.rule),
                                 title=dict(text="Sharpe Ratio Comparison",
-                                           font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                                showlegend=False,
-                                height=300,
-                                plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(l=60, r=90, t=50, b=50),
-                                hovermode="x unified",
-                                font=dict(family="DM Sans, system-ui, sans-serif"),
-                                hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                                font=dict(color="white", size=12, family="DM Sans")),
-                                xaxis=dict(title="Ticker", gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                           tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                           title_font=dict(size=12, color="#64748b", family="DM Sans")),
-                                yaxis=dict(title="Sharpe Ratio", tickformat=".2f",
-                                           gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                           tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                           title_font=dict(size=12, color="#64748b", family="DM Sans")),
+                                           font=dict(size=13, color=ct.color.ink,
+                                                     family=ct.font.data),
+                                           x=0, xanchor="left"),
                             )
                             st.plotly_chart(fig_sh, use_container_width=True)
 
@@ -3215,27 +3061,19 @@ elif _page == "analysis":
                         fig_dd = go.Figure(go.Bar(
                             x=_ticks,
                             y=_mdf["Max Drawdown (%)"],
-                            marker_color="#FF4136",
+                            marker_color=ct.color.negative, marker_line_width=0,
                             hovertemplate="%{x}: %{y:.2f}%<extra>Max Drawdown</extra>",
                         ))
-                        fig_dd.update_layout(
+                        ct.style(
+                            fig_dd,
+                            height=280, legend=None, crosshair=False,
+                            margin=dict(l=52, r=20, t=26, b=40),
+                            x=ct.category_axis(title="Ticker"),
+                            y=ct.pct_axis(tick_format=".1f", title="Max Drawdown (%)"),
                             title=dict(text="Maximum Drawdown Comparison",
-                                       font=dict(size=13, color="#0f172a", family="DM Sans"), x=0, xanchor="left"),
-                            showlegend=False,
-                            height=280,
-                            plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
-                            margin=dict(l=60, r=90, t=50, b=50),
-                            hovermode="x unified",
-                            font=dict(family="DM Sans, system-ui, sans-serif"),
-                            hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                            font=dict(color="white", size=12, family="DM Sans")),
-                            xaxis=dict(title="Ticker", gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                       tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                       title_font=dict(size=12, color="#64748b", family="DM Sans")),
-                            yaxis=dict(title="Max Drawdown (%)", ticksuffix="%", tickformat=".1f",
-                                       gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0", linewidth=1,
-                                       tickfont=dict(size=11, color="#64748b", family="DM Sans"),
-                                       title_font=dict(size=12, color="#64748b", family="DM Sans")),
+                                       font=dict(size=13, color=ct.color.ink,
+                                                 family=ct.font.data),
+                                       x=0, xanchor="left"),
                         )
                         st.plotly_chart(fig_dd, use_container_width=True)
 

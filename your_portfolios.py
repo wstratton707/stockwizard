@@ -16,6 +16,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import chart_theme as ct
+
 from tracker import track_portfolio, dollars_to_lots, amount_to_shares
 from database import (
     save_tracked_portfolio, load_tracked_portfolios,
@@ -27,13 +29,6 @@ from database import (
 @st.cache_data(ttl=30, show_spinner=False)
 def _storage_status():
     return tracked_storage_status()
-
-DARK  = "#0f172a"
-BLUE  = "#38bdf8"
-GREEN = "#16a34a"
-RED   = "#dc2626"
-AMBER = "#f59e0b"
-MUTED = "#94a3b8"
 
 
 def _section_header(text):
@@ -225,11 +220,11 @@ def _render_card(p, api_key):
     tr = float(m.get("Total Return", 0) or 0)
     dd = float(m.get("Max Drawdown", 0) or 0)
     _kpi_row([
-        ("Current Value", f"${m.get('Final Value', 0):,.0f}", DARK),
-        ("Total Return",  f"{tr:+.1f}%", GREEN if tr >= 0 else RED),
+        ("Current Value", f"${m.get('Final Value', 0):,.0f}", ct.color.ink),
+        ("Total Return",  f"{tr:+.1f}%", ct.color.positive if tr >= 0 else ct.color.negative),
         ("vs S&P 500",    _alpha_str(m.get("vs S&P 500")),
-                          GREEN if (isinstance(m.get("vs S&P 500"), (int, float)) and m["vs S&P 500"] >= 0) else RED),
-        ("Max Drawdown",  f"{dd:.1f}%", RED),
+                          ct.color.positive if (isinstance(m.get("vs S&P 500"), (int, float)) and m["vs S&P 500"] >= 0) else ct.color.negative),
+        ("Max Drawdown",  f"{dd:.1f}%", ct.color.negative),
     ])
     st.caption(f"Tracked since {res['inception_date']}  ·  "
                f"Ann. return {m.get('Ann. Return', 'N/A')}%  ·  Sharpe {m.get('Sharpe Ratio', 'N/A')}")
@@ -238,16 +233,26 @@ def _render_card(p, api_key):
     curve = res["curve"]
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=curve.index, y=curve["Portfolio"],
-                             name="Your Portfolio", line=dict(color=BLUE, width=2.5)))
+                             name="Your Portfolio",
+                             line=dict(color=ct.color.brand, width=ct.stroke.value)))
     if "SP500" in curve.columns and not curve["SP500"].isna().all():
         fig.add_trace(go.Scatter(x=curve.index, y=curve["SP500"],
-                                 name="S&P 500 (same $)", line=dict(color=MUTED, width=1.5, dash="dot")))
+                                 name="S&P 500 (same $)",
+                                 line=dict(color=ct.color.ink_muted, width=ct.stroke.price,
+                                           dash="dot")))
     fig.add_trace(go.Scatter(x=curve.index, y=curve["Contrib"],
-                             name="Invested", line=dict(color=AMBER, width=1.3, dash="dash")))
-    fig.update_layout(height=340, template="plotly_white",
-                      margin=dict(l=0, r=0, t=10, b=0),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                      yaxis=dict(tickprefix="$"), font=dict(family="DM Sans"))
+                             name="Invested",
+                             line=dict(color=ct.color.value_line, width=ct.stroke.price,
+                                       dash="dash")))
+    ct.style(
+        fig,
+        height=340,
+        # A portfolio can be days old, so yearly ticks would label one point.
+        x=ct.time_axis(fy_ticks=False),
+        # Not a filled area, and forcing the base to zero would flatten a curve
+        # whose whole story is the move above the invested line.
+        y=ct.value_axis(zero=False),
+    )
     st.plotly_chart(fig, use_container_width=True, key=f"curve_{pid}")
 
     # Holdings table

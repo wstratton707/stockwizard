@@ -35,14 +35,27 @@ from portfolio_analysis import (
 )
 from portfolio_excel import build_portfolio_excel
 from pptx_builder import build_portfolio_pptx, PPTX_AVAILABLE
+import chart_theme as ct
 
-DARK   = "#0f172a"
-BLUE   = "#38bdf8"
-GREEN  = "#16a34a"
-RED    = "#dc2626"
-AMBER  = "#f59e0b"
-PURPLE = "#8b5cf6"
-MUTED  = "#94a3b8"
+# Accent for the goal/target callout and the rolling-correlation series. The
+# categorical ramp owns it, so it stays in step with every other multi-series
+# chart instead of being a private violet.
+_ACCENT = ct.series_color(3)
+
+# The shared red→white→blue ramp, as the list-of-pairs form Plotly expects.
+_DIVERGING = [list(_stop) for _stop in ct.color.diverging]
+
+# These were a private hex palette. They are now aliases onto the shared chart
+# tokens, so the single source of truth still holds, but the names survive —
+# they are referenced from ~30 call sites, most of them KPI cards and raw HTML
+# rather than chart code, and rewriting those is churn with no visible payoff.
+DARK   = ct.color.ink
+BLUE   = ct.color.brand
+GREEN  = ct.color.positive
+RED    = ct.color.negative
+AMBER  = ct.color.value_line
+PURPLE = _ACCENT
+MUTED  = ct.color.ink_muted
 
 # ── Session state keys ────────────────────────────────────────────────────────
 _K_STEP        = "port_step"
@@ -88,7 +101,7 @@ def _build_sector_lookup():
 _SECTOR_LOOKUP, _BOND_SET = _build_sector_lookup()
 
 
-def _metric_card(label, value, color=DARK, subtitle=None):
+def _metric_card(label, value, color=ct.color.ink, subtitle=None):
     sub = f"<div style='font-size:0.75rem;color:#64748b;margin-top:2px'>{subtitle}</div>" if subtitle else ""
     return f"""
     <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;
@@ -137,7 +150,7 @@ def _render_step_0():
             st.markdown(f"""
             <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
                         padding:0.85rem 1rem;margin-top:0.5rem">
-                <span style="font-weight:600;color:{DARK}">{label}</span>
+                <span style="font-weight:600;color:{ct.color.ink}">{label}</span>
                 <span style="color:#64748b;font-size:0.85rem;margin-left:8px">{desc}</span>
             </div>""", unsafe_allow_html=True)
 
@@ -714,11 +727,11 @@ def _render_step_2(api_key):
     _section_header("Portfolio Overview")
     cols = st.columns(5)
     for col, label, value, color in [
-        (cols[0], "Expected Ann. Return", f"{ann_ret:.1f}%",  GREEN if ann_ret > 0 else RED),
-        (cols[1], "Portfolio Beta",       f"{pbeta:.2f}",      DARK),
-        (cols[2], "Expected Volatility",  f"{ann_vol:.1f}%",  DARK),
-        (cols[3], "Sharpe Ratio",         f"{sharpe:.2f}",    GREEN if sharpe > 1 else AMBER),
-        (cols[4], "Diversification",      f"{div_score}/10",  GREEN if div_score > 6 else AMBER),
+        (cols[0], "Expected Ann. Return", f"{ann_ret:.1f}%",  ct.color.positive if ann_ret > 0 else ct.color.negative),
+        (cols[1], "Portfolio Beta",       f"{pbeta:.2f}",      ct.color.ink),
+        (cols[2], "Expected Volatility",  f"{ann_vol:.1f}%",  ct.color.ink),
+        (cols[3], "Sharpe Ratio",         f"{sharpe:.2f}",    ct.color.positive if sharpe > 1 else ct.color.value_line),
+        (cols[4], "Diversification",      f"{div_score}/10",  ct.color.positive if div_score > 6 else ct.color.value_line),
     ]:
         with col:
             st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
@@ -791,7 +804,7 @@ concentration penalty for any single position above 25%.
         _cmp_cols = st.columns(len(_cmp_rows))
         for _ccol, _crow in zip(_cmp_cols, _cmp_rows):
             _is_sel  = (_crow["key"] == selected_key)
-            _cborder = f"2px solid {BLUE}" if _is_sel else "1px solid #e2e8f0"
+            _cborder = f"2px solid {ct.color.brand}" if _is_sel else "1px solid #e2e8f0"
             _cbg     = "#eff6ff" if _is_sel else "#ffffff"
             _clbl    = ("" if _is_sel else "") + _crow["label"]
             with _ccol:
@@ -799,17 +812,17 @@ concentration penalty for any single position above 25%.
                 <div style="background:{_cbg};border:{_cborder};border-radius:8px;
                             padding:1rem;text-align:center">
                     <div style="font-size:0.68rem;font-weight:700;letter-spacing:1px;
-                                color:{BLUE if _is_sel else "#64748b"};text-transform:uppercase;
+                                color:{ct.color.brand if _is_sel else "#64748b"};text-transform:uppercase;
                                 margin-bottom:0.75rem">{_clbl}</div>
                     <div style="font-size:1.5rem;font-weight:700;
-                                color:{GREEN if _crow['exp_ret']>0 else RED}">
+                                color:{ct.color.positive if _crow['exp_ret']>0 else ct.color.negative}">
                         {_crow['exp_ret']:+.1f}%</div>
                     <div style="font-size:0.68rem;color:#64748b;margin-bottom:0.6rem">Exp. Return · CAPM</div>
                     <div style="font-size:0.82rem;color:#0f172a;margin-bottom:2px">
                         {_crow['sharpe']:.2f} Sharpe</div>
                     <div style="font-size:0.82rem;color:#0f172a;margin-bottom:2px">
                         {_crow['vol']:.1f}% Volatility</div>
-                    <div style="font-size:0.82rem;color:{RED};margin-bottom:0.5rem">
+                    <div style="font-size:0.82rem;color:{ct.color.negative};margin-bottom:0.5rem">
                         {_crow['max_dd']:.1f}% Max DD</div>
                     <div style="font-size:0.7rem;color:#64748b">{_crow['holdings']} holdings</div>
                     <div style="font-size:0.68rem;color:#64748b">{_crow['top']}</div>
@@ -847,10 +860,10 @@ concentration penalty for any single position above 25%.
         _esh = _em.get("sharpe", 0)
         _ear = _em.get("ann_return", 0)
         _eav = _em.get("ann_vol", 0)
-        _esc = GREEN if _esh >= 1 else AMBER if _esh >= 0.5 else RED
+        _esc = ct.color.positive if _esh >= 1 else ct.color.value_line if _esh >= 0.5 else ct.color.negative
         st.markdown(f"""
         <div style="background:#f8fafc;border:1px solid #e2e8f0;
-                    border-left:3px solid {BLUE};border-radius:6px;
+                    border-left:3px solid {ct.color.brand};border-radius:6px;
                     padding:0.6rem 1rem;margin-bottom:0.4rem;
                     display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">
             <div>
@@ -859,10 +872,10 @@ concentration penalty for any single position above 25%.
                             background:#f1f5f9;padding:1px 7px;border-radius:3px">{_ese}</span>
             </div>
             <div style="font-size:0.8rem;color:#64748b">
-                <b style="color:{GREEN if _ear>0 else RED}">{_ear:.1f}%</b> return &nbsp;·&nbsp;
+                <b style="color:{ct.color.positive if _ear>0 else ct.color.negative}">{_ear:.1f}%</b> return &nbsp;·&nbsp;
                 <b style="color:#0f172a">{_eav:.1f}%</b> vol &nbsp;·&nbsp;
                 <b style="color:{_esc}">Sharpe {_esh:.2f}</b> &nbsp;·&nbsp;
-                <b style="color:{BLUE}">{_ew*100:.1f}% weight</b>
+                <b style="color:{ct.color.brand}">{_ew*100:.1f}% weight</b>
             </div>
             <div style="font-size:0.7rem;color:#64748b;font-style:italic">
                 Top-ranked by Sharpe in {_ese}
@@ -872,20 +885,18 @@ concentration penalty for any single position above 25%.
     # Allocation pie chart
     col1, col2 = st.columns(2)
     with col1:
+        _pie_tickers = list(selected_weights.keys())
         fig_pie = go.Figure(go.Pie(
-            labels=list(selected_weights.keys()),
+            labels=_pie_tickers,
             values=[round(v*100,1) for v in selected_weights.values()],
             hole=0.45,
             textinfo="label+percent",
-            marker=dict(colors=px.colors.qualitative.Set3),
+            marker=dict(colors=[ct.series_color(i) for i in range(len(_pie_tickers))],
+                        line=dict(color=ct.color.paper, width=1)),
         ))
-        fig_pie.update_layout(
-            title="Portfolio Allocation",
-            height=380,
-            margin=dict(l=0,r=0,t=40,b=0),
-            showlegend=False,
-            font=dict(family="DM Sans"),
-        )
+        # Full-bleed donut: the 44px value-axis gutter would push it off-centre.
+        ct.style(fig_pie, height=380, grid=False, crosshair=False, legend=None,
+                 title="Portfolio Allocation", margin=dict(l=0, r=0, t=40, b=0))
         st.plotly_chart(fig_pie, use_container_width=True)
 
     with col2:
@@ -899,11 +910,12 @@ concentration penalty for any single position above 25%.
             mode="markers",
             marker=dict(
                 color=ef_df["Sharpe"],
-                colorscale=[[0.0, "#dcfce7"], [1.0, "#15803d"]],
-                size=5, opacity=0.55,
+                colorscale=[[0.0, ct.color.corridor_high],
+                            [1.0, ct.color.corridor_base]],
+                size=ct.marker.size, opacity=0.55,
                 colorbar=dict(title=dict(text="Sharpe", side="top"),
                               thickness=10, len=0.8, x=1.0, xanchor="left",
-                              tickfont=dict(size=9), outlinewidth=0),
+                              tickfont=dict(size=ct.font.size.axis), outlinewidth=0),
             ),
             name="Random portfolios",
             hovertemplate="Volatility %{x:.1f}%<br>Return %{y:.1f}%<extra></extra>",
@@ -913,24 +925,19 @@ concentration penalty for any single position above 25%.
         fig_ef.add_trace(go.Scatter(
             x=[ann_vol], y=[ann_ret],
             mode="markers",
-            marker=dict(color=BLUE, size=17, symbol="star",
-                        line=dict(color="white", width=2)),
+            marker=dict(color=ct.color.brand, size=17, symbol="star",
+                        line=dict(color=ct.marker.fill, width=2)),
             name="Your portfolio",
             hovertemplate=("Your portfolio<br>Volatility %{x:.1f}%"
                            "<br>Return %{y:.1f}%<extra></extra>"),
         ))
-        fig_ef.update_layout(
-            title=dict(text="Efficient Frontier", font=dict(size=13, color=DARK),
-                       x=0, xanchor="left"),
-            xaxis=dict(title="Volatility (%)", gridcolor="#e2e8f0", zeroline=False),
-            yaxis=dict(title="Expected Return (%)", gridcolor="#e2e8f0", zeroline=False),
-            height=380,
-            template="plotly_white",
-            plot_bgcolor="white",
+        # Right margin holds the Sharpe colorbar (x=1.0, anchored left).
+        ct.style(
+            fig_ef, height=380, legend="bottom", crosshair=False,
+            title="Efficient Frontier",
+            x=ct.plain_axis(title="Volatility (%)", showgrid=False),
+            y=ct.plain_axis(title="Expected Return (%)"),
             margin=dict(l=0, r=44, t=40, b=44),
-            font=dict(family="DM Sans", color="#64748b"),
-            legend=dict(orientation="h", yanchor="top", y=-0.18,
-                        x=0.5, xanchor="center"),
         )
         st.plotly_chart(fig_ef, use_container_width=True)
 
@@ -943,10 +950,11 @@ concentration penalty for any single position above 25%.
     ]
     if not corr_show.empty:
         fig_corr = px.imshow(corr_show, text_auto=".2f",
-                             color_continuous_scale=["#dc2626","#ffffff","#0ea5e9"],
+                             color_continuous_scale=_DIVERGING,
                              zmin=-1, zmax=1, aspect="auto")
-        fig_corr.update_layout(height=320, margin=dict(l=0,r=0,t=10,b=0),
-                               font=dict(family="DM Sans"))
+        ct.style(fig_corr, height=320, grid=False, crosshair=False, legend=None,
+                 x=ct.category_axis(), y=ct.category_axis(),
+                 margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig_corr, use_container_width=True)
 
     # ── Sector Exposure vs. S&P 500 Benchmark ────────────────────────────
@@ -971,19 +979,18 @@ concentration penalty for any single position above 25%.
 
     fig_sec = go.Figure()
     fig_sec.add_trace(go.Bar(name="Your Portfolio", x=_sec_labels, y=_pv,
-        marker_color=BLUE, text=[f"{v:.1f}%" for v in _pv],
-        textposition="outside", textfont=dict(size=9)))
+        marker_color=ct.color.brand, text=[f"{v:.1f}%" for v in _pv],
+        textposition="outside", textfont=dict(size=ct.font.size.axis)))
     fig_sec.add_trace(go.Bar(name="S&P 500", x=_sec_labels, y=_sv,
-        marker_color=MUTED, opacity=0.55,
+        marker_color=ct.color.ink_muted, opacity=0.55,
         text=[f"{v:.1f}%" for v in _sv],
-        textposition="outside", textfont=dict(size=9)))
-    fig_sec.update_layout(
-        barmode="group", height=360, template="plotly_white",
+        textposition="outside", textfont=dict(size=ct.font.size.axis)))
+    # Deep bottom margin carries the angled sector labels.
+    ct.style(
+        fig_sec, height=360, barmode="group",
+        x=ct.category_axis(tickangle=-30),
+        y=ct.pct_axis(title="Weight (%)"),
         margin=dict(l=0, r=0, t=30, b=100),
-        yaxis=dict(title="Weight (%)", ticksuffix="%"),
-        xaxis=dict(tickangle=-30),
-        legend=dict(orientation="h", y=1.06),
-        font=dict(family="DM Sans", size=11),
     )
     st.plotly_chart(fig_sec, use_container_width=True)
 
@@ -1066,21 +1073,19 @@ def _render_step_3():
     fig_bt = go.Figure()
     fig_bt.add_trace(go.Scatter(
         x=bt_df.index, y=bt_df["Portfolio"],
-        name="Your Portfolio", line=dict(color=BLUE, width=2.5)))
+        name="Your Portfolio", line=dict(color=ct.color.brand, width=ct.stroke.value)))
     if "SP500" in bt_df.columns and not bt_df["SP500"].isna().all():
         fig_bt.add_trace(go.Scatter(
             x=bt_df.index, y=bt_df["SP500"],
-            name="S&P 500 (SPY)", line=dict(color=MUTED, width=1.5, dash="dot")))
+            name="S&P 500 (SPY)", line=dict(color=ct.color.ink_muted,
+                                            width=ct.stroke.price, dash="dot")))
     fig_bt.add_trace(go.Scatter(
         x=bt_df.index, y=bt_df["Contrib"],
-        name="Total Contributed", line=dict(color=AMBER, width=1.5, dash="dash")))
-    fig_bt.update_layout(
-        height=380, template="plotly_white",
-        margin=dict(l=0,r=0,t=10,b=0),
-        legend=dict(orientation="h",yanchor="bottom",y=1.02),
-        yaxis=dict(tickprefix="$"),
-        font=dict(family="DM Sans"),
-    )
+        name="Total Contributed", line=dict(color=ct.color.value_line,
+                                            width=ct.stroke.price, dash="dash")))
+    # Section header supplies the title, so keep the tight top margin; the left
+    # gutter is the theme's, so the "$" tick labels are no longer clipped.
+    ct.style(fig_bt, height=380, margin=dict(l=44, r=16, t=10, b=30))
     st.plotly_chart(fig_bt, use_container_width=True)
 
     # Drawdown chart — use the contribution-free NAV index so monthly cash
@@ -1093,13 +1098,16 @@ def _render_step_3():
     fig_dd   = go.Figure()
     fig_dd.add_trace(go.Scatter(
         x=bt_df.index, y=drawdown,
-        fill="tozeroy", fillcolor="rgba(220,38,38,0.12)",
-        line=dict(color=RED, width=1.5), name="Drawdown"))
-    fig_dd.update_layout(
-        height=220, template="plotly_white",
-        margin=dict(l=0,r=0,t=10,b=0),
-        yaxis=dict(ticksuffix="%"),
-        font=dict(family="DM Sans"),
+        fill="tozeroy", fillcolor=ct._rgba(ct.color.negative, 0.12),
+        line=dict(color=ct.color.negative, width=ct.stroke.price), name="Drawdown"))
+    # zero=False: drawdown is negative-only, so pinning the base at zero would
+    # be pinning the top of the series and flattening it against the axis.
+    ct.style(
+        fig_dd,
+        height=220, legend=None,
+        margin=dict(l=52, r=16, t=10, b=24),
+        x=ct.time_axis(fy_ticks=False),
+        y=ct.pct_axis(tick_format=".0f", zero=False),
     )
     st.plotly_chart(fig_dd, use_container_width=True)
 
@@ -1170,15 +1178,22 @@ def _render_step_3():
         fig_hmap = px.imshow(
             hmap.fillna(0),
             text_auto=".1f",
-            color_continuous_scale=["#dc2626","#ffffff","#16a34a"],
+            # Green-positive rather than the shared blue-positive ramp: on a
+            # monthly-return grid, red/green is the convention readers already
+            # have, and inverting it here would misread at a glance.
+            color_continuous_scale=[[0.0, ct.color.negative],
+                                    [0.5, ct.color.paper],
+                                    [1.0, ct.color.positive]],
             zmin=-15, zmax=15,
             aspect="auto",
         )
-        fig_hmap.update_layout(
+        ct.style(
+            fig_hmap,
             height=max(200, len(hmap)*35 + 60),
-            margin=dict(l=0,r=0,t=10,b=0),
+            margin=dict(l=52, r=16, t=10, b=10),
+            legend=None, grid=False, crosshair=False,
+            x=ct.category_axis(), y=ct.category_axis(),
             coloraxis_showscale=False,
-            font=dict(family="DM Sans"),
         )
         fig_hmap.update_traces(textfont_size=9)
         st.plotly_chart(fig_hmap, use_container_width=True)
@@ -1194,18 +1209,19 @@ def _render_step_3():
         _roll_vol = (_port_ret_full.rolling(60).std() * np.sqrt(252) * 100).dropna()
         _fig_rvol = go.Figure(go.Scatter(
             x=_roll_vol.index, y=_roll_vol,
-            fill="tozeroy", fillcolor="rgba(245,158,11,0.08)",
-            line=dict(color=AMBER, width=2),
+            fill="tozeroy", fillcolor=ct._rgba(ct.color.value_line, 0.08),
+            line=dict(color=ct.color.value_line, width=ct.stroke.price),
             hovertemplate="Vol: %{y:.1f}%<extra></extra>",
         ))
-        _fig_rvol.update_layout(
-            title=dict(text="Rolling 60D Volatility (%)", font=dict(size=12)),
-            height=230, template="plotly_white",
-            margin=dict(l=10, r=10, t=36, b=30),
-            yaxis=dict(ticksuffix="%", gridcolor="#e2e8f0"),
-            xaxis=dict(gridcolor="#e2e8f0"),
-            font=dict(family="DM Sans", size=10),
-            showlegend=False,
+        ct.style(
+            _fig_rvol,
+            height=230, legend=None,
+            margin=dict(l=44, r=10, t=32, b=26),
+            x=ct.time_axis(fy_ticks=False),
+            y=ct.pct_axis(tick_format=".0f"),
+            title=dict(text="Rolling 60D Volatility (%)",
+                       font=dict(size=12, color=ct.color.ink, family=ct.font.data),
+                       x=0, xanchor="left"),
         )
         st.plotly_chart(_fig_rvol, use_container_width=True)
 
@@ -1216,20 +1232,23 @@ def _render_step_3():
         _sh_colors = [GREEN if v >= 1 else AMBER if v >= 0 else RED for v in _rsh]
         _fig_rsh = go.Figure(go.Scatter(
             x=_rsh.index, y=_rsh,
-            line=dict(color=BLUE, width=2),
+            line=dict(color=ct.color.brand, width=ct.stroke.price),
             hovertemplate="Sharpe: %{y:.2f}<extra></extra>",
         ))
-        _fig_rsh.add_hline(y=1.0, line_dash="dot", line_color=GREEN, opacity=0.5,
+        _fig_rsh.add_hline(y=1.0, line_dash="dot", line_color=ct.color.positive, opacity=0.5,
                            annotation_text="1.0", annotation_font_size=9)
-        _fig_rsh.add_hline(y=0.0, line_dash="dot", line_color=RED, opacity=0.4)
-        _fig_rsh.update_layout(
-            title=dict(text=f"Rolling {_roll_w//21}M Sharpe Ratio", font=dict(size=12)),
-            height=230, template="plotly_white",
-            margin=dict(l=10, r=10, t=36, b=30),
-            yaxis=dict(gridcolor="#e2e8f0"),
-            xaxis=dict(gridcolor="#e2e8f0"),
-            font=dict(family="DM Sans", size=10),
-            showlegend=False,
+        _fig_rsh.add_hline(y=0.0, line_dash="dot", line_color=ct.color.negative, opacity=0.4)
+        # zero=False: a rolling Sharpe goes negative, and the 0.0 reference line
+        # above is the meaningful boundary, not an axis floor.
+        ct.style(
+            _fig_rsh,
+            height=230, legend=None,
+            margin=dict(l=44, r=10, t=32, b=26),
+            x=ct.time_axis(fy_ticks=False),
+            y=ct.plain_axis(tick_format=".1f", zero=False),
+            title=dict(text=f"Rolling {_roll_w//21}M Sharpe Ratio",
+                       font=dict(size=12, color=ct.color.ink, family=ct.font.data),
+                       x=0, xanchor="left"),
         )
         st.plotly_chart(_fig_rsh, use_container_width=True)
 
@@ -1243,20 +1262,22 @@ def _render_step_3():
                 _rcorr = _aligned["port"].rolling(_roll_w).corr(_aligned["sp"]).dropna()
                 _fig_rc = go.Figure(go.Scatter(
                     x=_rcorr.index, y=_rcorr,
-                    fill="tozeroy", fillcolor="rgba(139,92,246,0.08)",
-                    line=dict(color=PURPLE, width=2),
+                    fill="tozeroy", fillcolor=ct._rgba(_ACCENT, 0.08),
+                    line=dict(color=_ACCENT, width=ct.stroke.price),
                     hovertemplate="Corr: %{y:.2f}<extra></extra>",
                 ))
-                _fig_rc.add_hline(y=0.7, line_dash="dot", line_color=AMBER, opacity=0.5,
-                                  annotation_text="0.7 high", annotation_font_size=9)
-                _fig_rc.update_layout(
-                    title=dict(text="Rolling Correlation vs S&P 500", font=dict(size=12)),
-                    height=230, template="plotly_white",
-                    margin=dict(l=10, r=10, t=36, b=30),
-                    yaxis=dict(range=[-1.1, 1.1], gridcolor="#e2e8f0"),
-                    xaxis=dict(gridcolor="#e2e8f0"),
-                    font=dict(family="DM Sans", size=10),
-                    showlegend=False,
+                _fig_rc.add_hline(y=0.7, line_dash="dot", line_color=ct.color.value_line,
+                                  opacity=0.5, annotation_text="0.7 high",
+                                  annotation_font_size=9)
+                ct.style(
+                    _fig_rc,
+                    height=230, legend=None,
+                    margin=dict(l=44, r=10, t=32, b=26),
+                    x=ct.time_axis(fy_ticks=False),
+                    y=ct.plain_axis(range=[-1.1, 1.1], tick_format=".1f"),
+                    title=dict(text="Rolling Correlation vs S&P 500",
+                               font=dict(size=12, color=ct.color.ink, family=ct.font.data),
+                               x=0, xanchor="left"),
                 )
                 st.plotly_chart(_fig_rc, use_container_width=True)
             else:
@@ -1286,9 +1307,11 @@ def _render_step_3():
             x=_attr_df["Contribution (%)"],
             y=_attr_df["Ticker"],
             orientation="h",
-            marker_color=_attr_colors,
+            marker_color=_attr_colors, marker_line_width=0,
             text=[f"{v:+.2f}%" for v in _attr_df["Contribution (%)"]],
             textposition="outside",
+            textfont=dict(size=ct.font.size.grid, family=ct.font.data,
+                          color=ct.color.ink_muted),
             customdata=np.stack([_attr_df["Weight"]*100, _attr_df["Ann. Return (%)"]], axis=-1),
             hovertemplate=(
                 "<b>%{y}</b><br>"
@@ -1297,17 +1320,20 @@ def _render_step_3():
                 "Contribution: %{x:+.2f}%<extra></extra>"
             ),
         ))
-        _fig_attr.update_layout(
-            title=dict(text="Weighted Return Contribution by Holding",
-                       font=dict(size=13)),
+        # Horizontal bars: the value axis is x, so the gridlines live there and
+        # y is the category axis. zero=False because contributions are signed.
+        ct.style(
+            _fig_attr,
             height=max(260, len(_attr_rows) * 38 + 60),
-            template="plotly_white",
-            margin=dict(l=60, r=80, t=44, b=30),
-            xaxis=dict(title="Contribution to Portfolio Return (%)",
-                       ticksuffix="%", gridcolor="#e2e8f0"),
-            yaxis=dict(gridcolor="#e2e8f0"),
-            font=dict(family="DM Sans"),
-            showlegend=False,
+            legend=None, crosshair=False,
+            margin=dict(l=64, r=72, t=38, b=30),
+            x=ct.pct_axis(tick_format=".1f", zero=False,
+                          title="Contribution to Portfolio Return (%)",
+                          zeroline=True, zerolinecolor=ct.color.rule),
+            y=ct.category_axis(),
+            title=dict(text="Weighted Return Contribution by Holding",
+                       font=dict(size=13, color=ct.color.ink, family=ct.font.data),
+                       x=0, xanchor="left"),
         )
         st.plotly_chart(_fig_attr, use_container_width=True)
 
@@ -1583,13 +1609,14 @@ reflects that.
     if prefs.get("target_value"):
         fig_mc.add_hline(y=prefs["target_value"], line_dash="dash", line_color=PURPLE,
                          opacity=0.7, annotation_text="Your goal", annotation_position="right")
-    fig_mc.update_layout(
-        height=400, template="plotly_white",
-        margin=dict(l=0,r=0,t=10,b=0),
-        xaxis_title="Trading Days",
-        yaxis=dict(title="Portfolio Value ($)", tickprefix="$"),
-        legend=dict(orientation="h",yanchor="bottom",y=1.02),
-        font=dict(family="DM Sans"),
+    ct.style(
+        fig_mc,
+        height=400,
+        margin=dict(l=64, r=16, t=26, b=40),
+        x=ct.linear_axis(title="Trading Days"),
+        # zero=False: the fan starts at the opening capital, and anchoring the
+        # axis at $0 would squeeze the whole projection into the top band.
+        y=ct.value_axis(zero=False, title="Portfolio Value ($)"),
     )
     st.plotly_chart(fig_mc, use_container_width=True)
 

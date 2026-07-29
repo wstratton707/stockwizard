@@ -9,6 +9,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import chart_theme as ct
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import time
@@ -327,46 +328,35 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                 name="Your Portfolio",
                 x=s_names,
                 y=p_rets,
-                marker_color=["#16a34a" if r >= 0 else "#dc2626" for r in p_rets],
+                # Sign carries the meaning here — a scenario is a gain or a loss.
+                marker_color=[ct.color.positive if r >= 0 else ct.color.negative
+                              for r in p_rets],
                 text=[f"{r:+.1f}%" for r in p_rets],
                 textposition="outside",
-                textfont=dict(size=10, family="DM Sans"),
+                textfont=dict(size=ct.font.size.axis, family=ct.font.data),
             ))
             fig.add_trace(go.Bar(
                 name="S&P 500 (SPY)",
                 x=s_names,
                 y=spy_rets,
-                marker_color="rgba(148,163,184,0.55)",
+                # The benchmark is context, not a result: unsigned and recessive.
+                marker_color=ct._rgba(ct.color.ink_muted, 0.55),
                 text=[f"{r:+.1f}%" for r in spy_rets],
                 textposition="outside",
-                textfont=dict(size=10, family="DM Sans"),
+                textfont=dict(size=ct.font.size.axis, family=ct.font.data),
             ))
-            fig.update_layout(
-                barmode="group",
+            ct.style(
+                fig,
                 height=380,
-                template=None,
-                plot_bgcolor="#ffffff",
-                paper_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=10, r=10, t=40, b=90),
-                legend=dict(
-                    orientation="h", yanchor="top", y=0.99, xanchor="left", x=0.01,
-                    font=dict(size=11, family="DM Sans"),
-                    bgcolor="rgba(255,255,255,0.9)", bordercolor="#e2e8f0", borderwidth=1,
-                ),
-                xaxis=dict(
-                    tickangle=-18,
-                    tickfont=dict(size=10, family="DM Sans"),
-                    gridcolor="#e2e8f0", showline=True, linecolor="#e2e8f0",
-                ),
-                yaxis=dict(
-                    ticksuffix="%", tickformat=".0f",
-                    zeroline=True, zerolinecolor="#cbd5e1", zerolinewidth=1.5,
-                    gridcolor="#e2e8f0", autorange=True, rangemode="normal",
-                    tickfont=dict(size=11, family="DM Sans"),
-                ),
-                font=dict(family="DM Sans, system-ui, sans-serif"),
-                hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                font=dict(color="white", size=12, family="DM Sans")),
+                # automargin reserves whatever the angled scenario names need,
+                # instead of the hardcoded 90px bottom margin this used to carry.
+                x=ct.category_axis(tickangle=-18, automargin=True),
+                # Zero is the win/lose boundary on this chart, so it stays drawn.
+                y=ct.pct_axis(zeroline=True, zerolinecolor=ct.color.rule,
+                              zerolinewidth=ct.stroke.rule),
+                legend="top-left",
+                crosshair=False,
+                barmode="group",
             )
             st.plotly_chart(fig, use_container_width=True)
 
@@ -545,31 +535,22 @@ def render_stress_test(api_key: str, is_pro: bool = False):
             fig_at.add_trace(go.Bar(
                 x=ctickers,
                 y=cvalues,
-                marker_color=["#16a34a" if v >= 0 else "#dc2626" for v in cvalues],
+                # Helped vs hurt is the whole point of this chart — keep it by sign.
+                marker_color=[ct.color.positive if v >= 0 else ct.color.negative
+                              for v in cvalues],
                 text=[f"{v:+.2f}%" for v in cvalues],
                 textposition="outside",
-                textfont=dict(size=10, family="DM Sans"),
+                textfont=dict(size=ct.font.size.axis, family=ct.font.data),
                 hovertemplate="<b>%{x}</b><br>P&L contribution: %{y:+.2f}%<extra></extra>",
             ))
-            fig_at.add_hline(y=0, line_color="#94a3b8", line_width=1)
-            fig_at.update_layout(
+            fig_at.add_hline(y=0, line_color=ct.color.rule, line_width=ct.stroke.rule)
+            ct.style(
+                fig_at,
                 height=320,
-                template=None,
-                plot_bgcolor="#ffffff",
-                paper_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=10, r=10, t=30, b=50),
-                yaxis=dict(
-                    ticksuffix="%", tickformat=".1f",
-                    autorange=True, rangemode="normal",
-                    zeroline=True, zerolinecolor="#e2e8f0", zerolinewidth=1,
-                    gridcolor="#e2e8f0",
-                    tickfont=dict(size=11, family="DM Sans"),
-                ),
-                xaxis=dict(tickfont=dict(size=11, family="DM Sans")),
-                font=dict(family="DM Sans, system-ui, sans-serif"),
-                showlegend=False,
-                hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155",
-                                font=dict(color="white", size=12, family="DM Sans")),
+                x=ct.category_axis(automargin=True),
+                y=ct.pct_axis(tick_format=".1f"),
+                legend=None,
+                crosshair=False,
             )
             st.plotly_chart(fig_at, use_container_width=True)
 
@@ -641,23 +622,22 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                     z=corr.values,
                     x=corr.columns.tolist(),
                     y=corr.index.tolist(),
-                    colorscale=[[0, "#ef4444"], [0.5, "#ffffff"], [1, "#1d4ed8"]],
+                    colorscale=ct.color.diverging,
                     zmin=-1, zmax=1,
                     text=[[f"{v:.2f}" for v in row] for row in corr.values],
                     texttemplate="%{text}",
-                    textfont=dict(size=10, family="DM Sans"),
+                    textfont=dict(size=ct.font.size.axis, family=ct.font.data),
                     colorbar=dict(thickness=12, len=0.8),
                     hovertemplate="%{x} ↔ %{y}: %{z:.2f}<extra></extra>",
                 ))
-                fig_corr.update_layout(
+                ct.style(
+                    fig_corr,
                     height=max(300, len(avail) * 42 + 80),
-                    template=None,
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="#ffffff",
-                    margin=dict(l=10, r=60, t=30, b=10),
-                    font=dict(family="DM Sans, system-ui, sans-serif", size=11),
-                    xaxis=dict(tickfont=dict(size=10, family="DM Sans")),
-                    yaxis=dict(tickfont=dict(size=10, family="DM Sans")),
+                    x=ct.category_axis(automargin=True),
+                    y=ct.category_axis(automargin=True),
+                    grid=False,
+                    legend=None,
+                    crosshair=False,
                 )
                 st.plotly_chart(fig_corr, use_container_width=True)
 
