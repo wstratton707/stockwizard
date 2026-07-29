@@ -865,57 +865,33 @@ button[kind^="primary"]:active,
   box-shadow: var(--shadow-blue) !important;
 }
 
-/* ── Office-branded export buttons ──
-   Excel export in Excel green, PowerPoint export in PowerPoint orange. Keyed on
-   the widget keys (gen_/dl_ + excel/pptx, top & bottom), so both the "Export"
-   and "Download" states, in both page locations, pick up the brand colour. */
-[class*="st-key-gen_excel"] button,
-[class*="st-key-dl_excel"] button {
-  background: #217346 !important;
-  border: 1px solid #217346 !important;
+/* ── Research-package download button ──
+   These used to paint the generate/download buttons in Office brand colours —
+   Excel green, PowerPoint orange, Word blue — back when there were three
+   coequal export buttons side by side. There is one action now ("Generate
+   research package") with format as a secondary radio, so borrowing another
+   product's brand colour for it is both off-palette and misleading: the button
+   generates a QuantWizard report, it does not launch Excel.
+
+   The generate button keeps the app's primary style. Only the download button
+   is tinted, and in the brand green, to mark it as the completed state. */
+[class*="st-key-dl_excel"] button,
+[class*="st-key-dl_pptx"]  button,
+[class*="st-key-dl_word"]  button {
+  background: var(--green) !important;
+  border: 1px solid var(--green) !important;
   box-shadow: none !important;
 }
-[class*="st-key-gen_excel"] button:hover,
-[class*="st-key-dl_excel"] button:hover {
-  background: #1a5c38 !important;
-  border-color: #1a5c38 !important;
-}
-[class*="st-key-gen_pptx"] button,
-[class*="st-key-dl_pptx"] button {
-  background: #c43e1c !important;
-  border: 1px solid #c43e1c !important;
-  box-shadow: none !important;
-}
-[class*="st-key-gen_pptx"] button:hover,
-[class*="st-key-dl_pptx"] button:hover {
-  background: #a83417 !important;
-  border-color: #a83417 !important;
-}
-[class*="st-key-gen_word"] button,
-[class*="st-key-dl_word"] button {
-  background: #2b579a !important;
-  border: 1px solid #2b579a !important;
-  box-shadow: none !important;
-}
-[class*="st-key-gen_word"] button:hover,
-[class*="st-key-dl_word"] button:hover {
-  background: #22467d !important;
-  border-color: #22467d !important;
+[class*="st-key-dl_excel"] button:hover,
+[class*="st-key-dl_pptx"]  button:hover,
+[class*="st-key-dl_word"]  button:hover {
+  filter: brightness(0.92);
 }
 /* White label — high specificity (incl. the markdown container) so it beats the
    global slate text rule that otherwise bleeds dark onto the button labels. */
-[class*="st-key-gen_excel"] button, [class*="st-key-gen_excel"] button *,
-[class*="st-key-dl_excel"]  button, [class*="st-key-dl_excel"]  button *,
-[class*="st-key-gen_pptx"]  button, [class*="st-key-gen_pptx"]  button *,
-[class*="st-key-dl_pptx"]   button, [class*="st-key-dl_pptx"]   button *,
-[class*="st-key-gen_word"]  button, [class*="st-key-gen_word"]  button *,
-[class*="st-key-dl_word"]   button, [class*="st-key-dl_word"]   button *,
-[class*="st-key-gen_excel"] button [data-testid="stMarkdownContainer"] p,
-[class*="st-key-dl_excel"]  button [data-testid="stMarkdownContainer"] p,
-[class*="st-key-gen_pptx"]  button [data-testid="stMarkdownContainer"] p,
-[class*="st-key-dl_pptx"]   button [data-testid="stMarkdownContainer"] p,
-[class*="st-key-gen_word"]  button [data-testid="stMarkdownContainer"] p,
-[class*="st-key-dl_word"]   button [data-testid="stMarkdownContainer"] p {
+[class*="st-key-dl_excel"] button, [class*="st-key-dl_excel"] button *,
+[class*="st-key-dl_pptx"]  button, [class*="st-key-dl_pptx"]  button *,
+[class*="st-key-dl_word"]  button, [class*="st-key-dl_word"]  button * {
   color: #ffffff !important;
   fill:  #ffffff !important;
 }

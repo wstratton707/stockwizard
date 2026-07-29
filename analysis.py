@@ -319,10 +319,20 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
 
     # ── EV / EBITDA ───────────────────────────────────────────────────────────
     da         = _fin_val(inc, "depreciation_amortization")
+    # Polygon's balance sheet has NO cash column. Left to fall through, cash
+    # reads as None and net debt below silently becomes GROSS debt — for NKE
+    # that was $7.96B against a true $0.38B, an error the size of the entire
+    # cash balance, which inflates enterprise value and understates fair value
+    # per share in the DCF. The SEC path does carry `cash`; the supplement is
+    # what keeps the Polygon fallback from being quietly wrong.
     cash_bal   = _fin_val(bal, "cash")
+    if cash_bal is None:
+        cash_bal = _sup("cash")
     debt_cur   = _fin_val(bal, "debt_current")
     total_debt = (sum(v for v in (ltd, debt_cur) if v is not None)
                   if (ltd is not None or debt_cur is not None) else None)
+    if total_debt is None:
+        total_debt = _sup("total_debt")
     ebitda     = (oi + da) if (oi is not None and da is not None) else None
     ev         = (mcap + (total_debt or 0) - (cash_bal or 0)) if mcap else None
     ev_ebitda  = ratio(ev, ebitda) if (ev is not None and ebitda and ebitda > 0) else None

@@ -1602,76 +1602,71 @@ elif _page == "analysis":
             # same cached file, so building once serves both.
             _report_id = f"{ticker_input}|{period_label}|{bar_size}"
 
+            # One action, not three. Three coequal buttons framed the report as
+            # three products, invited a single user to build all three (each one
+            # renders matplotlib charts into a workbook or deck, which is the
+            # memory spike on a small instance), and fought the pricing model —
+            # there is one purchase here, not one per file format. Format is a
+            # preference chosen once, so it is a secondary control.
+            _FORMATS = [
+                ("Excel workbook", "excel", ".xlsx",
+                 "The full model — every metric, the DCF with live assumption "
+                 "cells you can change, and the underlying data."),
+            ]
+            if PPTX_AVAILABLE:
+                _FORMATS.append(("PowerPoint deck", "pptx", ".pptx",
+                                 "The conclusions, laid out to present."))
+            if DOCX_AVAILABLE:
+                _FORMATS.append(("Word memo", "word", ".docx",
+                                 "The written thesis, ready to edit."))
+
             def _stock_exports(suffix):
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    _ready = st.session_state.get("_excel_id") == _report_id
-                    if not _ready and st.button("Export to Excel",
+                _labels = [f[0] for f in _FORMATS]
+                _pick = st.radio("Format", _labels, horizontal=True,
+                                 key=f"fmt_{suffix}", label_visibility="collapsed")
+                _name, _kind, _ext, _blurb = next(
+                    f for f in _FORMATS if f[0] == (_pick or _labels[0]))
+                st.markdown(
+                    f'<div style="font-size:0.8rem;color:var(--muted);'
+                    f'margin:-0.35rem 0 0.6rem">{_blurb}</div>',
+                    unsafe_allow_html=True)
+
+                _id_key, _buf_key = f"_{_kind}_id", f"_{_kind}_buf"
+                _ready = st.session_state.get(_id_key) == _report_id
+
+                _bc = st.columns([1.6, 2.4])
+                with _bc[0]:
+                    if not _ready and st.button("Generate research package",
+                                                type="primary",
                                                 use_container_width=True,
-                                                key=f"gen_excel_{suffix}"):
-                        with st.spinner("Building your Excel workbook…"):
-                            st.session_state["_excel_buf"] = build_excel(
-                                ticker_input, df, period_label,
-                                company_details=company_details, sector_df=sector_df,
-                                mc_sim_df=mc_sim_df, mc_summary=mc_summary,
-                                news_list=news_list, peer_df=peer_df,
-                                corr_matrix=corr_matrix,
-                                resistance_levels=resistance, support_levels=support,
-                                summary_text=summary_text,
-                                bar_size=bar_size, fundamentals=_fund_report,
-                                analyst_data=_analyst_report, dcf=_dcf_report,
-                            )
-                            st.session_state["_excel_id"] = _report_id
-                        _ready = True
-                    if _ready:
-                        st.session_state["_excel_buf"].seek(0)
-                        st.download_button(
-                            "Download Excel (.xlsx)",
-                            data=st.session_state["_excel_buf"],
-                            file_name=f"{ticker_input}_{period_label}_Analysis.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True, key=f"dl_excel_{suffix}",
-                        )
-                with c2:
-                    if PPTX_AVAILABLE:
-                        _readyp = st.session_state.get("_pptx_id") == _report_id
-                        if not _readyp and st.button("Export to PowerPoint",
-                                                     use_container_width=True,
-                                                     key=f"gen_pptx_{suffix}"):
-                            with st.spinner("Building your PowerPoint deck…"):
-                                try:
-                                    st.session_state["_pptx_buf"] = build_stock_pptx(
+                                                key=f"gen_{_kind}_{suffix}"):
+                        with st.spinner(f"Building your {_name.lower()}…"):
+                            try:
+                                if _kind == "excel":
+                                    st.session_state[_buf_key] = build_excel(
+                                        ticker_input, df, period_label,
+                                        company_details=company_details, sector_df=sector_df,
+                                        mc_sim_df=mc_sim_df, mc_summary=mc_summary,
+                                        news_list=news_list, peer_df=peer_df,
+                                        corr_matrix=corr_matrix,
+                                        resistance_levels=resistance, support_levels=support,
+                                        summary_text=summary_text,
+                                        bar_size=bar_size, fundamentals=_fund_report,
+                                        analyst_data=_analyst_report, dcf=_dcf_report,
+                                    )
+                                elif _kind == "pptx":
+                                    # dcf= was missing here while Excel and Word
+                                    # both passed it, so the deck's valuation
+                                    # slide had nothing to render.
+                                    st.session_state[_buf_key] = build_stock_pptx(
                                         ticker_input, df, period_label,
                                         company_details=company_details,
                                         mc_sim_df=mc_sim_df, mc_summary=mc_summary,
                                         news_list=news_list, summary_text=summary_text,
-                                        fundamentals=_fund_report,
+                                        fundamentals=_fund_report, dcf=_dcf_report,
                                     )
-                                except Exception:
-                                    st.session_state["_pptx_buf"] = None
-                                st.session_state["_pptx_id"] = _report_id
-                            _readyp = True
-                        if _readyp:
-                            _pb = st.session_state.get("_pptx_buf")
-                            if _pb is not None:
-                                _pb.seek(0)
-                                st.download_button(
-                                    "Download PowerPoint (.pptx)", data=_pb,
-                                    file_name=f"{ticker_input}_{period_label}_Analysis.pptx",
-                                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                    use_container_width=True, key=f"dl_pptx_{suffix}",
-                                )
-                            else:
-                                st.caption("PowerPoint export isn't available.")
-                with c3:
-                    if DOCX_AVAILABLE:
-                        _readyw = st.session_state.get("_word_id") == _report_id
-                        if not _readyw and st.button("Export to Word",
-                                                     use_container_width=True,
-                                                     key=f"gen_word_{suffix}"):
-                            with st.spinner("Writing your Word report…"):
-                                try:
-                                    st.session_state["_word_buf"] = build_stock_docx(
+                                else:
+                                    st.session_state[_buf_key] = build_stock_docx(
                                         ticker_input, df, period_label,
                                         company_details=company_details,
                                         mc_summary=mc_summary, news_list=news_list,
@@ -1679,22 +1674,27 @@ elif _page == "analysis":
                                         fundamentals=_fund_report,
                                         analyst_data=_analyst_report, dcf=_dcf_report,
                                     )
-                                except Exception:
-                                    st.session_state["_word_buf"] = None
-                                st.session_state["_word_id"] = _report_id
-                            _readyw = True
-                        if _readyw:
-                            _wb = st.session_state.get("_word_buf")
-                            if _wb is not None:
-                                _wb.seek(0)
-                                st.download_button(
-                                    "Download Word (.docx)", data=_wb,
-                                    file_name=f"{ticker_input}_{period_label}_Report.docx",
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    use_container_width=True, key=f"dl_word_{suffix}",
-                                )
-                            else:
-                                st.caption("Word export isn't available.")
+                            except Exception:
+                                st.session_state[_buf_key] = None
+                            st.session_state[_id_key] = _report_id
+                        _ready = True
+                    if _ready:
+                        _buf = st.session_state.get(_buf_key)
+                        if _buf is not None:
+                            _buf.seek(0)
+                            _mime = {
+                                "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                "pptx":  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                "word":  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            }[_kind]
+                            st.download_button(
+                                f"Download {_name} ({_ext})", data=_buf,
+                                file_name=f"{ticker_input}_{period_label}_Analysis{_ext}",
+                                mime=_mime, use_container_width=True,
+                                key=f"dl_{_kind}_{suffix}",
+                            )
+                        else:
+                            st.caption(f"{_name} export isn’t available.")
 
             _stock_exports("top")
             st.markdown("---")

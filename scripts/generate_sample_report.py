@@ -38,7 +38,8 @@ except ImportError:
 import numpy as np
 
 from data import (fetch_stock_data, fetch_company_details, fetch_financials,
-                  fetch_news, fetch_peer_comparison, fetch_sector_data)
+                  fetch_sec_financials, fetch_news, fetch_peer_comparison,
+                  fetch_sector_data)
 from analysis import (compute_fundamentals, dcf_valuation, run_monte_carlo,
                       build_correlation_matrix, detect_support_resistance,
                       generate_summary_paragraph, market_beta)
@@ -83,7 +84,12 @@ def main():
     details = fetch_company_details(tk, key, log=log) or {}
     sector = details.get("Sector") or details.get("sector")
 
-    fin = fetch_financials(tk, key, log=log)
+    # Same source priority as the app (app.py: cached_fetch_sec_financials or
+    # cached_fetch_financials). Polygon-only was giving the downloadable sample
+    # a different balance sheet than the live site: Polygon carries no cash
+    # field, so net debt came out as gross debt — $7.96B against a true $0.38B
+    # for NKE. The sample has to be the same report the site produces.
+    fin = fetch_sec_financials(tk, log=log) or fetch_financials(tk, key, log=log)
     supplement   = get_financials_supplement(tk)
     fundamentals = compute_fundamentals(fin, market_cap=details.get("Market Cap"),
                                         supplement=supplement)

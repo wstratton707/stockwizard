@@ -383,5 +383,15 @@ def get_financials_supplement(ticker: str) -> dict | None:
         "current_assets":    _yf_row(bs, "Current Assets", "Total Current Assets"),
         "current_liabilities": _yf_row(bs, "Current Liabilities",
                                        "Total Current Liabilities"),
+        # Cash matters more than it looks. Polygon's balance sheet carries no
+        # cash field at all, so when the SEC path is unavailable and the code
+        # falls back to Polygon, net debt silently collapses to GROSS debt —
+        # for NKE that read $7.96B against a true $0.38B, overstating it by the
+        # entire cash balance, inflating enterprise value and understating fair
+        # value per share. This is the fallback's only source of cash.
+        "cash":              _yf_row(bs, "Cash Cash Equivalents And Short Term Investments",
+                                     "Cash And Cash Equivalents",
+                                     "CashAndCashEquivalents"),
+        "total_debt":        _yf_row(bs, "Total Debt"),
     }
     return out if any(v for v in out.values()) else None
