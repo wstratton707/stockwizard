@@ -549,14 +549,47 @@ if not DEV_MODE_FREE and SHOW_PRICING and st.session_state["show_payment"] and n
 # ── Page routing ──────────────────────────────────────────────────────────────
 if _page == "home":
     # ── Hero ──────────────────────────────────────────────────────────────────
+    # The sample workbook's metadata is loaded here, not further down the page,
+    # because the sample is now the hero's primary call to action. It is the
+    # lowest-friction proof the product has: a real generated report, served as
+    # a static file, so it opens in two seconds with no signup, no ticker entry,
+    # no 30-second build and no cold start. Asking someone to generate their own
+    # before they have seen one is the higher-friction path, so it is secondary.
+    _sm = None
+    try:
+        import json as _json
+        _sm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "static", "sample_report.json")
+        with open(_sm_path, encoding="utf-8") as _f:
+            _sm = _json.load(_f)
+        _sm["_size"] = f"{_sm.get('bytes', 0) / 1_048_576:.1f} MB"
+        _sm["_date"] = datetime.strptime(_sm["generated"], "%Y-%m-%d").strftime("%d %b %Y")
+    except Exception:
+        _sm = None   # no sample built yet — the CTA simply doesn't appear
+
+    # Hero leads with the artifact, not the workflow. The report used to be the
+    # third clause of a three-part sentence ("...then export a report"), which
+    # framed the thing we actually charge for as an afterthought of the thing
+    # that is free.
     st.markdown("""
     <div class="home-hero">
       <span class="home-hero-badge">Institutional tools · retail price</span>
-      <h1 class="home-hero-title">Institutional-grade equity &amp;<br>portfolio research — in seconds.</h1>
-      <p class="home-hero-sub">Analyze any stock, ETF, crypto or bond. Build a risk-optimized
-      portfolio and track it forward. Then export a <b>professional research report</b> with one click.</p>
+      <h1 class="home-hero-title">A full equity research report —<br>on any stock, in 30 seconds.</h1>
+      <p class="home-hero-sub">Valuation, Monte Carlo, fundamentals, peers and risk — exported to a
+      polished <b>Excel</b> workbook, <b>PowerPoint</b> deck or <b>Word</b> doc. The work that takes an
+      analyst an afternoon. Stock analysis and portfolio tools included.</p>
     </div>
     """, unsafe_allow_html=True)
+
+    if _sm:
+        from icons import icon as _icon
+        st.markdown(
+            f'<a class="sample-dl sample-dl-hero" href="app/static/{_sm["file"]}" download>'
+            f'{_icon("download", 17)}'
+            f'<span><b>See a real one — {_sm["ticker"]} research report</b>'
+            f'<span class="sample-dl-sub">Excel · {_sm["period"]} · {_sm["_size"]} · '
+            f'generated {_sm["_date"]}</span></span></a>', unsafe_allow_html=True)
+
     _hc = st.columns([1.1, 1.1, 2.8])
     if _hc[0].button("Analyze a stock", type="primary", use_container_width=True, key="cta_analyze"):
         _goto("analysis")
@@ -643,39 +676,30 @@ if _page == "home":
 
     _bc = st.columns([2, 1], vertical_alignment="center")
     with _bc[0]:
+        # Framed by the job it does, not by its specifications. Sheet count is
+        # not a reason to buy; having something you can actually send someone is.
         st.markdown("""<ul class="home-spotlight-ul">
-          <li>10 formatted, brand-styled sheets + a PowerPoint deck</li>
-          <li>Monte Carlo forecast + full risk metrics</li>
-          <li>Shareable — send it to a client or a group chat</li>
+          <li>Something you can actually send — to your investment club, your
+              partner, or your own future self when you're deciding whether to sell</li>
+          <li>Every number sourced and dated, so you can defend the conclusion</li>
+          <li>Valuation, Monte Carlo, fundamentals, peers and risk in one file</li>
         </ul>""", unsafe_allow_html=True)
     with _bc[1]:
         if st.button("Generate one →", type="primary", use_container_width=True, key="cta_report"):
             _goto("analysis")
 
-    # ── Pre-built sample ──────────────────────────────────────────────────────
-    # A real workbook, generated ahead of time by scripts/generate_sample_report.py
-    # and served as a static file. Someone can hold the actual output without
-    # waiting on a live run — no API call, no rate limit, no cold start. Served
-    # over HTTP rather than st.download_button so it costs no rerun and no memory.
-    # The date is read from the sidecar the generator writes, so the label can't
-    # drift away from the file.
-    try:
-        import json as _json
-        from icons import icon as _icon
-        _sm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "static", "sample_report.json")
-        with open(_sm_path, encoding="utf-8") as _f:
-            _sm = _json.load(_f)
-        _sm_size = f"{_sm.get('bytes', 0) / 1_048_576:.1f} MB"
-        _sm_date = datetime.strptime(_sm["generated"], "%Y-%m-%d").strftime("%d %b %Y")
+    # ── Pre-built sample, repeated ────────────────────────────────────────────
+    # Same static workbook as the hero CTA (metadata already loaded above, so
+    # this costs no second file read). Repeated deliberately: the hero catches
+    # people who want proof immediately, this catches the ones who scrolled the
+    # carousel first and are now convinced enough to open one.
+    if _sm:
         st.markdown(
             f'<a class="sample-dl" href="app/static/{_sm["file"]}" download>'
             f'{_icon("download", 17)}'
-            f'<span><b>See a real one — {_sm["ticker"]} research report'
-            f'</b><span class="sample-dl-sub">Excel · {_sm["period"]} · {_sm_size} · '
-            f'generated {_sm_date}</span></span></a>', unsafe_allow_html=True)
-    except Exception:
-        pass   # no sample built yet — the section simply doesn't appear
+            f'<span><b>See a real one — {_sm["ticker"]} research report</b>'
+            f'<span class="sample-dl-sub">Excel · {_sm["period"]} · {_sm["_size"]} · '
+            f'generated {_sm["_date"]}</span></span></a>', unsafe_allow_html=True)
 
     st.markdown('<div class="home-footer">QuantWizard · For informational purposes only · '
                 'Not investment advice</div>', unsafe_allow_html=True)

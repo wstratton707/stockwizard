@@ -640,6 +640,23 @@ footer { visibility: hidden; }
   letter-spacing: 0.2px;
 }
 
+/* Hero variant — this is the landing page's primary call to action, so it reads
+   as an offer rather than as a footnote under a rule. Still an <a> to a static
+   file, not a button: it must stay a real download with no rerun behind it. */
+.sample-dl-hero {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-chart);
+  background: var(--surface);
+  padding: 0.95rem 1.1rem;
+  margin: 0.35rem 0 1.15rem;
+  max-width: 30rem;
+}
+.sample-dl-hero:hover {
+  background: var(--surface2);
+  border-left-color: var(--accent-hover);
+}
+
 /* ── Editorial index rows (replaces the 3-up feature card grid) ──
    Rules and whitespace do the separating instead of another rounded box. */
 .index-rule { border-top: 1px solid var(--border); height: 0; }
