@@ -1673,6 +1673,7 @@ elif _page == "analysis":
                                         summary_text=summary_text,
                                         fundamentals=_fund_report,
                                         analyst_data=_analyst_report, dcf=_dcf_report,
+                                        sector_df=sector_df, peer_df=peer_df,
                                     )
                             except Exception:
                                 st.session_state[_buf_key] = None

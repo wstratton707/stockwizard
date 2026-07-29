@@ -15,6 +15,8 @@ import os
 
 import numpy as np
 
+from data import SECTOR_ETF_MAP
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -112,6 +114,41 @@ def _bullet(doc, text, size=10.5):
     return p
 
 
+def _table(doc, headers, rows, widths=None):
+    """Multi-column table with a ruled header row. Skips empty row sets."""
+    rows = [r for r in rows if r]
+    if not rows:
+        return None
+    t = doc.add_table(rows=len(rows) + 1, cols=len(headers))
+    t.autofit = True
+    for j, h in enumerate(headers):
+        c = t.rows[0].cells[j]
+        r = c.paragraphs[0].add_run(str(h))
+        r.bold = True
+        r.font.size = Pt(9)
+        r.font.color.rgb = MUTED
+    for i, row in enumerate(rows, start=1):
+        for j, v in enumerate(row):
+            c = t.rows[i].cells[j]
+            r = c.paragraphs[0].add_run("—" if v is None else str(v))
+            r.font.size = Pt(9.5)
+            r.font.color.rgb = NAVY if j == 0 else SLATE
+            if j == 0:
+                r.bold = True
+    return t
+
+
+def _trailing_return(closes, days):
+    """Simple return over the last `days` observations, or None if too short."""
+    try:
+        s = [float(x) for x in closes if x is not None and not np.isnan(float(x))]
+        if len(s) <= days or not s[-1 - days]:
+            return None
+        return (s[-1] / s[-1 - days] - 1) * 100
+    except Exception:
+        return None
+
+
 def _kv_table(doc, rows):
     """Two-column label/value table with light styling."""
     rows = [(l, v) for l, v in rows if v is not None]
@@ -165,11 +202,22 @@ def _price_chart_png(df, ticker):
 # ── Main builder ──────────────────────────────────────────────────────────────
 def build_stock_docx(ticker, df, period_label, company_details=None,
                      mc_summary=None, news_list=None, summary_text="",
-                     fundamentals=None, analyst_data=None, dcf=None):
+                     fundamentals=None, analyst_data=None, dcf=None,
+                     sector_df=None, peer_df=None):
     """Return a BytesIO .docx equity brief for one stock."""
     cd = company_details or {}
     f = fundamentals or {}
     doc = Document()
+
+    # Section numbers are counted, not written. Several sections below render
+    # only when their data exists (no Monte Carlo, no peer set, no sector
+    # benchmark), so hardcoded numbers left visible gaps — a brief that jumps
+    # from 6 to 8 reads as though a page went missing.
+    _n = [0]
+
+    def _sec(title):
+        _n[0] += 1
+        return f"{_n[0]}.  {title}"
 
     # Base style
     normal = doc.styles["Normal"]
@@ -236,25 +284,32 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
     r2.font.color.rgb = _rc
 
     # ── 1. What the company does ──────────────────────────────────────────────
-    _heading(doc, "1.  Company Overview")
+    # The business comes first. A reader who does not know what the company
+    # sells cannot evaluate a single number that follows, so the description
+    # leads and the reference facts sit underneath it rather than the reverse.
+    _heading(doc, _sec("What the Company Does"))
+    desc = cd.get("Description")
+    if desc and str(desc) != "N/A":
+        _para(doc, str(desc), size=10.5, after=6)
+    else:
+        _para(doc, f"{name} is listed on {cd.get('Exchange', 'a US exchange')} and is "
+                   f"classified under {cd.get('Industry') or cd.get('Sector') or 'an unstated industry'}. "
+                   "The data provider returned no business description for this ticker, so the "
+                   "commercial detail below is limited to reference data — treat the qualitative "
+                   "reading of this report accordingly.",
+              size=10.5, color=SLATE, italic=True)
     _kv_table(doc, [
-        ("Sector", cd.get("Sector")),
+        ("Industry", cd.get("Industry") if cd.get("Industry") != "N/A" else None),
         ("Exchange", cd.get("Exchange")),
         ("Country", cd.get("Country")),
-        ("Employees", f"{int(cd.get('Employees')):,}" if cd.get("Employees") else None),
+        ("Employees", f"{int(cd.get('Employees')):,}" if cd.get("Employees")
+                      and str(cd.get("Employees")) != "N/A" else None),
         ("Market Cap", _money(cd.get("Market Cap"))),
         ("Website", cd.get("Website")),
     ])
-    desc = cd.get("Description")
-    if desc:
-        _para(doc, str(desc), size=10.5, after=4)
-    else:
-        _para(doc, f"{name} operates in the {cd.get('Sector', 'market')} sector. "
-                   "A detailed business description was not available from the data provider.",
-              size=10.5)
 
     # ── 2. Performance overview ───────────────────────────────────────────────
-    _heading(doc, "2.  Performance Overview")
+    _heading(doc, _sec("Performance Overview"))
     perf_bits = []
     if period_ret is not None:
         perf_bits.append(f"Over the {period_label} window, {ticker} has returned "
@@ -289,9 +344,95 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
         except Exception:
             pass
 
-    # ── 3. Fundamentals ───────────────────────────────────────────────────────
+    # ── 3. Sector & momentum ──────────────────────────────────────────────────
+    # A stock's move is only interesting relative to what its sector did. Showing
+    # the two side by side over several windows separates company-specific
+    # performance from a sector-wide tide, which a single-stock return cannot.
+    _WINDOWS = [("1 month", 21), ("3 months", 63), ("6 months", 126), ("1 year", 252)]
+    _sec_name = (cd.get("Sector") or "").strip()
+    _sec_etf  = SECTOR_ETF_MAP.get(_sec_name)
+
+    # Pick a benchmark that actually exists. `fetch_sector_data` keys on
+    # SECTOR_ETF_MAP, but Polygon reports sector as an SIC description
+    # ("Rubber & Plastics Footwear"), which almost never matches those
+    # GICS-style keys — so the sector frame is usually None. Rather than drop
+    # the section, fall back to the broad market, which df already carries, and
+    # say which benchmark was used. A comparison against SPY is worth more than
+    # no comparison, provided the label is honest about what it is.
+    _bench_series, _bench_label, _bench_kind = None, None, None
+    if sector_df is not None and not sector_df.empty and "Sector_ETF_Cumulative" in sector_df.columns:
+        _bench_series = list(sector_df["Sector_ETF_Cumulative"])
+        _bench_label  = _sec_etf or "Sector ETF"
+        _bench_kind   = f"the {_sec_name} sector proxy" if _sec_name else "its sector ETF"
+    else:
+        for _bt in ("SPY", "QQQ"):
+            _cum = f"{_bt}_Cumulative"
+            if _cum in df.columns and df[_cum].notna().any():
+                _bench_series, _bench_label = list(df[_cum]), _bt
+                _bench_kind = "the broad market (no sector ETF matched this ticker)"
+                break
+
+    if _bench_series is not None:
+        _heading(doc, _sec("Sector & Momentum"))
+        _para(doc,
+              f"Benchmarked against {_bench_label}, {_bench_kind}. "
+              "Trailing returns are price-only and exclude dividends.",
+              size=9.5, color=MUTED, after=4)
+        _rows, _lead, _lag = [], 0, 0
+        _sc = list(df["Close"])
+        _kc = _bench_series
+        for _lbl, _d in _WINDOWS:
+            _s, _k = _trailing_return(_sc, _d), _trailing_return(_kc, _d)
+            if _s is None and _k is None:
+                continue
+            _rel = (_s - _k) if (_s is not None and _k is not None) else None
+            if _rel is not None:
+                _lead += 1 if _rel > 0 else 0
+                _lag  += 1 if _rel < 0 else 0
+            _rows.append([_lbl, _pct(_s, 1, sign=True), _pct(_k, 1, sign=True),
+                          _pct(_rel, 1, sign=True)])
+        _table(doc, ["Window", ticker, _bench_label, "Relative"], _rows)
+        if _lead or _lag:
+            _b = _bench_label
+            if _lead > _lag:
+                _msg = (f"{ticker} has outpaced {_b} in {_lead} of the "
+                        f"{_lead + _lag} windows measured, which points to a "
+                        f"company-specific driver rather than a broad move.")
+            elif _lag > _lead:
+                _msg = (f"{ticker} has lagged {_b} in {_lag} of the "
+                        f"{_lead + _lag} windows measured, so some of the weakness "
+                        f"is company-specific rather than market-wide.")
+            else:
+                _msg = (f"{ticker} has tracked {_b} closely, so recent performance "
+                        f"looks driven more by the market than by the company.")
+            _para(doc, _msg, size=10.5, after=4)
+
+    # ── 4. Competitive set ────────────────────────────────────────────────────
+    if peer_df is not None and not peer_df.empty and "Ticker" in peer_df.columns:
+        _heading(doc, _sec("Competitive Set"))
+        _prows = []
+        for _, _r in peer_df.iterrows():
+            _mc = _r.get("Market Cap ($B)")
+            _prows.append([
+                _r.get("Ticker"),
+                str(_r.get("Company", ""))[:38],
+                f"${_mc:,.1f}B" if isinstance(_mc, (int, float)) else "—",
+                "subject" if str(_r.get("Ticker")) == ticker else "peer",
+            ])
+        _table(doc, ["Ticker", "Company", "Market cap", "Role"], _prows)
+        # Deliberately not a moat claim. This is the comparison set the analysis
+        # used; naming it lets the reader challenge the choice, which they cannot
+        # do if the peer group is invisible.
+        _para(doc,
+              "These are the comparison companies used elsewhere in this report. "
+              "They are selected by industry classification and size, not by a "
+              "judgement about who competes most directly — treat the set as a "
+              "starting point and substitute your own if you disagree with it.",
+              size=9.5, color=MUTED, after=4)
+
+    # ── 5. Fundamentals ───────────────────────────────────────────────────────
     if f.get("ok"):
-        _heading(doc, "3.  Fundamentals")
+        _heading(doc, _sec("Fundamentals"))
         m = f.get("margins", {})
         ret = f.get("returns", {})
         val = f.get("valuation", {})
@@ -333,7 +474,7 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
             _para(doc, " ".join(fb))
 
     # ── 4. Analyst outlook & fair value ───────────────────────────────────────
-    _heading(doc, "4.  Analyst Outlook & Fair Value")
+    _heading(doc, _sec("Valuation & Fair Value"))
     consensus = None
     try:
         from market_data import consensus_from_recommendation
@@ -373,7 +514,7 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
 
     # ── 5. Forward outlook (Monte Carlo) ──────────────────────────────────────
     if mc_summary:
-        _heading(doc, "5.  Forward Outlook")
+        _heading(doc, _sec("Forward Outlook"))
         _para(doc,
               f"A Monte Carlo simulation of thousands of price paths projects a median "
               f"outcome of {mc_summary.get('Median (P50)', 'N/A')}, with a bearish "
@@ -384,7 +525,7 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
               f"and assume the stock's recent volatility persists.")
 
     # ── 6. Key risks ──────────────────────────────────────────────────────────
-    _heading(doc, "6.  Key Things to Know")
+    _heading(doc, _sec("Key Things to Know"))
     risks = []
     if ann_vol is not None and ann_vol >= 40:
         risks.append(f"High volatility — {ann_vol:.0f}% annualised means large swings in "
@@ -413,6 +554,68 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
     if summary_text:
         _heading(doc, "The Bottom Line")
         _para(doc, str(summary_text))
+
+    # ── 9. Sources & assumptions ──────────────────────────────────────────────
+    # The single biggest credibility gap in a generated report is a page of
+    # confident numbers with no statement of where they came from or what was
+    # assumed to produce them. A reader cannot challenge a fair value without the
+    # discount rate behind it, and cannot judge a margin without knowing which
+    # filing it was read from. Everything load-bearing gets named here.
+    _heading(doc, _sec("Sources & Assumptions"))
+
+    _src_rows = []
+    try:
+        _asof = df["Date"].iloc[-1]
+        _asof = _asof.strftime("%d %b %Y") if hasattr(_asof, "strftime") else str(_asof)[:10]
+    except Exception:
+        _asof = None
+    _src_rows.append(["Price & technicals", "Polygon.io", f"{period_label} window",
+                      _asof or "latest close"])
+    if f.get("ok"):
+        _src_rows.append(["Financial statements", f.get("source") or "SEC EDGAR / Polygon",
+                          "Annual filings", str(f.get("as_of") or "latest")])
+    if analyst_data:
+        _src_rows.append(["Analyst consensus", "Finnhub", "Third-party, not ours", "latest"])
+    if news_list:
+        _src_rows.append(["News", "Multi-source aggregation", f"{len(news_list)} items", "recent"])
+    if sector_df is not None and not sector_df.empty:
+        _src_rows.append(["Sector benchmark", "Polygon.io",
+                          SECTOR_ETF_MAP.get((cd.get("Sector") or "").strip()) or "sector ETF",
+                          _asof or "latest close"])
+    _table(doc, ["Input", "Source", "Basis", "As of"], _src_rows)
+
+    # Model assumptions, stated rather than implied.
+    _asm = []
+    _d = dcf if isinstance(dcf, dict) else {}
+    if _d.get("ok"):
+        _wb = _d.get("wacc_basis") or {}
+        _asm.append(("Discount rate (WACC)", _pct((_d.get("wacc") or 0) * 100, 2)))
+        if _wb.get("beta") is not None:
+            _asm.append(("How the rate was set",
+                         f"CAPM · beta {_wb['beta']:.2f} ({period_label} vs benchmark) · "
+                         f"Rf {_pct((_wb.get('risk_free') or 0)*100, 2)} · "
+                         f"ERP {_pct((_wb.get('erp') or 0)*100, 1)}"))
+            _asm.append(("Cost of debt / tax rate",
+                         f"{_pct((_wb.get('cost_of_debt') or 0)*100, 2)} assumed · "
+                         f"{_pct((_wb.get('tax_rate') or 0)*100, 0)} statutory"))
+        else:
+            _asm.append(("How the rate was set",
+                         "Default rate — no benchmark available, so no beta was estimated"))
+        _asm.append(("Terminal growth", _pct((_d.get("terminal_growth") or 0) * 100, 2)))
+        _asm.append(("Forecast horizon", f"{_d.get('years')} years" if _d.get("years") else None))
+        _asm.append(("Base free cash flow", _money(_d.get("base_fcf"))))
+    _asm.append(("Risk-free rate", _pct(rfr_pct, 2) + " (3-month T-bill, FRED)"))
+    _kv_table(doc, _asm)
+
+    _para(doc,
+          "Two things worth knowing about the numbers above. The discount rate is "
+          "the most load-bearing assumption in any fair value — on identical "
+          "financials, a low-beta rate and a high-beta rate can imply opposite "
+          "conclusions — so it is stated rather than buried. And the cost of debt "
+          "and tax rate are assumptions, not figures read from a filing: the "
+          "statement data available here carries no interest expense. Where a "
+          "figure could not be sourced it is shown as N/A rather than estimated.",
+          size=9.5, color=MUTED, after=4)
 
     # ── Disclaimer ────────────────────────────────────────────────────────────
     doc.add_paragraph()
