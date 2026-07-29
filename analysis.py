@@ -15,14 +15,121 @@ def _fin_val(df, field, i=0):
         return None
 
 
+# ── Discount rate ─────────────────────────────────────────────────────────────
+# Every valuation here used to discount at a flat 9%, so a regulated utility and
+# an unprofitable biotech were priced with the same cost of capital. That is the
+# single biggest weakness in a reverse DCF: the implied-growth number is only as
+# credible as the rate you solved it against.
+#
+# Two of the inputs cannot be derived from the data we hold — Polygon's
+# statements carry no interest expense, so there is no actual cost of debt to
+# read, and no effective tax rate. They are assumptions, and they are named
+# constants here (not buried in a formula) so the UI and the reports can state
+# them. An assumption a user can see and disagree with is honest; the same
+# assumption hidden inside a function is not.
+
+US_STATUTORY_TAX = 0.21        # federal statutory rate, used as the tax shield
+IG_CREDIT_SPREAD = 0.012       # investment-grade spread over the risk-free rate
+HY_CREDIT_SPREAD = 0.045       # spread applied to heavily levered balance sheets
+DEFAULT_WACC     = 0.09        # fallback only, when beta is unavailable
+
+
+def market_beta(stock_returns, market_returns):
+    """Ordinary market beta = cov(stock, market) / var(market).
+
+    Kept local rather than importing portfolio_analysis.compute_betas: that one
+    is built for a DataFrame of many names inside the optimiser, and importing it
+    here would pull the whole portfolio stack into the single-stock path.
+    """
+    try:
+        s = pd.Series(stock_returns).dropna()
+        m = pd.Series(market_returns).dropna()
+        j = pd.concat([s.rename("s"), m.rename("m")], axis=1).dropna()
+        if len(j) < 60:
+            return None
+        var = float(j["m"].var())
+        if not var:
+            return None
+        return round(float(j["s"].cov(j["m"])) / var, 3)
+    except Exception:
+        return None
+
+
+def cost_of_equity(beta, rf=None, erp=None):
+    """CAPM cost of equity: Rf + beta x ERP."""
+    from constants import get_risk_free_rate, EQUITY_RISK_PREMIUM
+    if beta is None:
+        return None
+    r = get_risk_free_rate() if rf is None else rf
+    p = EQUITY_RISK_PREMIUM if erp is None else erp
+    return r + float(beta) * p
+
+
+def _credit_spread(total_debt, market_cap):
+    """Spread over the risk-free rate, stepped by how levered the company is.
+
+    A crude proxy, and deliberately only two steps — without interest expense
+    there is nothing to calibrate a finer curve against, and a smooth-looking
+    function would imply precision that isn't there.
+    """
+    if not total_debt or not market_cap or market_cap <= 0:
+        return IG_CREDIT_SPREAD
+    return HY_CREDIT_SPREAD if (total_debt / market_cap) > 1.0 else IG_CREDIT_SPREAD
+
+
+def estimate_wacc(fundamentals, beta, rf=None, erp=None, tax_rate=US_STATUTORY_TAX):
+    """Blended WACC = (E/V)·Re + (D/V)·Rd·(1 - t), or None if beta is unknown.
+
+    Returns (wacc, basis) where `basis` is a dict of every input used, so the
+    caller can show its work rather than presenting a rate on faith.
+    """
+    from constants import get_risk_free_rate, EQUITY_RISK_PREMIUM
+    re = cost_of_equity(beta, rf=rf, erp=erp)
+    if re is None:
+        return None, None
+
+    r = get_risk_free_rate() if rf is None else rf
+    p = EQUITY_RISK_PREMIUM if erp is None else erp
+    e = fundamentals.get("market_cap") or 0.0
+    d = 0.0
+    try:
+        nd = fundamentals.get("net_debt")
+        cash = (fundamentals.get("balance") or {}).get("cash")
+        d = max(0.0, float(nd) + float(cash or 0.0)) if nd is not None else 0.0
+    except Exception:
+        d = 0.0
+    v = e + d
+    if v <= 0:
+        return None, None
+
+    rd = r + _credit_spread(d, e)
+    wacc = (e / v) * re + (d / v) * rd * (1.0 - tax_rate)
+    # A WACC below the terminal growth rate breaks a Gordon terminal value, and
+    # anything above ~20% produces nonsense fair values. Clamp and say so.
+    wacc_clamped = max(0.05, min(0.20, wacc))
+    return round(wacc_clamped, 4), {
+        "beta": beta, "risk_free": r, "erp": p,
+        "cost_of_equity": re, "cost_of_debt": rd, "tax_rate": tax_rate,
+        "equity_weight": e / v, "debt_weight": d / v,
+        "clamped": abs(wacc_clamped - wacc) > 1e-9,
+    }
+
+
 def _reverse_dcf_growth(market_cap, base_earnings, years=10, discount=0.09,
                         terminal_growth=0.025):
     """
-    Reverse DCF: the annual growth rate the market is pricing into `base_earnings`
-    (a 2-stage model, `years` of explicit growth + a terminal value). Returns the
-    implied growth as a decimal, or None if it can't be solved sensibly.
-    Intentionally a *reverse* model — it states what's priced in rather than
-    asserting a single "fair value", which is more honest about the assumptions.
+    Reverse DCF on ACCOUNTING EARNINGS — a secondary cross-check, not the headline.
+
+    The primary reverse DCF is inside `dcf_valuation`, which solves the same
+    question against free cash flow and returns it as `market_implied_growth`.
+    That one is the number to show a user: a DCF discounts cash, and net income
+    is not cash — for a capex-heavy business the two diverge materially.
+
+    Both exist because they answer slightly different questions, but they WILL
+    disagree, so never present them side by side as though they were the same
+    quantity. This one stays for the earnings-basis comparison in the workbook.
+
+    Returns the implied growth as a decimal, or None if it can't be solved.
     """
     if not market_cap or not base_earnings or base_earnings <= 0 or discount <= terminal_growth:
         return None
@@ -285,8 +392,15 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
     }
 
 
-def dcf_valuation(fundamentals, price, wacc=0.09, terminal_growth=0.025, years=10):
+def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=10,
+                  beta=None):
     """Two-stage unlevered DCF (FCFF) → fair value per share + upside/downside.
+
+    `wacc` resolution order: an explicit rate wins; otherwise it is derived from
+    `beta` via CAPM (see estimate_wacc); otherwise it falls back to DEFAULT_WACC.
+    The result carries `wacc_basis` describing which path was taken and every
+    input behind it, because a reverse DCF's headline number is meaningless
+    without the rate it was solved against.
 
     Transparent by construction: returns every assumption, the year-by-year
     projection, the enterprise-value→equity bridge, bull/base/bear scenarios, a
@@ -308,6 +422,14 @@ def dcf_valuation(fundamentals, price, wacc=0.09, terminal_growth=0.025, years=1
     mcap = fundamentals.get("market_cap")
     if not mcap or mcap <= 0:
         return {"ok": False, "reason": "no market cap"}
+
+    # Resolve the discount rate before anything depends on it.
+    wacc_basis = None
+    if wacc is None:
+        wacc, wacc_basis = estimate_wacc(fundamentals, beta)
+        if wacc is None:
+            wacc = DEFAULT_WACC
+            wacc_basis = {"fallback": True}
     if wacc <= terminal_growth:
         return {"ok": False, "reason": "WACC must exceed terminal growth"}
 
@@ -362,8 +484,16 @@ def dcf_valuation(fundamentals, price, wacc=0.09, terminal_growth=0.025, years=1
         return {"growth": g1, "fair_value": fv,
                 "upside": (fv / price - 1) if fv else None}
 
+    # Bear is floored at -5%, not at `terminal_growth + 0.005`. That old floor
+    # collided with the base case whenever base growth sat near terminal — for a
+    # company growing at 3% against a 2.5% terminal rate, bear and base both
+    # resolved to 3.0% and the table printed the identical fair value twice,
+    # which reads as a broken scenario rather than a conservative one. Stage-1
+    # growth is allowed below the terminal rate: it fades toward terminal over
+    # the horizon, so a declining near term followed by a mature steady state is
+    # exactly what a bear case should express.
     scenarios = {
-        "bear": _scn(max(terminal_growth + 0.005, g_base - 0.03)),
+        "bear": _scn(max(-0.05, g_base - 0.03)),
         "base": _scn(g_base),
         "bull": _scn(min(0.25, g_base + 0.03)),
     }
@@ -398,7 +528,8 @@ def dcf_valuation(fundamentals, price, wacc=0.09, terminal_growth=0.025, years=1
         "ok": True,
         "price": price, "fair_value": fv_base,
         "upside": (fv_base / price - 1) if fv_base else None,
-        "wacc": wacc, "terminal_growth": terminal_growth, "years": years,
+        "wacc": wacc, "wacc_basis": wacc_basis,
+        "terminal_growth": terminal_growth, "years": years,
         "base_fcf": base_fcf, "base_growth": g_base, "net_debt": net_debt,
         "shares": shares, "market_implied_growth": implied_growth,
         "enterprise_value": detail["enterprise_value"],

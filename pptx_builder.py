@@ -336,6 +336,58 @@ def _drawdown_chart(df, ticker, w=11, h=2.8):
     return _fig_to_buf(fig)
 
 
+def _valuation_range_chart(dcf, ticker, w=11.6, h=1.9):
+    """Football field: the bear→bull fair-value band with the base case and
+    today's price marked on it. One picture of the whole valuation argument."""
+    scn = (dcf or {}).get("scenarios") or {}
+    fvs = {k: (scn.get(k) or {}).get("fair_value") for k in ("bear", "base", "bull")}
+    if not all(isinstance(v, (int, float)) for v in fvs.values()):
+        return None
+    price = dcf.get("price")
+    if not isinstance(price, (int, float)) or price <= 0:
+        return None
+
+    lo, hi = min(fvs["bear"], fvs["bull"]), max(fvs["bear"], fvs["bull"])
+    fig, ax = plt.subplots(figsize=(w, h))
+    ax.barh([0], hi - lo, left=lo, height=0.34, color="#D6E4F0",
+            edgecolor=MPL_COLORS["blue"], linewidth=1.1, zorder=2)
+    ax.scatter([fvs["base"]], [0], marker="D", s=130, color=MPL_COLORS["navy"],
+               zorder=5, label="DCF base case")
+    ax.axvline(price, color=MPL_COLORS["red"], linewidth=2.0, linestyle="--",
+               zorder=4, label="Today's price")
+
+    # Band ends read outwards so they can never collide with each other or with
+    # the base-case label, however narrow the bear→bull range is.
+    ax.annotate(f"Bear ${lo:,.0f}", (lo, 0), xytext=(-8, 0), textcoords="offset points",
+                ha="right", va="center", fontsize=8.5, color="#475569")
+    ax.annotate(f"Bull ${hi:,.0f}", (hi, 0), xytext=(8, 0), textcoords="offset points",
+                ha="left", va="center", fontsize=8.5, color="#475569")
+    ax.annotate(f"Base ${fvs['base']:,.0f}", (fvs["base"], 0), xytext=(0, 16),
+                textcoords="offset points", ha="center", fontsize=9,
+                fontweight="bold", color=MPL_COLORS["navy"])
+    # White plaque so the dashed price line doesn't run through its own label.
+    ax.annotate(f"Price ${price:,.0f}", (price, 0), xytext=(0, 34),
+                textcoords="offset points", ha="center", fontsize=9,
+                fontweight="bold", color=MPL_COLORS["red"],
+                bbox=dict(boxstyle="round,pad=0.28", facecolor="#FFFFFF",
+                          edgecolor=MPL_COLORS["red"], linewidth=0.8))
+
+    span = max(hi - lo, 1e-9)
+    pad = max(span * 0.45, abs(price - fvs["base"]) * 0.30, price * 0.08)
+    ax.set_xlim(min(lo, price) - pad, max(hi, price) + pad)
+    ax.set_ylim(-0.55, 0.80)
+    ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
+    _chart_style(ax, f"{ticker} — Fair Value Range vs Today's Price",
+                 xlabel="Value per share", ylabel="")
+    ax.tick_params(axis="x", rotation=0, labelsize=8.5)
+    ax.set_yticks([])
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", linestyle="--", alpha=0.35, color="#CBD5E1")
+    ax.spines["left"].set_visible(False)
+    fig.tight_layout()
+    return _fig_to_buf(fig)
+
+
 # ── Portfolio chart helpers ───────────────────────────────────────────────────
 
 def _alloc_pie_chart(weights, ticker_info, w=6, h=4.5):
@@ -416,6 +468,129 @@ def _holdings_bar_chart(stock_metrics, w=9, h=4.0):
 
 # ── Stock Deck ────────────────────────────────────────────────────────────────
 
+# Plain-English translation of analysis.dcf_valuation()'s failure reasons, so a
+# missing model reads as an explanation rather than a blank slide.
+_DCF_NO_MODEL_REASONS = {
+    "fundamentals unavailable":
+        "No company financial statements are published for this security — normal for "
+        "ETFs, funds, ADRs and crypto — so there is no cash-flow stream to discount.",
+    "no price":
+        "No current market price was available, so the model has nothing to anchor to.",
+    "no market cap":
+        "No market capitalisation was available, so the share count could not be derived.",
+    "WACC must exceed terminal growth":
+        "The discount rate is not above the assumed terminal growth rate, which makes the "
+        "terminal value mathematically infinite.",
+    "no positive free cash flow to project":
+        "This company has not reported positive free cash flow in the years available, so "
+        "there is nothing to project forward. Judge it on multiples and quality instead.",
+}
+
+
+def _build_valuation_slide(prs, ticker, dcf, page_num, total):
+    """The signature analytic, as a conclusion slide: what today's price already
+    assumes, what the model says it's worth, and the range around that."""
+    s = _blank_slide(prs)
+
+    if not isinstance(dcf, dict) or not dcf.get("ok"):
+        _slide_header(s, "Valuation", ticker)
+        _slide_footer(s, page_num, total)
+        reason = dcf.get("reason", "") if isinstance(dcf, dict) else ""
+        _text_box(s, "No discounted-cash-flow model for this security.",
+                  0.6, 2.7, 12.1, 0.5, font_size=17, bold=True,
+                  color=C_NAVY, align=PP_ALIGN.CENTER)
+        _text_box(s, _DCF_NO_MODEL_REASONS.get(
+                      reason,
+                      "The inputs a DCF needs — audited financial statements, a market "
+                      "price and a positive free-cash-flow history — were not all "
+                      "available for this security."),
+                  1.9, 3.35, 9.5, 1.1, font_size=12.5,
+                  color=C_GREY_TEXT, align=PP_ALIGN.CENTER)
+        return True
+
+    imp   = dcf.get("market_implied_growth")
+    price = dcf["price"]
+    up    = dcf.get("upside")
+    scn   = dcf.get("scenarios") or {}
+
+    _slide_header(s, "Valuation — What Today's Price Implies",
+                  f"{ticker}  ·  Reverse discounted cash flow  ·  "
+                  f"{dcf['wacc']*100:.1f}% discount rate  ·  {dcf['years']}-year horizon")
+    _slide_footer(s, page_num, total)
+
+    # ── Hero: the implied-growth statement ───────────────────────────────────
+    _rect(s, 0.3, 1.38, 12.7, 1.66, fill_rgb=C_LIGHT)
+    _rect(s, 0.3, 1.38, 0.09, 1.66, fill_rgb=C_ACCENT)
+    if imp is not None:
+        _text_box(s, f"{imp*100:.1f}%", 0.6, 1.62, 3.0, 0.95,
+                  font_size=48, bold=True, color=C_NAVY)
+        _text_box(s, "IMPLIED FCF GROWTH, PER YEAR", 0.63, 2.55, 3.2, 0.3,
+                  font_size=9, bold=True, color=C_GREY_TEXT)
+        _hero = (f"To justify ${price:,.2f} a share, {ticker}'s free cash flow would have "
+                 f"to compound at about {imp*100:.1f}% a year for {dcf['years']} years, "
+                 f"then {dcf['terminal_growth']*100:.1f}% in perpetuity.\n"
+                 f"This model's own base case assumes {dcf['base_growth']*100:.1f}%. "
+                 f"The question is not what we think the stock is worth — it is whether "
+                 f"you believe this company can clear that bar.")
+    else:
+        _text_box(s, "n/a", 0.6, 1.62, 3.0, 0.95,
+                  font_size=48, bold=True, color=C_GREY_TEXT)
+        _text_box(s, "IMPLIED FCF GROWTH, PER YEAR", 0.63, 2.55, 3.2, 0.3,
+                  font_size=9, bold=True, color=C_GREY_TEXT)
+        _hero = (f"Today's ${price:,.2f} price sits outside the range of growth rates this "
+                 f"model can solve for, so no single implied rate can be quoted.\n"
+                 f"That is itself a finding: at a {dcf['wacc']*100:.1f}% discount rate the "
+                 f"price is not explicable by free-cash-flow growth alone.")
+    _text_box(s, _hero, 4.05, 1.60, 8.75, 1.30, font_size=12.5, color=C_DARK_TEXT)
+
+    # ── Conclusion tiles ─────────────────────────────────────────────────────
+    _tiles = [
+        ("Base-case fair value", f"${dcf['fair_value']:,.2f}" if dcf.get("fair_value") else "N/A", None),
+        ("Today's price",        f"${price:,.2f}", None),
+        ("Upside / downside",    f"{up*100:+.1f}%" if up is not None else "N/A",
+                                 (up > 0) if up is not None else None),
+        ("Verdict",              ("Undervalued" if up is not None and up > 0.15 else
+                                  "Overvalued"  if up is not None and up < -0.15 else
+                                  "Fairly valued"),
+                                 (up > 0.15) if up is not None and abs(up) > 0.15 else None),
+    ]
+    _tw = 3.07
+    for _i, (_lbl, _val, _pos) in enumerate(_tiles):
+        _x = 0.3 + _i * (_tw + 0.18)
+        _rect(s, _x, 3.22, _tw, 1.32, fill_rgb=C_WHITE,
+              line_rgb=RGBColor(0xE2, 0xE8, 0xF0), line_width=1)
+        _rect(s, _x, 3.22, _tw, 0.07, fill_rgb=C_ACCENT)
+        _vcol = C_GREEN if _pos is True else (C_RED if _pos is False else C_NAVY)
+        _text_box(s, _lbl.upper(), _x + 0.18, 3.42, _tw - 0.3, 0.28,
+                  font_size=9, bold=True, color=C_GREY_TEXT)
+        _text_box(s, _val, _x + 0.18, 3.76, _tw - 0.3, 0.62,
+                  font_size=(22 if len(str(_val)) > 9 else 25), bold=True, color=_vcol)
+
+    # ── Football field ───────────────────────────────────────────────────────
+    _chart = None
+    try:
+        _chart = _valuation_range_chart(dcf, ticker)
+    except Exception:
+        _chart = None
+    if _chart is not None:
+        _add_image(s, _chart, 0.32, 4.66, 12.66, 2.07)
+    else:
+        _rows = [(n.title(),
+                  f"${(scn.get(n) or {}).get('fair_value', 0):,.2f}"
+                  if (scn.get(n) or {}).get("fair_value") else "N/A",
+                  ((scn.get(n) or {}).get("upside") or 0) > 0)
+                 for n in ("bear", "base", "bull")]
+        _kv_block(s, _rows, 0.32, 4.75, 6.2, col_w=2.6, row_h=0.5)
+
+    _text_box(s, f"Two-stage unlevered DCF on free cash flow · {dcf['wacc']*100:.1f}% discount "
+                 f"rate · {dcf['terminal_growth']*100:.1f}% terminal growth · base FCF "
+                 f"normalised over recent years · full editable model, assumptions and "
+                 f"sensitivity grid on the Valuation sheet of the Excel workbook. "
+                 f"A model, not a price target.",
+              0.35, 6.80, 12.6, 0.36, font_size=8.5, italic=True, color=C_GREY_TEXT)
+    return True
+
+
 def _build_fundamentals_slide(prs, ticker, fundamentals, page_num, total):
     """One slide of EDGAR-sourced fundamentals + quality scores. Returns False if
     no fundamentals are available (e.g. crypto)."""
@@ -462,7 +637,8 @@ def _build_fundamentals_slide(prs, ticker, fundamentals, page_num, total):
 
 def build_stock_pptx(ticker, df, period_label,
                      company_details=None, mc_sim_df=None, mc_summary=None,
-                     news_list=None, summary_text="", fundamentals=None):
+                     news_list=None, summary_text="", fundamentals=None,
+                     dcf=None):
     """Build a professional stock analysis PowerPoint. Returns BytesIO."""
     if not PPTX_AVAILABLE:
         raise RuntimeError("python-pptx is not installed.")
@@ -493,8 +669,11 @@ def build_stock_pptx(ticker, df, period_label,
             return "N/A"
         return f"{v:.2f}"
 
-    # +1 for the new "Bottom Line" executive-summary slide added after the cover.
-    total_slides = (11 if (fundamentals and fundamentals.get("ok")) else 10) + 1
+    # +1 for the "Bottom Line" executive-summary slide added after the cover, and
+    # +1 for the valuation slide whenever a DCF was attempted at all (it renders a
+    # short explanation rather than nothing when the model couldn't be built).
+    total_slides = ((11 if (fundamentals and fundamentals.get("ok")) else 10)
+                    + 1 + (1 if dcf is not None else 0))
     page = [1]   # cover is page 1 (hardcoded); next slide starts at 2
 
     def _next_page():
@@ -584,6 +763,10 @@ def build_stock_pptx(ticker, df, period_label,
                   font_size=9.5, bold=True, color=C_GREY_TEXT)
         _text_box(sl, _val, _x + 0.2, 4.68, _tw - 0.35, 0.75,
                   font_size=26, bold=True, color=_vcol)
+
+    # ── Valuation — the conclusion slide, straight after the executive summary ─
+    if dcf is not None:
+        _build_valuation_slide(prs, ticker, dcf, _next_page(), total_slides)
 
     # ── Fundamentals & Valuation (only when EDGAR/Polygon data is available) ───
     if fundamentals and fundamentals.get("ok"):

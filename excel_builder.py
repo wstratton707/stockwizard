@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.chart import LineChart, Reference
+from openpyxl.chart import LineChart, BarChart, Reference
 from openpyxl.formatting.rule import ColorScaleRule, CellIsRule
 from openpyxl.drawing.image import Image as XLImage
 from datetime import datetime
@@ -34,6 +34,19 @@ GREY_ROW   = "F2F2F2"
 TILE_BG    = "F0F5FB"   # pale blue KPI-tile fill
 BAD_FILL   = "FFC7CE"   # Excel-classic light red
 BAD_TEXT   = "9C0006"   # Excel-classic dark red
+GOOD_FILL  = "C6EFCE"   # Excel-classic light green
+GOOD_TEXT  = "006100"   # Excel-classic dark green
+INPUT_BG   = "FFF2CC"   # editable-assumption cells on the Valuation model
+
+# Custom number formats used by the live valuation model. Values stay numeric
+# (so formulas can reference them) while displaying in the same $B / % style as
+# the static cells elsewhere in the workbook.
+FMT_USD    = '_($* #,##0.00_)'
+FMT_BN     = '$#,##0.0,,,"B"'
+FMT_SHARES = '#,##0.00,,,"B"'
+FMT_PCT1   = '0.0%'
+FMT_PCT2   = '0.00%'
+FMT_SIGNED = '+0.0%;-0.0%'
 
 # Kept in sync with the PowerPoint deck's data-source line (pptx_builder.py).
 DATA_SOURCE_LINE = "Polygon · Yahoo Finance · Finnhub · SEC EDGAR"
@@ -706,14 +719,21 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
             height=40, italic=True, bg="FFF8E1")
         row_cursor += 1
 
-    # ── Fair Value (DCF) — a valuation conclusion, honestly assumption-driven ───
+    # ── Valuation — leads with the reverse DCF (what the price already assumes),
+    #    then the forward conclusion. Full editable model on the Valuation sheet.
     if dcf and dcf.get("ok"):
-        sec_hdr(row_cursor, "Fair Value (DCF)")
+        sec_hdr(row_cursor, "Valuation — Reverse DCF & Fair Value")
         row_cursor += 1
-        up = dcf.get("upside")
+        up  = dcf.get("upside")
+        imp = dcf.get("market_implied_growth")
         verdict, vcolor = (("Undervalued vs DCF", GREEN_OK) if up is not None and up > 0.15 else
                            ("Overvalued vs DCF",  RED_BAD)  if up is not None and up < -0.15 else
                            ("Fairly valued vs DCF", DARK_BLUE))
+        if imp is not None:
+            kv(row_cursor, "Market-Implied FCF Growth", imp, fmt="0.0%")
+        else:
+            kv(row_cursor, "Market-Implied FCF Growth", "Outside solvable range")
+        row_cursor += 1
         kv(row_cursor, "DCF Fair Value / Share", dcf["fair_value"], fmt='_($* #,##0.00_)')
         row_cursor += 1
         if up is not None:
@@ -729,16 +749,35 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
         row_cursor += 1
         scn  = dcf.get("scenarios", {})
         bear, bull = scn.get("bear", {}), scn.get("bull", {})
-        imp  = dcf.get("market_implied_growth")
-        note = (f"2-stage FCF DCF: {dcf['wacc']*100:.0f}% WACC, "
-                f"{dcf['terminal_growth']*100:.1f}% terminal growth, {dcf['years']}y, "
-                f"base FCF growth {dcf['base_growth']*100:.1f}%. ")
+        if imp is not None:
+            note = (f"Today's ${dcf['price']:,.2f} price implies free cash flow "
+                    f"compounding at ~{imp*100:.1f}% a year for {dcf['years']} years. "
+                    f"That is the number to argue with. ")
+        else:
+            note = (f"Today's ${dcf['price']:,.2f} price sits outside the growth range "
+                    f"the reverse DCF can solve, so no implied rate is quoted. ")
+        note += (f"2-stage FCF DCF at a {dcf['wacc']*100:.1f}% discount rate, "
+                 f"{dcf['terminal_growth']*100:.1f}% terminal growth, "
+                 f"base case {dcf['base_growth']*100:.1f}% stage-1 growth. ")
         if bear.get("fair_value") and bull.get("fair_value"):
             note += f"Bear ${bear['fair_value']:,.0f} / Bull ${bull['fair_value']:,.0f}. "
-        if imp is not None:
-            note += f"Today's price implies ~{imp*100:.0f}% FCF growth for a decade. "
-        note += "Full workings on the Valuation sheet. " + DISCLAIMER_SHORT
-        row_cursor = _narrative_box(ws, row_cursor, note, height=56, italic=True, bg="FFF8E1")
+        note += ("The Valuation sheet holds the full model as live formulas — change an "
+                 "assumption there and it recalculates. ") + DISCLAIMER_SHORT
+        row_cursor = _narrative_box(ws, row_cursor, note, height=70, italic=True, bg="FFF8E1")
+        row_cursor += 1
+    else:
+        sec_hdr(row_cursor, "Valuation — Reverse DCF & Fair Value")
+        row_cursor += 1
+        _reason = (dcf or {}).get("reason", "") if isinstance(dcf, dict) else ""
+        row_cursor = _narrative_box(
+            ws, row_cursor,
+            f"No discounted-cash-flow model for {ticker}.  "
+            + _DCF_NO_MODEL_REASONS.get(
+                _reason,
+                "The inputs a DCF needs — audited financial statements, a market price "
+                "and a positive free-cash-flow history — were not all available.")
+            + "  " + DISCLAIMER_SHORT,
+            height=56, italic=True, bg="FFF8E1")
         row_cursor += 1
 
     if resistance_levels or support_levels:
@@ -1329,164 +1368,375 @@ def _build_fundamentals_sheet(wb, fundamentals):
         ws.column_dimensions[col].width = 12
 
 
-# ── Valuation sheet (transparent DCF: conclusion, scenarios, projection, sensitivity)
+# ── Valuation sheet ───────────────────────────────────────────────────────────
+# The analytical heart of the workbook. The reverse DCF ("what growth does
+# today's price already assume?") leads, and the whole model is written as live
+# Excel formulas hanging off a block of editable assumption cells, so a reader
+# can change WACC or terminal growth and watch fair value move rather than
+# reading a static dump of numbers someone else computed.
+
+# Plain-English translation of analysis.dcf_valuation()'s failure reasons.
+_DCF_NO_MODEL_REASONS = {
+    "fundamentals unavailable":
+        "No company financial statements are published for this security — normal "
+        "for ETFs, funds, ADRs and crypto — so there is no cash-flow stream to discount.",
+    "no price":
+        "No current market price was available, so the model has nothing to anchor to.",
+    "no market cap":
+        "No market capitalisation was available, so the share count (market cap ÷ "
+        "price) could not be derived.",
+    "WACC must exceed terminal growth":
+        "The discount rate is not above the assumed terminal growth rate, which makes "
+        "the terminal value mathematically infinite.",
+    "no positive free cash flow to project":
+        "This company has not reported positive free cash flow in the years available, "
+        "so there is nothing to project forward. A DCF would not be meaningful here — "
+        "judge it on the multiples and quality scores on the Fundamentals sheet instead.",
+}
+
+
 def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
-    if not dcf or not dcf.get("ok"):
-        return
     ws = wb.create_sheet("Valuation")
     ws.sheet_view.showGridLines = False
-    ws.column_dimensions["A"].width = 32
-    for col in ("B", "C", "D", "E", "F"):
-        ws.column_dimensions[col].width = 15
+    ws.column_dimensions["A"].width = 34
+    for col in ("B", "C", "D", "E", "F", "G", "H", "I", "J", "K"):
+        ws.column_dimensions[col].width = 14
 
-    def _bn(x):
-        return f"${x / 1e9:,.1f}B" if isinstance(x, (int, float)) else "—"
-
-    ws.merge_cells("A1:F1")
-    t = ws["A1"]
-    t.value = f"{ticker} — Discounted Cash Flow Valuation"
-    t.font  = Font(size=14, bold=True, color=DARK_BLUE, name="Calibri")
-    ws.merge_cells("A2:F2")
+    ws.merge_cells("A1:K1")
+    ttl = ws["A1"]
+    ttl.value = f"{ticker} — Reverse DCF & Fair Value"
+    ttl.font  = Font(size=14, bold=True, color=DARK_BLUE, name="Calibri")
+    ws.merge_cells("A2:K2")
     sub = ws["A2"]
-    sub.value = ("Two-stage unlevered DCF on free cash flow.  Fair value = "
-                 "(PV of projected FCF + PV of terminal value − net debt) ÷ shares.  "
-                 "Assumption-driven — a valuation lens, not a price target.")
     sub.font      = Font(size=9, italic=True, color="888888", name="Calibri")
     sub.alignment = Alignment(wrap_text=True, vertical="top")
+
+    # ── No credible model: say so in one line rather than shipping a blank tab ─
+    if not isinstance(dcf, dict) or not dcf.get("ok"):
+        reason = dcf.get("reason", "") if isinstance(dcf, dict) else ""
+        sub.value = "A discounted-cash-flow model could not be built for this security."
+        ws.row_dimensions[2].height = 16
+        _narrative_box(
+            ws, 4,
+            f"No DCF for {ticker}.  "
+            + _DCF_NO_MODEL_REASONS.get(
+                reason,
+                "The inputs a DCF needs — audited financial statements, a market price "
+                "and a positive free-cash-flow history — were not all available.")
+            + "  " + DISCLAIMER_SHORT,
+            height=64, italic=False, bg="FFF8E1")
+        return
+
+    sub.value = ("Two-stage unlevered DCF on free cash flow, run both ways: forwards "
+                 "(what is it worth?) and backwards (what does today's price already "
+                 "assume?).  Every shaded cell is an input — change one and the "
+                 "projection, bridge, fair value and scenarios below all recalculate.")
     ws.row_dimensions[2].height = 26
 
-    def sec(row, label, span="F"):
+    # ── Local styling helpers (match the rest of the workbook) ────────────────
+    def sec(row, label, span="K"):
         ws.merge_cells(f"A{row}:{span}{row}")
         c = ws.cell(row=row, column=1, value=label)
         c.font = Font(bold=True, color=WHITE, name="Calibri", size=11)
         c.fill = PatternFill("solid", fgColor=DARK_BLUE)
         ws.row_dimensions[row].height = 18
 
-    def kv2(row, label, value, bold=True):
+    def kv2(row, label, value, fmt=None, bold=True, note=None, input_cell=False):
         cl = ws.cell(row=row, column=1, value=label)
         cv = ws.cell(row=row, column=2, value=value)
         cl.font = Font(name="Calibri", size=10)
         cv.font = Font(name="Calibri", size=10, bold=bold)
         cv.alignment = Alignment(horizontal="right")
         cl.border = cv.border = _border()
+        if fmt:
+            cv.number_format = fmt
+        if input_cell:
+            cv.fill = PatternFill("solid", fgColor=INPUT_BG)
+        if note:
+            nc = ws.cell(row=row, column=3, value=note)
+            nc.font      = Font(name="Calibri", size=9, italic=True, color="888888")
+            nc.alignment = Alignment(vertical="center")
+            ws.merge_cells(f"C{row}:K{row}")
+        return cv
 
-    row = 4
-    # ── Conclusion ────────────────────────────────────────────────────────────
-    sec(row, "Conclusion"); row += 1
+    proj = dcf.get("projection") or []
+    n_yr = len(proj)
+    scn  = dcf.get("scenarios") or {}
+    g_bear = (scn.get("bear") or {}).get("growth")
+    g_bull = (scn.get("bull") or {}).get("growth")
+    imp    = dcf.get("market_implied_growth")
+
+    # ── Row plan (fixed up front so every formula can reference its inputs) ────
+    R_HEAD_SEC = 4
+    R_HEAD_BIG = 5                      # merged 5:6
+    R_CONC_SEC = 8
+    R_FV, R_PX, R_UP, R_VERD = 9, 10, 11, 12
+    R_SCN_SEC, R_SCN_HDR = 14, 15
+    R_SCN_BEAR, R_SCN_BASE, R_SCN_BULL, R_SCN_MKT = 16, 17, 18, 19
+    R_IN_SEC = 21
+    (R_W, R_TG, R_YRS, R_FCF0, R_G1,
+     R_GBEAR, R_GBULL, R_ND, R_SH, R_P) = range(22, 32)
+    R_PROJ_SEC, R_PROJ_HDR = 33, 34
+    R_P0 = 35
+    R_PN = R_P0 + max(n_yr - 1, 0)
+    R_BR_SEC = R_PN + 2
+    R_PVEXP, R_TV, R_PVTV, R_EV, R_NDB, R_EQ = (R_BR_SEC + i for i in range(1, 7))
+    R_SENS_SEC = R_EQ + 2
+    R_SENS_HDR = R_SENS_SEC + 1
+    R_SENS0    = R_SENS_HDR + 1
+
+    # ── 1. The headline: what today's price implies ───────────────────────────
+    sec(R_HEAD_SEC, "The Headline — What Today's Price Already Assumes")
+    ws.merge_cells(f"A{R_HEAD_BIG}:B{R_HEAD_BIG + 1}")
+    big = ws.cell(row=R_HEAD_BIG, column=1,
+                  value=(imp if imp is not None else "n/a"))
+    if imp is not None:
+        big.number_format = FMT_PCT1
+    big.font      = Font(name="Calibri", size=30, bold=True, color=DARK_BLUE)
+    big.alignment = Alignment(horizontal="center", vertical="center")
+    big.fill      = PatternFill("solid", fgColor=TILE_BG)
+    big.border    = _border()
+
+    ws.merge_cells(f"C{R_HEAD_BIG}:K{R_HEAD_BIG + 1}")
+    if imp is not None:
+        head_txt = (
+            f"At ${dcf['price']:,.2f} the market is pricing {ticker}'s free cash flow to "
+            f"compound at roughly {imp * 100:.1f}% a year for {dcf['years']} years, then "
+            f"{dcf['terminal_growth'] * 100:.1f}% in perpetuity, discounted at "
+            f"{dcf['wacc'] * 100:.1f}%.\nThe reverse DCF asks one question: is that rate "
+            f"plausible for this business?  This model's own base case assumes "
+            f"{dcf['base_growth'] * 100:.1f}%.")
+    else:
+        head_txt = (
+            f"Today's ${dcf['price']:,.2f} price sits outside the range of growth rates "
+            f"this model can solve for (−20% to +50% a year), so no single implied growth "
+            f"rate can be quoted. That is itself informative: the price is not explicable "
+            f"by free-cash-flow growth alone at a "
+            f"{dcf['wacc'] * 100:.1f}% discount rate.")
+    hc = ws.cell(row=R_HEAD_BIG, column=3, value=head_txt)
+    hc.font      = Font(name="Calibri", size=11)
+    hc.alignment = Alignment(wrap_text=True, vertical="center")
+    hc.border    = _border()
+    hc.fill      = PatternFill("solid", fgColor=TILE_BG)
+    ws.row_dimensions[R_HEAD_BIG].height = 30
+    ws.row_dimensions[R_HEAD_BIG + 1].height = 42
+
+    # ── 2. Conclusion — fair value vs price (live off the bridge below) ───────
+    sec(R_CONC_SEC, "Conclusion — Fair Value vs Price")
     up = dcf.get("upside")
+    kv2(R_FV, "Base-case fair value / share", f"=B{R_EQ}/B{R_SH}", fmt=FMT_USD,
+        note="= equity value ÷ shares, both computed below")
+    kv2(R_PX, "Current price", f"=B{R_P}", fmt=FMT_USD)
+    kv2(R_UP, "Upside / downside", f'=IF(B{R_PX}=0,"",B{R_FV}/B{R_PX}-1)',
+        fmt=FMT_SIGNED)
     verdict, vcol = (("Undervalued vs DCF", GREEN_OK) if up is not None and up > 0.15 else
                      ("Overvalued vs DCF",  RED_BAD)  if up is not None and up < -0.15 else
                      ("Fairly valued vs DCF", DARK_BLUE))
-    kv2(row, "Base-case Fair Value / Share", f"${dcf['fair_value']:,.2f}"); row += 1
-    kv2(row, "Current Price",                f"${dcf['price']:,.2f}");      row += 1
-    kv2(row, "Upside / Downside", f"{up * 100:+.1f}%" if up is not None else "—"); row += 1
-    ws.cell(row=row, column=1, value="Verdict").font = Font(name="Calibri", size=10)
-    vc = ws.cell(row=row, column=2, value=verdict)
-    vc.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
-    vc.fill = PatternFill("solid", fgColor=vcol)
+    ws.cell(row=R_VERD, column=1, value="Verdict").font = Font(name="Calibri", size=10)
+    vc = ws.cell(row=R_VERD, column=2,
+                 value=(f'=IF(B{R_UP}>0.15,"Undervalued vs DCF",'
+                        f'IF(B{R_UP}<-0.15,"Overvalued vs DCF","Fairly valued vs DCF"))'))
+    vc.font      = Font(name="Calibri", size=10, bold=True, color=WHITE)
+    vc.fill      = PatternFill("solid", fgColor=vcol)
     vc.alignment = Alignment(horizontal="right")
-    ws.cell(row=row, column=1).border = vc.border = _border()
-    row += 2
+    ws.cell(row=R_VERD, column=1).border = vc.border = _border()
 
-    # ── Scenarios ─────────────────────────────────────────────────────────────
-    sec(row, "Scenarios"); row += 1
-    for ci, h in enumerate(["Scenario", "Stage-1 FCF Growth", "Fair Value / Share",
-                            "Upside / Downside"], 1):
-        _hdr_cell(ws.cell(row=row, column=ci, value=h), bg=MID_BLUE)
-    row += 1
-    for name, key in [("Bear", "bear"), ("Base", "base"), ("Bull", "bull")]:
-        s = dcf["scenarios"].get(key, {})
-        vals = [name,
-                f"{s.get('growth', 0) * 100:.1f}%",
-                f"${s['fair_value']:,.2f}" if s.get("fair_value") else "—",
-                f"{s['upside'] * 100:+.1f}%" if s.get("upside") is not None else "—"]
-        for ci, v in enumerate(vals, 1):
-            c = ws.cell(row=row, column=ci, value=v)
-            c.font   = Font(name="Calibri", size=10, bold=(name == "Base"))
+    # ── 3. Scenarios — with the market itself as the fourth row ──────────────
+    sec(R_SCN_SEC, "Scenarios — and What the Market Is Assuming")
+    for ci, h in enumerate(["Scenario", "Stage-1 FCF growth", "Fair value / share",
+                            "Upside / downside"], 1):
+        _hdr_cell(ws.cell(row=R_SCN_HDR, column=ci, value=h), bg=MID_BLUE)
+
+    def _scn_row(row, name, growth_ref, fv_formula, highlight=None):
+        cells = [
+            ws.cell(row=row, column=1, value=name),
+            ws.cell(row=row, column=2, value=growth_ref),
+            ws.cell(row=row, column=3, value=fv_formula),
+            ws.cell(row=row, column=4,
+                    value=f'=IF(B{R_P}=0,"",C{row}/B{R_P}-1)'),
+        ]
+        cells[1].number_format = FMT_PCT1
+        cells[2].number_format = FMT_USD
+        cells[3].number_format = FMT_SIGNED
+        for c in cells:
+            c.font   = Font(name="Calibri", size=10, bold=bool(highlight))
             c.border = _border()
-            if name == "Base":
-                c.fill = PatternFill("solid", fgColor="D6E4F0")
-        row += 1
-    row += 1
+            if highlight:
+                c.fill = PatternFill("solid", fgColor=highlight)
+            c.alignment = Alignment(horizontal="left" if c.column == 1 else "right")
 
-    # ── Key assumptions ───────────────────────────────────────────────────────
-    sec(row, "Key Assumptions"); row += 1
-    imp = dcf.get("market_implied_growth")
-    for lbl, val in [
-        ("Discount rate (WACC)",                f"{dcf['wacc'] * 100:.1f}%"),
-        ("Terminal growth rate",                f"{dcf['terminal_growth'] * 100:.1f}%"),
-        ("Explicit forecast horizon",           f"{dcf['years']} years"),
-        ("Normalised base FCF",                 _bn(dcf['base_fcf'])),
-        ("Base-case stage-1 growth",            f"{dcf['base_growth'] * 100:.1f}%"),
-        ("Net debt (total debt − cash)",        _bn(dcf['net_debt'])),
-        ("Shares (market cap ÷ price)",         f"{dcf['shares'] / 1e9:,.2f}B"),
-        ("Market-implied FCF growth (at today's price)",
-         f"{imp * 100:.1f}%" if imp is not None else "—"),
-    ]:
-        kv2(row, lbl, val); row += 1
-    row += 1
+    # Terminal value + PV, in one formula, for a scenario's FCF/PV columns.
+    def _scn_fv(fcf_col, pv_col):
+        return (f"=((SUM({pv_col}{R_P0}:{pv_col}{R_PN})"
+                f"+{fcf_col}{R_PN}*(1+B{R_TG})/(B{R_W}-B{R_TG})/(1+B{R_W})^B{R_YRS})"
+                f"-B{R_ND})/B{R_SH}")
 
-    # ── Base-case projection + EV→equity bridge ───────────────────────────────
-    sec(row, "Base-Case Projection & Value Bridge"); row += 1
-    for ci, h in enumerate(["Year", "Growth", "Projected FCF", "PV of FCF"], 1):
-        _hdr_cell(ws.cell(row=row, column=ci, value=h), bg=MID_BLUE)
-    row += 1
-    for p in dcf["projection"]:
-        vals = [p["year"], f"{p['growth'] * 100:.1f}%", _bn(p["fcf"]), _bn(p["pv"])]
-        for ci, v in enumerate(vals, 1):
-            c = ws.cell(row=row, column=ci, value=v)
+    _scn_row(R_SCN_BEAR, "Bear", f"=B{R_GBEAR}", _scn_fv("G", "H"))
+    _scn_row(R_SCN_BASE, "Base", f"=B{R_G1}",    f"=B{R_FV}", highlight="D6E4F0")
+    _scn_row(R_SCN_BULL, "Bull", f"=B{R_GBULL}", _scn_fv("J", "K"))
+    _scn_row(R_SCN_MKT,  "Market (today's price)",
+             (imp if imp is not None else "n/a"), f"=B{R_P}", highlight=TILE_BG)
+    if imp is None:
+        ws.cell(row=R_SCN_MKT, column=2).number_format = "General"
+
+    # ── 4. Model inputs — the editable cells everything else hangs off ────────
+    sec(R_IN_SEC, "Model Inputs — every shaded cell is editable")
+    kv2(R_W,    "Discount rate (WACC)", dcf["wacc"], fmt=FMT_PCT2, input_cell=True,
+        note="Company-specific cost of capital. Raise it and fair value falls.")
+    kv2(R_TG,   "Terminal growth rate", dcf["terminal_growth"], fmt=FMT_PCT2,
+        input_cell=True, note="Growth forever after the explicit horizon. Must stay below WACC.")
+    kv2(R_YRS,  "Explicit forecast horizon (years)", dcf["years"], fmt="0",
+        input_cell=True,
+        note="Drives discounting and the terminal year; the projection table is fixed "
+             f"at {n_yr} rows.")
+    kv2(R_FCF0, "Normalised base free cash flow", dcf["base_fcf"], fmt=FMT_BN,
+        input_cell=True, note="Mean of the last three positive annual FCF figures.")
+    kv2(R_G1,   "Stage-1 FCF growth — base case", dcf["base_growth"], fmt=FMT_PCT1,
+        input_cell=True, note="Year-1 growth, fading linearly to the terminal rate.")
+    kv2(R_GBEAR, "Stage-1 FCF growth — bear case",
+        g_bear if g_bear is not None else dcf["base_growth"], fmt=FMT_PCT1, input_cell=True)
+    kv2(R_GBULL, "Stage-1 FCF growth — bull case",
+        g_bull if g_bull is not None else dcf["base_growth"], fmt=FMT_PCT1, input_cell=True)
+    kv2(R_ND,   "Net debt (total debt − cash)", dcf["net_debt"], fmt=FMT_BN,
+        input_cell=True, note="Subtracted from enterprise value to reach equity value.")
+    kv2(R_SH,   "Shares outstanding", dcf["shares"], fmt=FMT_SHARES, input_cell=True,
+        note="Derived as market cap ÷ price, so the model ties to the quoted price.")
+    kv2(R_P,    "Current price", dcf["price"], fmt=FMT_USD, input_cell=True)
+
+    # ── 5. Projection — live formulas, base / bear / bull side by side ────────
+    sec(R_PROJ_SEC, "Base-Case Projection  (bear and bull run alongside)")
+    for ci, h in enumerate(["Year", "Growth", "Projected FCF", "Discount factor",
+                            "PV of FCF", "Bear growth", "Bear FCF", "Bear PV",
+                            "Bull growth", "Bull FCF", "Bull PV"], 1):
+        _hdr_cell(ws.cell(row=R_PROJ_HDR, column=ci, value=h), bg=MID_BLUE)
+
+    def _fade(g_row, r):
+        """Linear fade from the stage-1 rate to terminal, exactly as analysis.py."""
+        return (f"=IF($B${R_YRS}<=1,$B${R_TG},$B${g_row}"
+                f"+($B${R_TG}-$B${g_row})*(A{r}-1)/($B${R_YRS}-1))")
+
+    for i in range(n_yr):
+        r     = R_P0 + i
+        first = (i == 0)
+        ws.cell(row=r, column=1, value=proj[i]["year"]).number_format = "0"
+        ws.cell(row=r, column=2, value=_fade(R_G1, r))
+        ws.cell(row=r, column=3,
+                value=(f"=$B${R_FCF0}*(1+B{r})" if first else f"=C{r-1}*(1+B{r})"))
+        ws.cell(row=r, column=4, value=f"=1/(1+$B${R_W})^A{r}")
+        ws.cell(row=r, column=5, value=f"=C{r}*D{r}")
+        ws.cell(row=r, column=6, value=_fade(R_GBEAR, r))
+        ws.cell(row=r, column=7,
+                value=(f"=$B${R_FCF0}*(1+F{r})" if first else f"=G{r-1}*(1+F{r})"))
+        ws.cell(row=r, column=8, value=f"=G{r}*D{r}")
+        ws.cell(row=r, column=9, value=_fade(R_GBULL, r))
+        ws.cell(row=r, column=10,
+                value=(f"=$B${R_FCF0}*(1+I{r})" if first else f"=J{r-1}*(1+I{r})"))
+        ws.cell(row=r, column=11, value=f"=J{r}*D{r}")
+        for ci in range(1, 12):
+            c = ws.cell(row=r, column=ci)
             c.font   = Font(name="Calibri", size=10)
             c.border = _border()
-            if row % 2 == 0:
+            c.alignment = Alignment(horizontal="right")
+            if ci in (2, 6, 9):
+                c.number_format = FMT_PCT1
+            elif ci == 4:
+                c.number_format = "0.000"
+            elif ci > 1:
+                c.number_format = FMT_BN
+            if r % 2 == 0:
                 c.fill = PatternFill("solid", fgColor=GREY_ROW)
-        row += 1
-    for lbl, val in [("PV of explicit FCF",   _bn(dcf["pv_explicit"])),
-                     ("Terminal value",        _bn(dcf["terminal_value"])),
-                     ("PV of terminal value",  _bn(dcf["pv_terminal"])),
-                     ("Enterprise value",      _bn(dcf["enterprise_value"])),
-                     ("Less: net debt",        _bn(dcf["net_debt"])),
-                     ("Equity value",          _bn(dcf["equity_value"]))]:
-        kv2(row, lbl, val); row += 1
-    row += 1
 
-    # ── Sensitivity grid (WACC × terminal growth) ─────────────────────────────
-    sec(row, "Sensitivity — Fair Value / Share  (WACC × Terminal Growth)"); row += 1
-    sens = dcf["sensitivity"]
-    corner = ws.cell(row=row, column=1, value="WACC ╲ Term. g")
-    corner.font   = Font(bold=True, size=9, name="Calibri")
-    corner.border = _border()
-    for cj, tg in enumerate(sens["tg_axis"], 2):
-        _hdr_cell(ws.cell(row=row, column=cj, value=f"{tg * 100:.1f}%"), bg=MID_BLUE)
-    row += 1
-    grid_top = row
-    for ri, w in enumerate(sens["wacc_axis"]):
-        _hdr_cell(ws.cell(row=row, column=1, value=f"{w * 100:.1f}%"), bg=MID_BLUE)
-        for cj, fv in enumerate(sens["grid"][ri], 2):
-            c = ws.cell(row=row, column=cj, value=(round(fv, 2) if fv else None))
-            c.number_format = '_($* #,##0.00_)'
-            c.font          = Font(name="Calibri", size=10)
-            c.border        = _border()
-            c.alignment     = Alignment(horizontal="right")
-        row += 1
-    last_col = get_column_letter(1 + len(sens["tg_axis"]))
-    ws.conditional_formatting.add(
-        f"B{grid_top}:{last_col}{row - 1}",
-        ColorScaleRule(start_type="min",        start_color="FFC7CE",
-                       mid_type="percentile",   mid_value=50, mid_color="FFEB9C",
-                       end_type="max",          end_color="C6EFCE"))
-    row += 1
+    # ── 6. Enterprise value → equity bridge (live) ────────────────────────────
+    sec(R_BR_SEC, "Enterprise Value → Equity Bridge")
+    for row, lbl, formula in [
+        (R_PVEXP, "PV of explicit FCF",  f"=SUM(E{R_P0}:E{R_PN})"),
+        (R_TV,    "Terminal value",      f"=C{R_PN}*(1+B{R_TG})/(B{R_W}-B{R_TG})"),
+        (R_PVTV,  "PV of terminal value", f"=B{R_TV}/(1+B{R_W})^B{R_YRS}"),
+        (R_EV,    "Enterprise value",    f"=B{R_PVEXP}+B{R_PVTV}"),
+        (R_NDB,   "Less: net debt",      f"=B{R_ND}"),
+        (R_EQ,    "Equity value",        f"=B{R_EV}-B{R_NDB}"),
+    ]:
+        cv = kv2(row, lbl, formula, fmt=FMT_BN, bold=(row == R_EQ))
+        if row == R_EQ:
+            cv.fill = PatternFill("solid", fgColor="D6E4F0")
 
-    _narrative_box(
-        ws, row,
-        "A DCF is a model, not a forecast. Small changes in WACC, terminal growth, or "
-        "the FCF growth path move fair value materially — see the sensitivity grid. Base "
-        "FCF is normalised over recent years; shares are derived from market cap ÷ price. "
+    # ── 7. Sensitivity grid — green above today's price, red below ────────────
+    sec(R_SENS_SEC, "Sensitivity — Fair Value / Share  (WACC × Terminal Growth)")
+    sens   = dcf.get("sensitivity") or {}
+    w_axis = sens.get("wacc_axis") or []
+    tg_axis = sens.get("tg_axis") or []
+    grid   = sens.get("grid") or []
+    if w_axis and tg_axis and grid:
+        corner = ws.cell(row=R_SENS_HDR, column=1, value="WACC ╲ Term. g")
+        corner.font   = Font(bold=True, size=9, name="Calibri")
+        corner.border = _border()
+        for cj, tg in enumerate(tg_axis, 2):
+            _hdr_cell(ws.cell(row=R_SENS_HDR, column=cj, value=f"{tg * 100:.1f}%"), bg=MID_BLUE)
+        for ri, w in enumerate(w_axis):
+            r = R_SENS0 + ri
+            _hdr_cell(ws.cell(row=r, column=1, value=f"{w * 100:.1f}%"), bg=MID_BLUE)
+            for cj, fv in enumerate(grid[ri], 2):
+                c = ws.cell(row=r, column=cj, value=(round(fv, 2) if fv else None))
+                c.number_format = FMT_USD
+                c.font          = Font(name="Calibri", size=10)
+                c.border        = _border()
+                c.alignment     = Alignment(horizontal="right")
+        last_col  = get_column_letter(1 + len(tg_axis))
+        grid_rng  = f"B{R_SENS0}:{last_col}{R_SENS0 + len(w_axis) - 1}"
+        # Green = the model says it's worth more than the market is charging.
+        ws.conditional_formatting.add(grid_rng, CellIsRule(
+            operator="greaterThan", formula=[f"$B${R_P}"],
+            fill=PatternFill("solid", bgColor=GOOD_FILL),
+            font=Font(color=GOOD_TEXT, bold=True)))
+        ws.conditional_formatting.add(grid_rng, CellIsRule(
+            operator="lessThan", formula=[f"$B${R_P}"],
+            fill=PatternFill("solid", bgColor=BAD_FILL),
+            font=Font(color=BAD_TEXT)))
+        row_after = R_SENS0 + len(w_axis) + 1
+    else:
+        row_after = R_SENS_HDR + 1
+
+    row_after = _narrative_box(
+        ws, row_after,
+        f"Each cell is base-case fair value per share at that discount rate and terminal "
+        f"growth rate. Green = above today's ${dcf['price']:,.2f} price, red = below. "
+        f"These 25 values are computed once when the report is generated; the rest of "
+        f"this sheet is live formulas, so editing the inputs above moves everything "
+        f"except this grid.",
+        height=44, italic=True, bg=TILE_BG)
+
+    row_after = _narrative_box(
+        ws, row_after + 1,
+        "How to use this sheet: the reverse DCF is the headline — it converts today's "
+        "price into the growth rate you would have to believe. Change the discount rate "
+        "or the terminal growth rate in the shaded input cells and every projection, "
+        "bridge and scenario figure recalculates, so you can test your own assumptions "
+        "rather than accept ours. A DCF is a model, not a forecast: base FCF is "
+        "normalised over recent years, shares are derived from market cap ÷ price, and "
+        "small changes in WACC or terminal growth move fair value materially. "
         + DISCLAIMER_SHORT,
-        height=52, italic=True, bg="FFF8E1")
+        height=76, italic=True, bg="FFF8E1")
+
+    # ── 8. Football-field chart, driven off the live scenario cells ───────────
+    # Anchored at the foot of the sheet so the floating picture can't sit on top
+    # of the input notes.
+    try:
+        ch = BarChart()
+        ch.type  = "bar"
+        ch.title = "Fair value per share — scenarios vs today's price"
+        ch.add_data(Reference(ws, min_col=3, min_row=R_SCN_HDR, max_row=R_SCN_MKT),
+                    titles_from_data=True)
+        ch.set_categories(Reference(ws, min_col=1, min_row=R_SCN_BEAR, max_row=R_SCN_MKT))
+        ch.legend = None
+        ch.y_axis.numFmt = '$#,##0'
+        ch.height, ch.width = 7.0, 15.0
+        ws.add_chart(ch, f"A{row_after + 1}")
+    except Exception:
+        pass
 
 
 # ── Methodology & Definitions sheet (de-black-boxes every metric) ─────────────
-def _build_methodology_sheet(wb):
+def _build_methodology_sheet(wb, dcf=None):
     ws = wb.create_sheet("Methodology")
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 26
@@ -1537,12 +1787,32 @@ def _build_methodology_sheet(wb):
         ("Bollinger Bands (20, 2σ)", "20-day average ± 2 standard deviations. %B shows where price sits within the bands; near the upper band is relatively high."),
         ("Support / Resistance", "Recent levels where the stock repeatedly stalled (resistance) or bounced (support), detected from local highs/lows."),
     ])
+    # Read the model's own assumptions rather than restating defaults — WACC is
+    # derived per company, so a fixed "9%" in the glossary would be a lie.
+    _d      = dcf if isinstance(dcf, dict) and dcf.get("ok") else {}
+    _w_txt  = f"{_d['wacc']*100:.1f}%" if _d else "a company-specific discount rate (CAPM-derived WACC)"
+    _tg_txt = f"{_d['terminal_growth']*100:.1f}%" if _d else "a long-run terminal growth rate"
+    _yr_txt = f"{_d['years']}-year" if _d else "multi-year"
+
     section("Valuation", [
         ("P/E · P/S · P/B", "Market cap ÷ net income / revenue / book equity — dollars paid per dollar of earnings, sales, or book value."),
         ("EV / EBITDA", "Enterprise value (market cap + debt − cash) ÷ EBITDA — a capital-structure-neutral earnings multiple."),
         ("FCF / Earnings Yield", "Free cash flow / net income ÷ market cap — the cash or earnings return at today's price; higher = cheaper."),
-        ("Reverse-DCF Implied Growth", "The earnings growth the current price implies, solved from a 2-stage DCF (10y explicit + terminal, 9% discount, 2.5% terminal growth)."),
-        ("DCF Fair Value", "Two-stage DCF on free cash flow: PV of 10y of projected FCF + PV of terminal value − net debt, ÷ shares (market cap ÷ price). 9% WACC, 2.5% terminal growth; base FCF normalised over recent years; stage-1 growth fades to terminal. Full workings + sensitivity on the Valuation sheet. A model, not a price target."),
+        ("What a Reverse DCF Is",
+         "A normal DCF starts with a growth forecast and produces a value. A reverse DCF runs the same model backwards: it takes today's share price as given and solves for the one number that would justify it — the rate at which free cash flow would have to compound over the forecast horizon. "
+         "That flips the question from 'what do I think this is worth?' (which needs a forecast you may not have) to 'what would I have to believe to pay this price?' (which you can judge against the company's history, its competitors and its market size). "
+         "It needs no analyst estimates, so it cannot inherit their optimism, and it gives you a single falsifiable claim to argue with."),
+        ("Reverse-DCF Implied Growth",
+         f"The stage-1 free-cash-flow growth rate the current price implies, solved numerically from the same {_yr_txt} two-stage DCF used for fair value ({_w_txt} discount rate, {_tg_txt} terminal growth). "
+         "Read it as a hurdle: if the implied rate is comfortably below what the business has actually delivered, the price is undemanding; if it is far above, the price already assumes a lot must go right. "
+         "It is blank when today's price falls outside the range of growth rates the model can solve (roughly −20% to +50% a year) — usually a sign the price is being driven by something other than free-cash-flow growth."),
+        ("DCF Fair Value",
+         f"Two-stage DCF on free cash flow: PV of {_yr_txt} of projected FCF + PV of terminal value − net debt, ÷ shares (market cap ÷ price). "
+         f"Discount rate {_w_txt}, terminal growth {_tg_txt}; base FCF normalised over the last three positive annual figures; stage-1 growth fades linearly to the terminal rate. "
+         "The Valuation sheet holds the whole model as live Excel formulas over a block of editable assumption cells — change the discount rate, the terminal growth rate or the growth path and every downstream figure recalculates. A model, not a price target."),
+        ("Sensitivity Grid",
+         "Base-case fair value per share across a 5×5 grid of discount rates and terminal growth rates, on the Valuation sheet. Green cells sit above today's price, red below. "
+         "The spread across that grid is the honest measure of how much confidence a DCF deserves for this company."),
     ])
     section("Quality Scores", [
         ("Piotroski F-Score (0–9)", "Nine pass/fail fundamental-quality tests (profitability, leverage, efficiency) across the two latest fiscal years. Higher = higher quality."),
@@ -1588,7 +1858,7 @@ def build_excel(ticker, df, period,
     _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=df)
     _build_valuation_sheet(wb, ticker, dcf, fundamentals)
     _build_fundamentals_sheet(wb, fundamentals)
-    _build_methodology_sheet(wb)
+    _build_methodology_sheet(wb, dcf=dcf)
 
     # Final tab order (Cover first, then Dashboard, then the rest). Valuation sits
     # right after the Dashboard — "what is it worth?" follows "what's the answer?".

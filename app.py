@@ -49,7 +49,7 @@ from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP
 from analysis import (
     detect_support_resistance, build_correlation_matrix,
     run_monte_carlo, run_custom_forecast, generate_summary_paragraph,
-    compute_fundamentals, dcf_valuation
+    compute_fundamentals, dcf_valuation, market_beta
 )
 from excel_builder import build_excel
 from pptx_builder import build_stock_pptx, build_portfolio_pptx, PPTX_AVAILABLE
@@ -1534,13 +1534,30 @@ elif _page == "analysis":
                 # or when no Finnhub key is configured.
                 _analyst_report = {} if is_crypto else cached_get_analyst_data(ticker_input)
 
-                # Forward DCF fair value (FCF-based) for the report. Reuses the
-                # fundamentals already computed above; degrades to {"ok": False}
-                # for crypto or names without positive free cash flow.
+                # Forward DCF fair value (FCF-based), and the reverse solve for
+                # what growth today's price implies. Reuses the fundamentals
+                # computed above; degrades to {"ok": False} for crypto or names
+                # without positive free cash flow.
+                #
+                # Beta drives the discount rate, and the discount rate drives the
+                # implied-growth headline — on identical financials, a beta of
+                # 0.55 vs 1.35 moves it from -1.6% to +13.8%. So it is computed
+                # from whichever benchmark the user included rather than left at
+                # the flat rate every company used to share. With no benchmark
+                # selected, dcf_valuation falls back to its default and says so
+                # in `wacc_basis`, instead of inventing a beta.
                 _dcf_report = {"ok": False}
                 if not is_crypto and _fund_report.get("ok"):
+                    _beta = None
+                    for _bt in ("SPY", "QQQ"):
+                        if f"{_bt}_Return" in df.columns:
+                            _beta = market_beta(df["Daily_Return"], df[f"{_bt}_Return"])
+                            if _beta is not None:
+                                break
                     try:
-                        _dcf_report = dcf_valuation(_fund_report, float(df["Close"].iloc[-1]))
+                        _dcf_report = dcf_valuation(_fund_report,
+                                                    float(df["Close"].iloc[-1]),
+                                                    beta=_beta)
                     except Exception:
                         _dcf_report = {"ok": False}
 
@@ -2277,34 +2294,330 @@ elif _page == "analysis":
                         )
                         st.plotly_chart(fig_fcf, use_container_width=True)
 
-                    # Reverse-DCF valuation lens — states what growth is priced in
-                    _ig, _hist = fund["implied_growth"], _g["eps_cagr"]
-                    if _ig is not None:
-                        _igp = _ig * 100
-                        if _hist is not None and _igp > _hist + 3:
-                            _msg = (f"The market is pricing in <b>{_igp:.1f}%</b> annual earnings growth for 10 years — "
-                                    f"well above the <b>{_hist:.1f}%</b> the company actually delivered. "
-                                    f"The valuation assumes growth accelerates.")
-                            _vc, _vbg, _vbd = "#b45309", "#fffbeb", "#fde68a"
-                        elif _hist is not None and _igp < _hist - 3:
-                            _msg = (f"The market is pricing in <b>{_igp:.1f}%</b> annual earnings growth for 10 years — "
-                                    f"below the <b>{_hist:.1f}%</b> historical rate. Expectations look conservative.")
-                            _vc, _vbg, _vbd = "#047857", "#ecfdf5", "#a7f3d0"
-                        elif _hist is not None:
-                            _msg = (f"The market is pricing in <b>{_igp:.1f}%</b> annual earnings growth for 10 years — "
-                                    f"roughly in line with the <b>{_hist:.1f}%</b> historical rate.")
-                            _vc, _vbg, _vbd = "#1d4ed8", "#eff6ff", "#bfdbfe"
-                        else:
-                            _msg = (f"The market is pricing in <b>{_igp:.1f}%</b> annual earnings growth for 10 years "
-                                    f"(reverse-DCF · 9% discount · 2.5% terminal).")
-                            _vc, _vbg, _vbd = "#1d4ed8", "#eff6ff", "#bfdbfe"
+                    # ── What's Priced In ──────────────────────────────────────
+                    # Renders `_dcf_report` (analysis.dcf_valuation) — the same
+                    # two-stage FCF model the Excel report ships. It replaces an
+                    # older net-income reverse-DCF one-liner that quoted a
+                    # different, less rigorous implied-growth number and showed
+                    # none of the assumptions behind it.
+                    #
+                    # Every rate below is read from the report, never assumed:
+                    # the WACC is CAPM-derived per company, so hardcoding a
+                    # discount rate here would silently misstate the model.
+                    _dcfr = _dcf_report if isinstance(_dcf_report, dict) else {"ok": False}
+
+                    def _wpi_pct(x, dp=1, sign=False):
+                        """Decimal → percent. `—` when the model didn't produce one."""
+                        if x is None:
+                            return "—"
+                        return f"{x * 100:+.{dp}f}%" if sign else f"{x * 100:.{dp}f}%"
+
+                    def _wpi_usd(x, dp=2):
+                        return "—" if x is None else f"${x:,.{dp}f}"
+
+                    def _wpi_mag(x):
+                        """Compact signed $ magnitude — cash flows, debt, EV."""
+                        if x is None:
+                            return "—"
+                        _a, _sg = abs(x), ("-" if x < 0 else "")
+                        if _a >= 1e12: return f"{_sg}${_a / 1e12:,.2f}T"
+                        if _a >= 1e9:  return f"{_sg}${_a / 1e9:,.2f}B"
+                        if _a >= 1e6:  return f"{_sg}${_a / 1e6:,.1f}M"
+                        return f"{_sg}${_a:,.0f}"
+
+                    def _wpi_cnt(x):
+                        """Share counts — a count, not a currency."""
+                        if x is None:
+                            return "—"
+                        if abs(x) >= 1e9: return f"{x / 1e9:,.2f}B"
+                        if abs(x) >= 1e6: return f"{x / 1e6:,.1f}M"
+                        return f"{x:,.0f}"
+
+                    st.markdown(
+                        '<div class="section-header">What&rsquo;s Priced In '
+                        '<span style="font-weight:500;color:var(--dim);letter-spacing:0;'
+                        'text-transform:none;font-size:0.7rem">'
+                        '· two-stage discounted free cash flow</span></div>',
+                        unsafe_allow_html=True)
+
+                    # Scoped styles. Colour, radius and rules all come from the
+                    # design tokens in styles.css — no literals here, so this
+                    # block moves with the palette instead of drifting from it.
+                    # NOTE: flush-left, like every other raw-HTML f-string on
+                    # this page (see the comment above the hero block).
+                    st.markdown("""<style>
+.wpi{font-family:var(--font-chart);font-variant-numeric:tabular-nums;color:var(--text)}
+.wpi-lbl{font-size:10px;text-transform:uppercase;letter-spacing:0.08em;
+color:var(--muted);font-weight:600;line-height:1.3}
+.wpi-head{display:flex;align-items:flex-start;gap:1.8rem;flex-wrap:wrap;
+border-top:1px solid var(--border);border-bottom:1px solid var(--border);
+padding:1.05rem 0;margin:0 0 1.15rem}
+.wpi-big{font-size:2.5rem;font-weight:600;line-height:1;letter-spacing:-0.02em;
+margin-top:0.35rem;color:var(--accent);font-variant-numeric:tabular-nums}
+.wpi-big.hot{color:var(--red)}
+.wpi-big.cool{color:var(--green)}
+.wpi-big.na{color:var(--muted);font-size:2rem}
+.wpi-read{flex:1 1 320px;min-width:250px;align-self:center;
+font-size:0.85rem;line-height:1.6;color:var(--text2)}
+.wpi-read b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.wpi-fv{display:flex;flex-wrap:wrap;margin:0 0 1.5rem;
+border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.wpi-fv-c{flex:1 1 150px;padding:0.75rem 0 0.8rem 1.15rem;
+border-left:1px solid var(--border)}
+.wpi-fv-c:first-child{padding-left:0;border-left:none}
+.wpi-fv-v{font-size:1.2rem;font-weight:500;margin-top:0.3rem;color:var(--text);
+font-variant-numeric:tabular-nums}
+.wpi-fv-v.pos{color:var(--green)}
+.wpi-fv-v.neg{color:var(--red)}
+.wpi-scroll{overflow-x:auto;margin:0.5rem 0 0.35rem}
+.wpi-sens{width:100%;min-width:540px;border-collapse:collapse;
+font-family:var(--font-chart);font-variant-numeric:tabular-nums;font-size:0.8rem}
+.wpi-sens th,.wpi-sens td{padding:6px 10px;text-align:right;white-space:nowrap;
+border:1px solid var(--border)}
+.wpi-sens thead th{font-size:0.64rem;text-transform:uppercase;letter-spacing:0.07em;
+color:var(--muted);font-weight:700;background:var(--surface2)}
+/* Column hints, not table-layout:fixed — the grid should read as a grid rather
+   than as one wide label column, but a long figure must never clip. */
+.wpi-sens th.cnr,.wpi-sens th.rh{width:24%}
+.wpi-sens td,.wpi-sens thead th:not(.cnr){width:15.2%}
+.wpi-sens th.cnr{text-align:left;font-weight:600}
+.wpi-sens th.rh{text-align:left;font-size:0.76rem;font-weight:600;
+color:var(--muted);background:var(--surface2)}
+.wpi-sens td{color:var(--text);font-weight:500}
+.wpi-sens td.up{background:color-mix(in srgb,var(--green) 8%,transparent)}
+.wpi-sens td.up2{background:color-mix(in srgb,var(--green) 18%,transparent)}
+.wpi-sens td.dn{background:color-mix(in srgb,var(--red) 7%,transparent)}
+.wpi-sens td.dn2{background:color-mix(in srgb,var(--red) 16%,transparent)}
+.wpi-sens td.na{color:var(--muted);font-weight:400}
+.wpi-sens td.mid{outline:1px solid var(--accent);outline-offset:-1px;font-weight:700}
+.wpi-note{font-size:0.72rem;line-height:1.55;color:var(--muted);margin:0.4rem 0 0}
+</style>""", unsafe_allow_html=True)
+
+                    if not _dcfr.get("ok"):
+                        # Say why, and say nothing was substituted for it. A
+                        # silently missing section reads as a broken page.
+                        _why = str(_dcfr.get("reason") or "not enough data").strip()
                         st.markdown(
-                            f'<div style="background:{_vbg};border:1px solid {_vbd};border-left:4px solid {_vc};'
-                            f'border-radius:10px;padding:1rem 1.25rem;margin-top:0.5rem;font-size:0.85rem;'
-                            f'color:#334155;line-height:1.6"><span style="font-weight:700;color:{_vc};'
-                            f'text-transform:uppercase;font-size:0.68rem;letter-spacing:0.5px">'
-                            f"Reverse-DCF · What's Priced In</span><br>{_msg}</div>",
+                            f'<p class="wpi wpi-note" style="border-top:1px solid var(--border);'
+                            f'padding-top:0.85rem">A discounted-cash-flow read isn&rsquo;t available '
+                            f'for {ticker_input} — {_why}. Nothing has been estimated in its '
+                            f'place.</p>',
                             unsafe_allow_html=True)
+                    else:
+                        _mig  = _dcfr.get("market_implied_growth")
+                        _bg   = _dcfr.get("base_growth")
+                        _wacc = _dcfr.get("wacc")
+                        _tg   = _dcfr.get("terminal_growth")
+                        _yrs  = _dcfr.get("years")
+                        _px   = _dcfr.get("price")
+                        _fv   = _dcfr.get("fair_value")
+                        _up   = _dcfr.get("upside")
+                        _hist = _g.get("eps_cagr")
+                        _hzn  = f"{_yrs} years" if _yrs else "the forecast horizon"
+                        _base_clause = (f" The model&rsquo;s own base case is <b>{_wpi_pct(_bg)}</b>."
+                                        if _bg is not None else "")
+
+                        # 1 ── Headline. Same three-way tone as before, restated
+                        # for free cash flow: the DCF projects FCF, so comparing
+                        # it to delivered EPS growth is the honest framing.
+                        if _mig is None:
+                            _tone = "na"
+                            _big  = "—"
+                            _read = ("Today&rsquo;s price sits outside the growth range this model can "
+                                     "solve, so there is no single implied rate to quote."
+                                     + _base_clause)
+                        else:
+                            _migp = _mig * 100
+                            _big  = f"{_migp:.1f}%"
+                            if _hist is not None and _migp > _hist + 3:
+                                _tone = "hot"
+                                _read = (f"To justify today&rsquo;s price the company has to compound free "
+                                         f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — well above "
+                                         f"the <b>{_hist:.1f}%</b> earnings growth it has actually "
+                                         f"delivered. The price assumes growth accelerates from "
+                                         f"here.{_base_clause}")
+                            elif _hist is not None and _migp < _hist - 3:
+                                _tone = "cool"
+                                _read = (f"To justify today&rsquo;s price the company only has to compound "
+                                         f"free cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — below "
+                                         f"the <b>{_hist:.1f}%</b> earnings growth it has delivered. "
+                                         f"Expectations look conservative.{_base_clause}")
+                            elif _hist is not None:
+                                _tone = ""
+                                _read = (f"To justify today&rsquo;s price the company has to compound free "
+                                         f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — roughly in "
+                                         f"line with the <b>{_hist:.1f}%</b> earnings growth it has "
+                                         f"delivered.{_base_clause}")
+                            else:
+                                _tone = ""
+                                _read = (f"To justify today&rsquo;s price the company has to compound free "
+                                         f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn}, discounted "
+                                         f"at <b>{_wpi_pct(_wacc)}</b> with a <b>{_wpi_pct(_tg)}</b> "
+                                         f"terminal rate.{_base_clause}")
+
+                        _wpi = ['<div class="wpi">', '<div class="wpi-head">',
+                                '<div><div class="wpi-lbl">Market-implied FCF growth</div>',
+                                f'<div class="wpi-big {_tone}">{_big}</div></div>',
+                                f'<div class="wpi-read">{_read}</div>', '</div>']
+
+                        # 2 ── Fair value vs price.
+                        _up_cls = "" if _up is None else ("pos" if _up >= 0 else "neg")
+                        _up_lbl = "Downside to fair value" if (_up is not None and _up < 0) \
+                                  else "Upside to fair value"
+                        _wpi.append(
+                            '<div class="wpi-fv">'
+                            '<div class="wpi-fv-c"><div class="wpi-lbl">DCF fair value</div>'
+                            f'<div class="wpi-fv-v">{_wpi_usd(_fv)}</div></div>'
+                            '<div class="wpi-fv-c"><div class="wpi-lbl">Current price</div>'
+                            f'<div class="wpi-fv-v">{_wpi_usd(_px)}</div></div>'
+                            f'<div class="wpi-fv-c"><div class="wpi-lbl">{_up_lbl}</div>'
+                            f'<div class="wpi-fv-v {_up_cls}">{_wpi_pct(_up, 1, sign=True)}</div>'
+                            '</div></div>')
+
+                        # 3 ── Scenarios. Reuses .fund-table so the row rhythm
+                        # matches the fundamentals grid directly above.
+                        _scn = _dcfr.get("scenarios") or {}
+                        _wpi.append(
+                            '<table class="fund-table">'
+                            '<tr class="grp"><td>Scenario</td><td class="v">FCF growth</td>'
+                            '<td class="v">Fair value</td><td class="v">Upside</td></tr>')
+                        for _sk, _sn in (("bear", "Bear"), ("base", "Base"), ("bull", "Bull")):
+                            _s   = _scn.get(_sk) or {}
+                            _sup = _s.get("upside")
+                            _scl = "" if _sup is None else ("pos" if _sup >= 0 else "neg")
+                            _wpi.append(
+                                f'<tr><td class="k">{_sn}</td>'
+                                f'<td class="v">{_wpi_pct(_s.get("growth"))}</td>'
+                                f'<td class="v">{_wpi_usd(_s.get("fair_value"))}</td>'
+                                f'<td class="v {_scl}">{_wpi_pct(_sup, 1, sign=True)}</td></tr>')
+                        _wpi.append('</table>')
+
+                        # 4 ── Sensitivity. An HTML table, not a heatmap: the
+                        # point of this grid is that you can read the numbers.
+                        # The tint is a low-alpha mix of the semantic tokens so
+                        # the figure on top of it stays legible.
+                        _sen  = _dcfr.get("sensitivity") or {}
+                        _wax  = _sen.get("wacc_axis") or []
+                        _tax  = _sen.get("tg_axis") or []
+                        _grid = _sen.get("grid") or []
+                        if _wax and _tax and _grid:
+                            _wmid = next((i for i, w in enumerate(_wax)
+                                          if _wacc is not None and abs(w - _wacc) < 5e-5), None)
+                            _tmid = next((i for i, t in enumerate(_tax)
+                                          if _tg is not None and abs(t - _tg) < 5e-5), None)
+                            _hdr  = "".join(f'<th>{_wpi_pct(_t)}</th>' for _t in _tax)
+                            _body = []
+                            for _ri, _w in enumerate(_wax):
+                                _row   = _grid[_ri] if _ri < len(_grid) else []
+                                _cells = []
+                                for _ci in range(len(_tax)):
+                                    _cv = _row[_ci] if _ci < len(_row) else None
+                                    if _cv is None or not _px:
+                                        _ccls, _ctxt = "na", "—"
+                                    else:
+                                        _d = _cv / _px - 1
+                                        _ccls = ("up2" if _d >= 0.25 else "up" if _d > 0 else
+                                                 "dn2" if _d <= -0.25 else "dn" if _d < 0 else "")
+                                        _ctxt = _wpi_usd(_cv)
+                                    if _ri == _wmid and _ci == _tmid:
+                                        _ccls = (_ccls + " mid").strip()
+                                    _cells.append(f'<td class="{_ccls}">{_ctxt}</td>')
+                                _body.append(f'<tr><th class="rh">{_wpi_pct(_w)}</th>'
+                                             + "".join(_cells) + '</tr>')
+                            _wpi.append(
+                                '<div class="wpi-lbl" style="margin:1.6rem 0 0.15rem">'
+                                'Fair value sensitivity</div>'
+                                '<div class="wpi-scroll"><table class="wpi-sens"><thead>'
+                                f'<tr><th class="cnr">WACC &darr; &nbsp;/&nbsp; Terminal growth &rarr;</th>'
+                                f'{_hdr}</tr></thead><tbody>' + "".join(_body)
+                                + '</tbody></table></div>'
+                                '<p class="wpi-note">Each cell is the fair value per share at that '
+                                'discount rate and terminal growth rate. Green sits above '
+                                f'today&rsquo;s price of {_wpi_usd(_px)}, red below it; the outlined '
+                                'cell is the base case above.</p>')
+
+                        # 5 ── Assumptions. The section is only as credible as
+                        # the inputs it will show you, so they are shown.
+                        _pvx, _pvt = _dcfr.get("pv_explicit"), _dcfr.get("pv_terminal")
+                        _tshare = (_pvt / (_pvx + _pvt)
+                                   if (_pvx is not None and _pvt is not None and (_pvx + _pvt))
+                                   else None)
+                        _shares = _dcfr.get("shares")
+                        _eqv    = _dcfr.get("equity_value")
+
+                        # Where the discount rate came from. This is the single
+                        # most load-bearing assumption in the section — the same
+                        # financials priced at a 0.55 beta vs a 1.35 beta imply
+                        # -1.6% vs +13.8% growth — so it is shown, not asserted.
+                        # A fallback rate is labelled as one rather than passed
+                        # off as company-specific.
+                        _wb = _dcfr.get("wacc_basis") or {}
+                        if _wb.get("beta") is not None:
+                            # The estimation window is part of the assumption:
+                            # beta over 1y and over 5y are different numbers for
+                            # the same company, so quoting one without saying
+                            # which is incomplete.
+                            _rate_basis = (f"CAPM &middot; &beta; {_wb['beta']:.2f} "
+                                           f"({period_label} vs benchmark) &middot; "
+                                           f"Rf {_wpi_pct(_wb.get('risk_free'), 2)} &middot; "
+                                           f"ERP {_wpi_pct(_wb.get('erp'), 1)}")
+                            _rate_extra = [
+                                ("Cost of equity", _wpi_pct(_wb.get("cost_of_equity"), 2)),
+                                ("Cost of debt (assumed)", _wpi_pct(_wb.get("cost_of_debt"), 2)),
+                                ("Equity / debt weight",
+                                 f"{_wpi_pct(_wb.get('equity_weight'))} / {_wpi_pct(_wb.get('debt_weight'))}"),
+                            ]
+                        else:
+                            _rate_basis = ("Default rate &mdash; no benchmark selected, "
+                                           "so no beta could be estimated")
+                            _rate_extra = []
+
+                        _wpi.append('<table class="fund-table" style="margin-top:1.5rem">')
+                        for _grp, _items in (
+                            ("Assumptions, stated openly", [
+                                ("Discount rate (WACC)", _wpi_pct(_wacc, 2)),
+                                ("How the rate was set", _rate_basis),
+                                *_rate_extra,
+                                ("Terminal growth",      _wpi_pct(_tg, 2)),
+                                ("Forecast horizon",     f"{_yrs} years" if _yrs else "—"),
+                                ("Base-case FCF growth", _wpi_pct(_bg, 2)),
+                                ("Base free cash flow",  _wpi_mag(_dcfr.get("base_fcf"))),
+                                ("Net debt",             _wpi_mag(_dcfr.get("net_debt"))),
+                                ("Shares outstanding",   _wpi_cnt(_shares)),
+                                ("Terminal share of value", _wpi_pct(_tshare)),
+                            ]),
+                            ("Value bridge", [
+                                (f"PV of years 1&ndash;{_yrs}" if _yrs else "PV of forecast years",
+                                 _wpi_mag(_pvx)),
+                                ("PV of terminal value",  _wpi_mag(_pvt)),
+                                ("Terminal value (undiscounted)",
+                                 _wpi_mag(_dcfr.get("terminal_value"))),
+                                ("Enterprise value",      _wpi_mag(_dcfr.get("enterprise_value"))),
+                                ("Equity value",          _wpi_mag(_eqv)),
+                                ("Equity value / share",
+                                 _wpi_usd(_eqv / _shares) if (_eqv is not None and _shares) else "—"),
+                            ]),
+                        ):
+                            _wpi.append(f'<tr class="grp"><td colspan="4">{_grp}</td></tr>')
+                            for _i in range(0, len(_items), 2):
+                                _cells = ""
+                                for _j in range(2):
+                                    if _i + _j < len(_items):
+                                        _k, _val = _items[_i + _j]
+                                        _cells += (f'<td class="{"k pair2" if _j else "k"}">{_k}</td>'
+                                                   f'<td class="v">{_val}</td>')
+                                    else:
+                                        _cells += '<td class="k"></td><td class="v"></td>'
+                                _wpi.append(f'<tr>{_cells}</tr>')
+                        _wpi.append('</table></div>')
+                        st.markdown("".join(_wpi), unsafe_allow_html=True)
+                        st.caption(
+                            "Two-stage DCF on free cash flow: stage-one growth fades linearly to "
+                            "the terminal rate over the horizon, discounted at the company's own "
+                            "CAPM cost of capital, then bridged from enterprise value to equity "
+                            "with net debt. Market-implied growth is the same model solved "
+                            "backwards from today's price. A lens on expectations, not a price "
+                            "target — always do your own research.")
 
             # ── ETF Profile Panel ─────────────────────────────────────────────
             if is_etf:

@@ -41,7 +41,7 @@ from data import (fetch_stock_data, fetch_company_details, fetch_financials,
                   fetch_news, fetch_peer_comparison, fetch_sector_data)
 from analysis import (compute_fundamentals, dcf_valuation, run_monte_carlo,
                       build_correlation_matrix, detect_support_resistance,
-                      generate_summary_paragraph)
+                      generate_summary_paragraph, market_beta)
 from market_data import get_financials_supplement
 from excel_builder import build_excel
 from constants import get_risk_free_rate
@@ -88,8 +88,19 @@ def main():
     fundamentals = compute_fundamentals(fin, market_cap=details.get("Market Cap"),
                                         supplement=supplement)
     price = float(df["Close"].iloc[-1])
+    # Beta must be passed here for the same reason the app passes it: without it
+    # dcf_valuation falls back to a flat default rate, and the sample workbook
+    # would then quote a different WACC — and a different implied growth — than
+    # the live site does for the same ticker.
+    beta = None
+    for _bt in ("SPY", "QQQ"):
+        if f"{_bt}_Return" in df.columns:
+            beta = market_beta(df["Daily_Return"], df[f"{_bt}_Return"])
+            if beta is not None:
+                break
+    print(f"  market beta: {beta if beta is not None else 'unavailable — DCF will use its default rate'}")
     try:
-        dcf = dcf_valuation(fundamentals, price)
+        dcf = dcf_valuation(fundamentals, price, beta=beta)
     except Exception:
         dcf = None
 
