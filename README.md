@@ -35,6 +35,30 @@ create index if not exists idx_tracked_user on tracked_portfolios(user_email);
 
 Beta sign-in is email-only (not secure) — harden to real auth before paid launch.
 
+### Waitlist
+
+The sidebar waitlist writes to Supabase. It needs a one-time table (DDL also in
+`database.py`):
+
+```sql
+create table if not exists waitlist (
+  id uuid primary key default gen_random_uuid(),
+  email text not null unique,
+  source text,
+  created_at timestamptz not null default now()
+);
+```
+
+`email` must be `unique` — the insert upserts on that column so a repeat signup
+is a no-op. Until the table exists, signups fall back to stderr (grep **Manage
+app → logs** for `WAITLIST-FALLBACK`) and a local `waitlist.csv`, which is
+gitignored and lost whenever the container recycles. **Run the DDL before
+promoting the app.**
+
+`SUPABASE_URL` must be the **Project URL** (`https://<ref>.supabase.co`), not the
+REST endpoint — every call appends `/rest/v1` itself. Set it under **Manage app
+→ Settings → Secrets**.
+
 ---
 
 ## Deploy to Streamlit Cloud (free, 5 minutes)
