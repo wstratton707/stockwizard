@@ -13,12 +13,38 @@ Usage:
 import os
 import json
 import logging
+import threading
 import requests
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+def _normalise_base(raw: str) -> str:
+    """Project URL only — no API path, no trailing slash.
+
+    Every call site here builds `{SUPABASE_URL}/rest/v1/<table>`. If SUPABASE_URL
+    already carries the API path, the result is `/rest/v1/rest/v1/<table>`, which
+    PostgREST rejects with PGRST125 "Invalid path".
+
+    That misconfiguration is invisible in production, which is what makes it
+    worth defending against: every function in this module catches the failure
+    and degrades to None/False, so the cache silently stops caching, the nightly
+    rankings silently vanish (the Portfolio Builder then falls through to its
+    slow live-candidate path), saved portfolios silently don't save, and the
+    Your Portfolios tab reports "table isn't in this project" about a table that
+    is right there. Observed in the deployed app 2026-08-01.
+
+    Copying the *REST endpoint* out of the Supabase dashboard instead of the
+    *project URL* is the natural way to end up here, so accept either form.
+    """
+    u = (raw or "").strip().rstrip("/")
+    for suffix in ("/rest/v1", "/rest"):
+        if u.endswith(suffix):
+            u = u[: -len(suffix)].rstrip("/")
+    return u
+
+
+SUPABASE_URL = _normalise_base(os.getenv("SUPABASE_URL", ""))
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 _TABLE       = "api_cache"
 _TIMEOUT     = 8  # seconds
@@ -44,6 +70,84 @@ def _base_url() -> str:
 
 def _available() -> bool:
     return bool(SUPABASE_URL and SUPABASE_KEY)
+
+
+# ── Why the last write failed ─────────────────────────────────────────────────
+# Every write here returns a bare bool/None and swallows the reason, so the UI
+# could only ever say "check your connection" — whether the real cause was a
+# malformed URL, a rejected key, a missing table, or an actual network drop.
+# That cost real debugging time: a doubled /rest/v1 in SUPABASE_URL presented as
+# "the table isn't in this project" about a table that was present with rows in
+# it, and as "check your connection" on a connection that was fine.
+#
+# Thread-local, not a module global: Streamlit serves concurrent sessions on
+# separate threads, and one user's failure must not surface in another's UI.
+_LAST_ERROR = threading.local()
+
+
+def _remember(reason: str) -> None:
+    _LAST_ERROR.reason = reason
+
+
+def last_write_error() -> str:
+    """Human-readable reason the most recent write on THIS thread failed."""
+    return getattr(_LAST_ERROR, "reason", "") or "unknown error"
+
+
+def _explain(r=None, exc=None) -> str:
+    """Turn a response or exception into something worth showing a user."""
+    if exc is not None:
+        return f"couldn't reach Supabase ({type(exc).__name__})"
+    if r is None:
+        return "unknown error"
+    if r.status_code in (401, 403):
+        return ("the Supabase key was rejected — check SUPABASE_KEY belongs to "
+                f"{supabase_project_url()}")
+    if "PGRST125" in (r.text or ""):
+        return ("SUPABASE_URL points at a REST endpoint. It should be "
+                "https://<project-ref>.supabase.co with no /rest/v1 on the end")
+    if r.status_code == 404:
+        return (f"that table doesn't exist in {supabase_project_url()} — "
+                f"run the DDL from database.py")
+    if r.status_code == 409:
+        return "a conflicting row already exists"
+    body = " ".join((r.text or "").split())[:160]
+    return f"Supabase returned HTTP {r.status_code}" + (f" — {body}" if body else "")
+
+
+def _table_status(table: str) -> str:
+    """Reachability of one table, distinguishing the failure modes:
+
+      'ok'          — reachable
+      'no_creds'    — SUPABASE_URL / SUPABASE_KEY not set for this instance
+      'bad_key'     — connected, but the key is wrong or lacks access (401/403)
+      'bad_url'     — the URL isn't a Supabase REST base (PostgREST rejected the path)
+      'no_table'    — connected and authorised, but the table doesn't exist (404)
+      'unreachable' — network/DNS/timeout
+
+    Worth the extra branches: the previous version collapsed every non-200 into
+    'no_table', so a malformed URL produced the confident and completely wrong
+    message "the table isn't in this project" about a table that was present.
+    Shared by both public status helpers so they can't drift apart.
+    """
+    if not _available():
+        return "no_creds"
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/{table}",
+                         headers=_headers(),
+                         params={"select": "*", "limit": "1"}, timeout=_TIMEOUT)
+        if r.status_code == 200:
+            return "ok"
+        if r.status_code in (401, 403):
+            return "bad_key"
+        # PGRST125 is PostgREST's "Invalid path" — the base URL already carried
+        # /rest/v1, so we built it twice. _normalise_base() prevents this now.
+        if "PGRST125" in (r.text or ""):
+            return "bad_url"
+        return "no_table"
+    except Exception as e:
+        logger.warning(f"_table_status({table}): {e}")
+        return "unreachable"
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -154,6 +258,65 @@ def is_connected() -> bool:
         return False
 
 
+# ── Waitlist ───────────────────────────────────────────────────────────────────
+# One-time table setup (run in the Supabase SQL editor):
+#
+#   create table if not exists waitlist (
+#     id         uuid primary key default gen_random_uuid(),
+#     email      text        not null unique,
+#     source     text,
+#     created_at timestamptz not null default now()
+#   );
+#
+# `email` must be UNIQUE — the upsert below conflict-targets that column, so
+# without the constraint a repeat signup errors instead of being ignored.
+#
+# This replaced a local `waitlist.csv`. Streamlit Community Cloud's filesystem is
+# ephemeral — rebuilt on every push, recycled when the app sleeps — so every
+# signup collected since the last restart was silently destroyed.
+_WAITLIST_TABLE = "waitlist"
+
+
+def save_waitlist_email(email: str, source: str = "") -> bool:
+    """Record a waitlist signup. True if it reached Supabase.
+
+    Upserts on `email`, so signing up twice is a no-op rather than an error the
+    visitor sees or a duplicate we have to clean up later. The caller is
+    responsible for validating the address; this only normalises it.
+    """
+    if not _available():
+        _remember("Supabase isn't configured on this app instance")
+        return False
+    e = (email or "").strip().lower()
+    if not e:
+        _remember("empty email")
+        return False
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/{_WAITLIST_TABLE}",
+            headers={**_headers(),
+                     "Prefer": "resolution=merge-duplicates,return=minimal"},
+            params={"on_conflict": "email"},
+            json={"email": e, "source": (source or None)},
+            timeout=_TIMEOUT,
+        )
+        if r.status_code in (200, 201, 204):
+            _remember("")
+            return True
+        _remember(_explain(r=r))
+        logger.warning(f"save_waitlist_email: HTTP {r.status_code} {r.text[:200]}")
+        return False
+    except Exception as ex:
+        _remember(_explain(exc=ex))
+        logger.warning(f"save_waitlist_email: {ex}")
+        return False
+
+
+def waitlist_storage_status() -> str:
+    """Waitlist persistence health — see _table_status for the return values."""
+    return _table_status(_WAITLIST_TABLE)
+
+
 # ── Portfolio persistence ──────────────────────────────────────────────────────
 _PORT_TABLE = "saved_portfolios"
 
@@ -165,6 +328,8 @@ def save_portfolio(user_email: str, name: str, weights: dict,
     Returns True on success.
     """
     if not _available():
+        _remember("Supabase isn't configured on this app instance "
+                  "(SUPABASE_URL / SUPABASE_KEY are missing)")
         return False
     try:
         r = requests.post(
@@ -179,8 +344,14 @@ def save_portfolio(user_email: str, name: str, weights: dict,
             },
             timeout=_TIMEOUT,
         )
-        return r.status_code in (200, 201, 204)
+        if r.status_code in (200, 201, 204):
+            _remember("")
+            return True
+        _remember(_explain(r=r))
+        logger.warning(f"save_portfolio: HTTP {r.status_code} {r.text[:200]}")
+        return False
     except Exception as e:
+        _remember(_explain(exc=e))
         logger.warning(f"save_portfolio: {e}")
         return False
 
@@ -251,6 +422,8 @@ def save_tracked_portfolio(user_email: str, name: str, holdings: list,
                            inception_date: str) -> str | None:
     """Create a tracked portfolio. Returns its new UUID, or None on failure."""
     if not _available() or not (user_email or "").strip():
+        _remember("Supabase isn't configured on this app instance "
+                  "(SUPABASE_URL / SUPABASE_KEY are missing)")
         return None
     try:
         r = requests.post(
@@ -267,8 +440,14 @@ def save_tracked_portfolio(user_email: str, name: str, holdings: list,
         if r.status_code in (200, 201):
             rows = r.json()
             if rows:
+                _remember("")
                 return rows[0].get("id")
+            _remember("Supabase accepted the write but returned no row")
+        else:
+            _remember(_explain(r=r))
+            logger.warning(f"save_tracked_portfolio: HTTP {r.status_code} {r.text[:200]}")
     except Exception as e:
+        _remember(_explain(exc=e))
         logger.warning(f"save_tracked_portfolio: {e}")
     return None
 
@@ -332,17 +511,5 @@ def delete_tracked_portfolio(portfolio_id: str) -> bool:
 
 
 def tracked_storage_status() -> str:
-    """Diagnose why saves might fail, for a clear UI message:
-      'ok'       — Supabase configured and the tracked_portfolios table is reachable
-      'no_creds' — SUPABASE_URL/KEY not set for THIS app instance (check secrets)
-      'no_table' — connected, but tracked_portfolios isn't in this project (run the DDL)
-    """
-    if not _available():
-        return "no_creds"
-    try:
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/{_TRACKED_TABLE}",
-            headers=_headers(), params={"select": "id", "limit": "1"}, timeout=_TIMEOUT)
-        return "ok" if r.status_code == 200 else "no_table"
-    except Exception:
-        return "no_table"
+    """Tracked-portfolio persistence health — see _table_status for the values."""
+    return _table_status(_TRACKED_TABLE)

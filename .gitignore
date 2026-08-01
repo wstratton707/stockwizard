@@ -209,3 +209,9 @@ __marimo__/
 # Playwright MCP scratch snapshots + root-level QA screenshots
 .playwright-mcp/
 /*.png
+
+# Waitlist fallback file — contains user email addresses, never commit
+waitlist.csv
+
+# Real secrets (the .example template IS committed)
+.streamlit/secrets.toml
