@@ -13,6 +13,12 @@ from constants import DEV_MODE_FREE
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PRICE_ID   = os.environ.get("STRIPE_PRICE_ID", "")
+# Annual plan. The pricing card used to offer an "Annual billing (save 34%) —
+# $79/yr" toggle while checkout only ever passed STRIPE_PRICE_ID, so anyone
+# choosing annual would have been billed the monthly price. The toggle is now
+# gated on this being configured, and the chosen plan is what gets charged.
+STRIPE_PRICE_ID_ANNUAL = os.environ.get("STRIPE_PRICE_ID_ANNUAL", "")
+ANNUAL_PRICE_LABEL     = os.environ.get("STRIPE_ANNUAL_LABEL", "$79/yr")
 
 # Validate key at startup but do NOT set stripe.api_key globally —
 # pass it per-call so the key never appears in module-level state or error traces.
@@ -21,16 +27,25 @@ if not DEV_MODE_FREE:
         raise EnvironmentError("STRIPE_SECRET_KEY is not set. Payments cannot be processed.")
 
 
-def create_checkout_session(success_url, cancel_url, email=None):
+def create_checkout_session(success_url, cancel_url, email=None, annual=None):
     # DEV_MODE_FREE: Stripe is disabled — callers should not reach this function,
     # but return None safely if they do.
     if DEV_MODE_FREE:
+        return None
+    # Which plan the user picked on the pricing card. Defaults to the toggle in
+    # session state so existing call sites don't need to thread it through.
+    if annual is None:
+        annual = bool(st.session_state.get("annual_billing"))
+    price_id = STRIPE_PRICE_ID_ANNUAL if annual else STRIPE_PRICE_ID
+    if not price_id:
+        st.error("That billing plan isn't available right now. Please choose monthly, "
+                 "or contact support.")
         return None
     # ── Original Stripe logic preserved below — do not delete ──
     try:
         kwargs = {
             "payment_method_types": ["card"],
-            "line_items": [{"price": STRIPE_PRICE_ID, "quantity": 1}],
+            "line_items": [{"price": price_id, "quantity": 1}],
             "mode": "subscription",
             "success_url": success_url + "?session_id={CHECKOUT_SESSION_ID}",
             "cancel_url": cancel_url,
@@ -106,17 +121,20 @@ def render_pricing_section():
                 <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">RSI, MACD, Bollinger Bands</span></div>
                 <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">Support & resistance</span></div>
                 <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">News headlines</span></div>
-                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">Up to 5 year history</span></div>
-                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#cbd5e1;display:inline-flex;flex:0 0 auto">{_no}</span><span style="color:#94a3b8">Intraday charts</span></div>
-                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#cbd5e1;display:inline-flex;flex:0 0 auto">{_no}</span><span style="color:#94a3b8">Day trader mode</span></div>
-                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#cbd5e1;display:inline-flex;flex:0 0 auto">{_no}</span><span style="color:#94a3b8">Intraday (15-min delayed) data</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#059669;display:inline-flex;flex:0 0 auto">{_ok}</span><span style="color:#334155">Up to 10 years of price history</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#cbd5e1;display:inline-flex;flex:0 0 auto">{_no}</span><span style="color:#94a3b8">Portfolio Builder &amp; backtest</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#cbd5e1;display:inline-flex;flex:0 0 auto">{_no}</span><span style="color:#94a3b8">Stress Test &amp; Portfolio Autopsy</span></div>
+                <div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0"><span style="color:#cbd5e1;display:inline-flex;flex:0 0 auto">{_no}</span><span style="color:#94a3b8">Save &amp; forward-track portfolios</span></div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     with col2:
-        billing = st.toggle("Annual billing (save 34%)", key="annual_billing")
-        price_display = "$79/yr" if billing else "$9.99/mo"
+        # Only offer annual when an annual price actually exists in Stripe —
+        # otherwise the toggle promises a plan checkout cannot sell.
+        billing = (st.toggle("Annual billing (save 34%)", key="annual_billing")
+                   if STRIPE_PRICE_ID_ANNUAL else False)
+        price_display = ANNUAL_PRICE_LABEL if billing else "$9.99/mo"
         savings_tag   = "BEST VALUE" if billing else "MOST POPULAR"
 
         st.markdown(f"""
@@ -138,15 +156,21 @@ def render_pricing_section():
                     f'<div style="display:flex;align-items:center;gap:0.6rem;padding:0.16rem 0">'
                     f'<span style="color:#38bdf8;display:inline-flex;flex:0 0 auto">{_ok}</span>'
                     f'<span style="color:{_c}">{_t}</span></div>'
+                    # These must match the gates the app actually enforces and the
+                    # Pro list on the Analysis landing page. The old list sold Day
+                    # Trader Mode, intraday candles and pre-market/after-hours —
+                    # none of which exist any more (app.py pins Investor Mode) —
+                    # and named "10 year history" as Pro while the date-range
+                    # slider offers 10Y to everyone.
                     for _t, _c in [
                         ("Everything in Free", "#94a3b8"),
-                        ("Intraday candlestick charts (15-min delayed)", "#38bdf8"),
-                        ("Delayed quotes (~15 min)", "#38bdf8"),
-                        ("Day trader mode", "#38bdf8"),
-                        ("1min 5min 15min 1hr candles", "#38bdf8"),
-                        ("Volume spike detection", "#38bdf8"),
-                        ("Pre-market &amp; after-hours", "#38bdf8"),
-                        ("10 year history", "#38bdf8"),
+                        ("<strong>Portfolio Builder</strong> — ranked universe, "
+                         "5-year backtest, efficient frontier", "#38bdf8"),
+                        ("<strong>Stress Test</strong> — 5 historical crash scenarios", "#38bdf8"),
+                        ("<strong>Portfolio Autopsy</strong> — CSV upload, P&amp;L attribution", "#38bdf8"),
+                        ("<strong>Bond analysis</strong> — 60+ ETFs across 6 categories", "#38bdf8"),
+                        ("Portfolio Monte Carlo with milestone probabilities", "#38bdf8"),
+                        ("Save, load &amp; forward-track portfolios", "#38bdf8"),
                         ("Priority support", "#94a3b8"),
                     ])}
             </div>
