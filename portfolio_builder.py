@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 
+import auth
 from constants import DEV_MODE_FREE, get_risk_free_rate, EQUITY_RISK_PREMIUM
 from disclaimers import render_inline, render_section
 import disclaimers as _disc
@@ -31,7 +32,7 @@ from portfolio_analysis import (
     compute_monthly_heatmap, run_portfolio_monte_carlo,
     compute_diversification_score, get_rebalancing_recommendations,
     compute_betas, capm_expected_returns, portfolio_beta, shrunk_covariance,
-    factor_tilted_expected_returns,
+    factor_tilted_expected_returns, FACTOR_ALPHA_MAX,
 )
 from portfolio_excel import build_portfolio_excel
 from pptx_builder import build_portfolio_pptx, PPTX_AVAILABLE
@@ -694,7 +695,10 @@ def _render_step_2(api_key):
         _m   = stock_metrics.get(_t, {})
         _sc  = _fs.get(_t)
         _b   = _m.get("beta")
-        _tilt = (2.0 * (_sc - 0.5) * 0.02 * 100) if _sc is not None else None
+        # Mirrors factor_tilted_expected_returns exactly. Read the cap from the
+        # constant rather than repeating 0.02 — a hardcoded copy here would keep
+        # displaying the old tilt after the optimiser's cap was retuned.
+        _tilt = (2.0 * (_sc - 0.5) * FACTOR_ALPHA_MAX * 100) if _sc is not None else None
         _rows.append({
             "Holding":    _t,
             "Weight":     f"{_w*100:.1f}%",
@@ -709,9 +713,10 @@ def _render_step_2(api_key):
         st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
         st.caption(
             "**Factor score** is the selection composite (momentum 30% · quality 30% · "
-            "low-volatility 20% · risk-adjusted return 20%), percentile-ranked within "
-            "sector for momentum and quality. **Tilt vs CAPM** is how much that score "
-            "moves the expected return the optimiser sees, capped at ±2%/yr so a factor "
+            "low-volatility 20% · risk-adjusted return 20%). Momentum is percentile-ranked "
+            "within sector; quality, volatility and Sharpe are ranked across the whole "
+            "universe. **Tilt vs CAPM** is how much that score "
+            f"moves the expected return the optimiser sees, capped at ±{FACTOR_ALPHA_MAX*100:g}%/yr so a factor "
             "reading can influence weights without dominating them. **Weight** then comes "
             "from mean-variance optimisation on those expected returns and a "
             "shrinkage-estimated covariance matrix."
@@ -737,29 +742,34 @@ def _render_step_2(api_key):
             st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
 
     with st.expander("About these numbers — methodology & assumptions"):
-        st.markdown("""
-**Expected Ann. Return** — CAPM estimate: risk-free rate + (portfolio beta × 5% equity risk premium).
-It reflects how much *market* risk the portfolio carries, not which stocks recently ran up — so it
-isn't inflated by a hot recent stretch. Past returns do not guarantee future performance.
+        st.markdown(f"""
+**Expected Ann. Return** — CAPM estimate: risk-free rate + (portfolio beta × {EQUITY_RISK_PREMIUM*100:g}% equity risk
+premium). It reflects how much *market* risk the portfolio carries, not which stocks recently ran up
+— so it isn't inflated by a hot recent stretch. Past returns do not guarantee future performance.
 
 **Portfolio Beta** — How much the portfolio moves with the market (S&P 500). 1.0 = moves with the
 market; below 1.0 = less market-sensitive (more defensive); above 1.0 = more sensitive.
 
-**Expected Volatility** — Annualised standard deviation of daily returns over the 5-year window.
+**Expected Volatility** — Annualised standard deviation of daily returns over the
+{_PRICE_HISTORY_YEARS}-year window, from a Ledoit-Wolf shrunk covariance matrix.
 Higher volatility = wider range of possible outcomes.
 
-**Sharpe Ratio** — Excess return above the risk-free rate (4.5%) divided by volatility.
-A Sharpe above 1.0 is generally considered good. Above 2.0 is exceptional.
-Calculated from up to 5 years of history — spanning multiple market regimes.
+**Sharpe Ratio** — The *expected* return above (the CAPM figure above, minus the live risk-free rate
+— currently {_rfr_pct:.2f}%) divided by that historical volatility. It is therefore forward-looking in
+the numerator and backward-looking in the denominator, and it is **not** a trailing Sharpe: it does
+not say what this portfolio would have earned per unit of risk over the past five years. Above 1.0
+is generally considered good.
 
 **Diversification Score** — Proprietary 1–10 score combining:
 effective number of holdings (Herfindahl index), average pairwise correlation, and
 concentration penalty for any single position above 25%.
 
 **Important caveats:**
-- All metrics are based on historical data and will not perfectly predict future returns
+- Expected returns are a model, not a forecast; volatility and drawdown are historical and will not
+  perfectly predict future risk
 - Survivorship bias: the universe only includes stocks that still exist today
-- Maximum weight per stock is capped at 40% to prevent over-concentration
+- Maximum weight per stock is whatever you set in the Universe step —
+  currently {prefs.get('max_per_stock', 0.30)*100:.0f}%. Sector concentration is capped at 40%.
 - Stock selection uses a diversified multi-factor score — Momentum (30%) + Quality (30%,
   fundamentals: margins/ROE/growth/Piotroski) + Low-volatility (20%) + risk-adjusted return (20%).
   It's a factor *tilt*, not a prediction — no method reliably forecasts returns, and a
@@ -827,9 +837,9 @@ concentration penalty for any single position above 25%.
                     <div style="font-size:0.7rem;color:#64748b">{_crow['holdings']} holdings</div>
                     <div style="font-size:0.68rem;color:#64748b">{_crow['top']}</div>
                 </div>""", unsafe_allow_html=True)
-        st.caption("Expected return & Sharpe are forward-looking (CAPM: Rf + β·ERP) — the "
-                   "same basis the optimizer maximizes. Volatility and max drawdown are "
-                   "historical (2-yr).")
+        st.caption(f"Expected return & Sharpe are forward-looking (CAPM: Rf + β·ERP) — the "
+                   f"same basis the optimizer maximizes. Volatility and max drawdown are "
+                   f"historical, over the {_PRICE_HISTORY_YEARS}-year price window.")
 
     # Holdings table
     _section_header("Suggested Holdings")
@@ -1044,6 +1054,21 @@ def _render_step_3():
     prefs  = st.session_state.get(_K_PREFS, {})
     start_cap = prefs.get("starting_capital", 10000)
 
+    # Contribution-free growth indices. EVERY return, volatility, beta,
+    # correlation and drawdown figure below reads from these, never from the
+    # "Portfolio"/"SP500" account-value columns: a monthly contribution lands as a
+    # one-day step in account value (+5% in month one on a $10k/$500 plan), and
+    # pct_change() cannot tell that step apart from a market move. It inflated the
+    # rolling volatility, distorted the stress-test beta, and made the historical
+    # drawdown windows look shallower than they were. Both fall back for
+    # backtests cached before these columns existed.
+    _nav = bt_df["NAV"] if "NAV" in bt_df.columns else bt_df["Portfolio"]
+    _bench_nav = (bt_df["SP500_NAV"] if "SP500_NAV" in bt_df.columns
+                  else bt_df.get("SP500"))
+    _has_bench = _bench_nav is not None and not _bench_nav.isna().all()
+    # In percent, to match the rolling return/vol series it is subtracted from.
+    _rfr_pct = get_risk_free_rate() * 100
+
     # Key metrics
     _section_header("Backtest Results")
     cols = st.columns(4)
@@ -1060,7 +1085,12 @@ def _render_step_3():
     st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
     cols2 = st.columns(4)
     for col, label, value, color in [
-        (cols2[0], "Ann. Return",      f"{bt_met.get('Ann. Return',0):.1f}%",     GREEN if bt_met.get("Ann. Return",0)>0 else RED),
+        # `Ann. Return` is None under ~3 months of history — compute_backtest_metrics
+        # refuses to annualise a window too short to justify it, rather than
+        # scaling a few weeks into an impossible yearly figure.
+        (cols2[0], "Ann. Return",
+         (f"{bt_met['Ann. Return']:.1f}%" if bt_met.get("Ann. Return") is not None else "—"),
+         GREEN if (bt_met.get("Ann. Return") or 0) > 0 else RED),
         (cols2[1], "Max Drawdown",     f"{bt_met.get('Max Drawdown',0):.1f}%",    AMBER),
         (cols2[2], "Best Month",       f"{bt_met.get('Best Month',0):.1f}%",      GREEN),
         (cols2[3], "% Months Positive",f"{bt_met.get('% Months Positive',0):.0f}%",GREEN if bt_met.get('% Months Positive',0)>50 else RED),
@@ -1092,9 +1122,8 @@ def _render_step_3():
     # inflows can't mask real market drawdowns (falls back to Portfolio for any
     # older cached backtest that predates the NAV column).
     _section_header("Drawdown from Peak")
-    port     = bt_df["NAV"] if "NAV" in bt_df.columns else bt_df["Portfolio"]
-    peak     = port.cummax()
-    drawdown = (port - peak) / peak * 100
+    peak     = _nav.cummax()
+    drawdown = (_nav - peak) / peak * 100
     fig_dd   = go.Figure()
     fig_dd.add_trace(go.Scatter(
         x=bt_df.index, y=drawdown,
@@ -1113,30 +1142,41 @@ def _render_step_3():
 
     # ── Historical Stress Tests ───────────────────────────────────────────
     _section_header("Historical Stress Tests")
+    # Read from stress_test.CRASH_SCENARIOS rather than a second hardcoded list.
+    # The two used to disagree on the same crashes — this section had the 2022
+    # window ending 10-14 and the 2018 one starting 09-20, while the Stress Test
+    # tab used 10-12 and 10-01 — so the same portfolio showed different "actual"
+    # returns for the same crash depending on which page you were looking at.
+    from stress_test import CRASH_SCENARIOS as _CRASHES, RECENT_CRASHES as _RECENT
     _STRESS_PERIODS = [
-        ("2022 Rate Hike Selloff", "2022-01-03", "2022-10-14", "Fed +425bps; S&P fell 25%",   -24.5),
-        ("COVID-19 Crash",          "2020-02-19", "2020-03-23", "Market fell 34% in 33 days", -33.9),
-        ("Q4 2018 Selloff",         "2018-09-20", "2018-12-24", "Trade war & rate fears",      -19.8),
+        (_n, _CRASHES[_n]["start"], _CRASHES[_n]["end"],
+         _CRASHES[_n]["description"].split("·")[0].strip(),
+         _CRASHES[_n]["market_shock"])
+        for _n in _RECENT if _n in _CRASHES
     ]
     _stress_rows = []
     for _sn, _ss, _se, _sdesc, _known_sp in _STRESS_PERIODS:
         _ss_dt, _se_dt = pd.Timestamp(_ss), pd.Timestamp(_se)
         _bt_min, _bt_max = bt_df.index.min(), bt_df.index.max()
         if _ss_dt >= _bt_min and _se_dt <= _bt_max:
-            _psl = bt_df.loc[_ss_dt:_se_dt, "Portfolio"]
+            _psl = _nav.loc[_ss_dt:_se_dt]
             if len(_psl) > 1:
                 _pr = (_psl.iloc[-1] / _psl.iloc[0] - 1) * 100
                 _sr = None
-                if "SP500" in bt_df.columns:
-                    _ssl = bt_df.loc[_ss_dt:_se_dt, "SP500"].dropna()
+                if _has_bench:
+                    _ssl = _bench_nav.loc[_ss_dt:_se_dt].dropna()
                     if len(_ssl) > 1:
                         _sr = (_ssl.iloc[-1] / _ssl.iloc[0] - 1) * 100
+                # `is not None`, not truthiness: a benchmark that came back exactly
+                # flat over the window is a real reading, not a missing one.
                 _stress_rows.append({"name": _sn, "desc": _sdesc,
-                    "port": round(_pr, 1), "sp": round(_sr, 1) if _sr else None,
-                    "vs": round(_pr - _sr, 1) if _sr else None, "est": False})
+                    "port": round(_pr, 1),
+                    "sp": round(_sr, 1) if _sr is not None else None,
+                    "vs": round(_pr - _sr, 1) if _sr is not None else None,
+                    "est": False})
         else:
-            _p_ret = bt_df["Portfolio"].pct_change().dropna()
-            _s_ret = bt_df.get("SP500", pd.Series()).pct_change().dropna() if "SP500" in bt_df.columns else pd.Series()
+            _p_ret = _nav.pct_change().dropna()
+            _s_ret = (_bench_nav.pct_change().dropna() if _has_bench else pd.Series(dtype=float))
             _al = pd.concat([_p_ret.rename("p"), _s_ret.rename("s")], axis=1).dropna()
             if len(_al) > 20:
                 _beta = np.cov(_al["p"], _al["s"])[0,1] / max(np.var(_al["s"]), 1e-10)
@@ -1200,7 +1240,7 @@ def _render_step_3():
 
     # ── Rolling Performance Metrics ───────────────────────────────────────
     _section_header("Rolling Performance Metrics")
-    _port_ret_full = bt_df["Portfolio"].pct_change().dropna()
+    _port_ret_full = _nav.pct_change().dropna()
     _roll_w = min(252, max(60, len(_port_ret_full) // 3))
 
     _rc1, _rc2, _rc3 = st.columns(3)
@@ -1228,8 +1268,11 @@ def _render_step_3():
     with _rc2:
         _rret = _port_ret_full.rolling(_roll_w).mean() * 252 * 100
         _rvol = _port_ret_full.rolling(_roll_w).std() * np.sqrt(252) * 100
-        _rsh  = (_rret / _rvol.replace(0, np.nan)).dropna()
-        _sh_colors = [GREEN if v >= 1 else AMBER if v >= 0 else RED for v in _rsh]
+        # Excess of the risk-free rate, matching the headline Sharpe and every
+        # other Sharpe in the app. Without it this line ran high by Rf/vol —
+        # roughly +0.3 at 15% volatility — so the chart and the metric card
+        # above it disagreed about the same portfolio.
+        _rsh  = ((_rret - _rfr_pct) / _rvol.replace(0, np.nan)).dropna()
         _fig_rsh = go.Figure(go.Scatter(
             x=_rsh.index, y=_rsh,
             line=dict(color=ct.color.brand, width=ct.stroke.price),
@@ -1253,9 +1296,8 @@ def _render_step_3():
         st.plotly_chart(_fig_rsh, use_container_width=True)
 
     with _rc3:
-        _sp_col = "SP500"
-        if _sp_col in bt_df.columns and not bt_df[_sp_col].isna().all():
-            _sp_ret = bt_df[_sp_col].pct_change().dropna()
+        if _has_bench:
+            _sp_ret = _bench_nav.pct_change().dropna()
             _aligned = pd.concat([_port_ret_full.rename("port"),
                                   _sp_ret.rename("sp")], axis=1).dropna()
             if len(_aligned) > _roll_w:
@@ -1338,18 +1380,39 @@ def _render_step_3():
         st.plotly_chart(_fig_attr, use_container_width=True)
 
     # Rebalancing recommendations
+    #
+    # This used to derive `current_holdings` by dividing today's capital by
+    # today's prices at the TARGET weights — i.e. it built a book that was
+    # already perfectly on target, then asked what to rebalance. The answer was
+    # always "nothing", so the section printed "Portfolio is balanced" every
+    # single time and no user ever saw a recommendation.
+    #
+    # The drift it should be showing is real and computable from data already in
+    # hand: buy the target weights at the start of the price window, hold without
+    # rebalancing, and by today the winners have grown past their target weight.
+    # That is the position a user who acted on this portfolio and left it alone
+    # would actually hold.
     _section_header("Rebalancing Recommendations")
     weights = st.session_state.get(_K_WEIGHTS, {})
     opt     = st.session_state.get(_K_OPTIMISED, {})
     close_df_rb = opt.get("close_df")
-    if weights and close_df_rb is not None:
+    if weights and close_df_rb is not None and len(close_df_rb) > 1:
+        _rb_capital = prefs.get("starting_capital", 10000)
+        _entry_prices = {t: float(close_df_rb[t].iloc[0])
+                         for t in weights if t in close_df_rb.columns}
         latest_prices = {t: float(close_df_rb[t].iloc[-1])
                          for t in weights if t in close_df_rb.columns}
-        # Use actual starting capital from user preferences
-        _rb_capital = prefs.get("starting_capital", 10000)
-        current_holdings = {t: (_rb_capital * weights[t]) / latest_prices[t]
-                            for t in weights if t in latest_prices and latest_prices[t] > 0}
+        current_holdings = {
+            t: (_rb_capital * weights[t]) / _entry_prices[t]
+            for t in weights
+            if _entry_prices.get(t, 0) > 0 and latest_prices.get(t, 0) > 0
+        }
         recs = get_rebalancing_recommendations(current_holdings, weights, latest_prices)
+        _rb_from = pd.Timestamp(close_df_rb.index[0]).strftime("%b %Y")
+        st.caption(
+            f"Assumes you bought these target weights in {_rb_from} and never "
+            f"rebalanced. Drift below is what price moves since then have done to "
+            f"the allocation — trade these amounts to return to target.")
         if recs:
             for r in recs:
                 action_color = GREEN if r["Action"] == "BUY" else RED
@@ -1380,7 +1443,7 @@ def _render_step_3():
         prefs.get("horizon","5 years"), 5)
     _fee_cap = prefs.get("starting_capital", 10000)
     _fee_mo  = prefs.get("monthly_contribution", 500)
-    _fee_ret = bt_met.get("Ann. Return", 0) / 100
+    _fee_ret = (bt_met.get("Ann. Return") or 0) / 100
     _fee_mr_with    = max((1 + max(_fee_ret - _wt_fee, -0.5)) ** (1/12) - 1, -0.5)
     _fee_mr_without = (1 + _fee_ret) ** (1/12) - 1 if _fee_ret > -1 else 0
 
@@ -1587,9 +1650,11 @@ reflects that.
 
     # Fan chart
     _section_header("Simulation Fan Chart")
-    sample_paths = mc_sim_df.iloc[:, :300].values
-    x_days       = list(range(len(sample_paths)))
-    pcts         = np.percentile(sample_paths, [5,25,50,75,95], axis=1)
+    # All paths, not the first 300: the Outcome Range cards above are computed from
+    # the full set, so sampling here made the fan's endpoints disagree with the
+    # Bear/Median/Best numbers printed a few inches above it.
+    x_days = list(range(len(mc_sim_df)))
+    pcts   = np.percentile(mc_sim_df.values, [5, 25, 50, 75, 95], axis=1)
 
     fig_mc = go.Figure()
     fig_mc.add_trace(go.Scatter(x=x_days,y=pcts[4],name="P95 (Best)",
@@ -1728,8 +1793,10 @@ reflects that.
             st.rerun()
     with col2:
         if st.button("Start New Portfolio", key="step4_restart"):
-            for k in [_K_STEP, _K_PREFS, _K_OPTIMISED,
-                      _K_WEIGHTS, _K_BACKTEST, _K_MC, _K_EXCEL, _K_RANKINGS]:
+            # _K_PPTX was missing, so a freshly-started portfolio still offered the
+            # previous one's PowerPoint download.
+            for k in [_K_STEP, _K_PREFS, _K_OPTIMISED, _K_WEIGHTS,
+                      _K_BACKTEST, _K_MC, _K_EXCEL, _K_PPTX, _K_RANKINGS]:
                 st.session_state.pop(k, None)
             st.rerun()
 
@@ -1741,10 +1808,19 @@ reflects that.
 
     with _sv_col:
         st.markdown("**Save this portfolio**")
-        _save_email = st.text_input("Your email", placeholder="you@example.com",
-                                    key="save_port_email")
+        # The address comes from the signed-in session, never a text box. A
+        # free-text field here let anyone write a portfolio into someone else's
+        # account just by typing their address — and it made "which email did I
+        # use?" a thing users had to remember.
+        _save_email = auth.current_email() or ""
+        if _save_email:
+            st.caption(f"Saving to **{_save_email}**")
+        else:
+            st.info("Sign in to save or track this portfolio — "
+                    "use the **Sign in** button at the top right.")
         _save_name  = st.text_input("Portfolio name", placeholder="My Growth Portfolio",
-                                    key="save_port_name")
+                                    key="save_port_name",
+                                    disabled=not _save_email)
         if st.button("Save Portfolio", key="save_port_btn"):
             if _save_email.strip() and _save_name.strip():
                 _weights  = st.session_state.get(_K_WEIGHTS, {})
@@ -1761,7 +1837,12 @@ reflects that.
                 if _ok:
                     st.success("Portfolio saved!")
                 else:
-                    st.error("Save failed — check your connection.")
+                    # Say what actually went wrong. "Check your connection" was
+                    # wrong for every cause except an actual network drop, and it
+                    # sent debugging in the wrong direction for a malformed
+                    # SUPABASE_URL more than once.
+                    from database import last_write_error
+                    st.error(f"Save failed — {last_write_error()}")
             else:
                 st.warning("Enter both an email and a name.")
 
@@ -1786,28 +1867,30 @@ reflects that.
                         if _pid:
                             st.success("Now tracking — open the **Your Portfolios** tab.")
                         else:
-                            from database import tracked_storage_status, supabase_project_url
-                            if tracked_storage_status() == "no_table":
-                                st.error(f"Couldn't save — the **tracked_portfolios** table isn't in "
-                                         f"this Supabase project:\n\n`{supabase_project_url()}`\n\n"
-                                         f"Run the DDL from `database.py` in **that** project's SQL editor.")
-                            else:
-                                st.error("Couldn't save — Supabase isn't reachable/configured for "
-                                         "this app instance (check `SUPABASE_URL` / `SUPABASE_KEY`).")
+                            # Report the reason the write itself gave, rather than
+                            # re-probing and guessing. The old version asked
+                            # tracked_storage_status() and announced "the table
+                            # isn't in this project" for any non-200 — including a
+                            # doubled /rest/v1 in the URL, where the table was
+                            # present and the advice was actively misleading.
+                            from database import last_write_error
+                            st.error(f"Couldn't save — {last_write_error()}")
             else:
                 st.warning("Enter both an email and a name.")
 
     with _ld_col:
         st.markdown("**Load a saved portfolio**")
-        _load_email = st.text_input("Your email", placeholder="you@example.com",
-                                    key="load_port_email")
-        if st.button("Find My Portfolios", key="load_port_btn"):
-            if _load_email.strip():
-                _saved = load_portfolios(_load_email)
-                if _saved:
-                    st.session_state[_K_FOUND_PORTS] = _saved
-                else:
-                    st.info("No saved portfolios found for that email.")
+        # Same rule as saving: your own account only. This used to accept any
+        # address and return that person's portfolios to whoever asked.
+        _load_email = auth.current_email() or ""
+        if not _load_email:
+            st.caption("Sign in to see portfolios you've saved.")
+        elif st.button("Find My Portfolios", key="load_port_btn"):
+            _saved = load_portfolios(_load_email)
+            if _saved:
+                st.session_state[_K_FOUND_PORTS] = _saved
+            else:
+                st.info("You haven't saved any portfolios yet.")
 
         if _K_FOUND_PORTS in st.session_state:
             _saved = st.session_state[_K_FOUND_PORTS]
@@ -1821,8 +1904,26 @@ reflects that.
                     st.caption(_tickers)
                 with _pcols[1]:
                     if st.button("Load", key=f"load_{_p['id']}"):
+                        # Restore the saved risk profile and rebuild from current
+                        # market data. Setting only _K_WEIGHTS (the old behaviour)
+                        # left the optimiser frame, backtest, forecast and both
+                        # export buffers in place from the PREVIOUS portfolio — so
+                        # a loaded allocation was displayed next to another
+                        # portfolio's backtest, drawdown and Monte Carlo, and any
+                        # loaded ticker absent from the stale price frame was
+                        # silently dropped.
                         st.session_state[_K_WEIGHTS] = _p["weights"]
-                        st.success(f"Loaded: {_p['name']}")
+                        if _p.get("preferences"):
+                            st.session_state[_K_PREFS] = _p["preferences"]
+                        for _k in (_K_OPTIMISED, _K_BACKTEST, _K_MC,
+                                   _K_EXCEL, _K_PPTX):
+                            st.session_state.pop(_k, None)
+                        st.session_state[_K_STEP] = 2
+                        st.info(f"Loaded **{_p['name']}** — its risk profile is "
+                                f"restored and the analysis is being rebuilt on "
+                                f"today's prices, so weights may differ from the "
+                                f"saved copy.")
+                        st.rerun()
                 with _pcols[2]:
                     if st.button("Delete", key=f"del_{_p['id']}"):
                         delete_portfolio(_p["id"])

@@ -5,10 +5,13 @@ Forward-tracks portfolios the user saves: enter holdings once, and every time yo
 open the tab it marks them to market from the day you added them (via tracker.py)
 and shows the value curve vs the S&P 500, headline metrics, and the holdings.
 
-Beta login is email-only (keys your portfolios by email) — not secure, fine for
-self-entered tickers; harden to real auth before paid launch.
+Sign-in is real OIDC (see `auth.py`) — Streamlit's native `st.login`, with the
+session cookie managed by Streamlit so it survives a refresh. Portfolios remain
+keyed by email, so anyone who used the old email-only beta gate keeps their data
+by signing in with the same address.
 """
 
+import html as _html
 import json
 from datetime import date
 
@@ -16,6 +19,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import auth
 import chart_theme as ct
 
 from tracker import track_portfolio, dollars_to_lots, amount_to_shares
@@ -39,16 +43,20 @@ def _section_header(text):
     """, unsafe_allow_html=True)
 
 
-def _kpi_row(items):
-    """items: list of (label, value, color)."""
-    for col, (label, val, color) in zip(st.columns(len(items)), items):
-        col.markdown(f"""
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
-                    padding:0.7rem 0.9rem">
-          <div style="font-size:1.35rem;font-weight:700;color:{color}">{val}</div>
-          <div style="font-size:0.66rem;font-weight:600;letter-spacing:0.6px;
-                      text-transform:uppercase;color:#94a3b8;margin-top:2px">{label}</div>
-        </div>""", unsafe_allow_html=True)
+def _stat_ribbon(items):
+    """items: list of (label, value, tone) where tone is '', 'pos', 'neg' or 'na'.
+
+    One ruled ribbon, not four grey rounded boxes. Rendered as a single markdown
+    block rather than st.columns so the vertical rules actually meet the
+    horizontal ones — Streamlit columns carry their own gap and the dividers
+    never lined up.
+    """
+    cells = "".join(
+        f'<div class="pf-stat">'
+        f'<div class="pf-stat-val {tone}">{val}</div>'
+        f'<div class="pf-stat-lbl">{label}</div></div>'
+        for label, val, tone in items)
+    st.markdown(f'<div class="pf-ribbon">{cells}</div>', unsafe_allow_html=True)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -56,6 +64,19 @@ def _cached_track(portfolio_id, holdings_key, _holdings, _api_key):
     # holdings_key (a JSON string) is the cache key; _holdings/_api_key are passed
     # unhashable so they don't bloat the hash. Recomputes when holdings change.
     return track_portfolio(_holdings, api_key=_api_key)
+
+
+def _ann_return_str(m):
+    """Annualised return, or an honest 'not yet' for a young portfolio.
+
+    `compute_backtest_metrics` returns None below ~3 months rather than scaling a
+    few weeks up to a year — which is how a one-month-old portfolio came to
+    report -132.09%.
+    """
+    v = m.get("Ann. Return")
+    if v is None or (isinstance(v, float) and v != v):
+        return "Ann. return — needs 3 months"
+    return f"Ann. return {float(v):+.1f}%"
 
 
 def _alpha_str(v):
@@ -67,42 +88,29 @@ def _alpha_str(v):
         return str(v)
 
 
-# ── Login gate (email-only, beta) ───────────────────────────────────────────────
+# ── Identity ──────────────────────────────────────────────────────────────────
+# Was: a free-text email box, mirrored into ?email= so it survived a refresh.
+# That was not authentication — typing someone else's address returned their
+# portfolios. Identity now comes from the signed OIDC session (see auth.py), and
+# the address it yields is the same `user_email` these rows were always keyed by,
+# so anyone who used the old beta gate keeps their data by signing in with the
+# same address.
 def _current_email():
-    email = (st.session_state.get("user_email") or "").strip()
-    if not email:
-        qp = st.query_params.get("email", "")
-        if qp:
-            st.session_state["user_email"] = qp.strip()
-            email = qp.strip()
-    return email
+    return auth.current_email()
 
 
-def _render_login_gate():
-    st.markdown(f"""
-    <div style="background:linear-gradient(135deg,var(--brand-1),var(--brand-2));border-radius:14px;
-                padding:1.6rem 1.8rem;color:#e2e8f0;margin-bottom:1.2rem">
-      <div style="font-size:1.5rem;font-weight:700;color:#fff">Your Portfolios</div>
-      <div style="font-size:0.95rem;color:#b0c4de;margin-top:0.4rem;max-width:640px">
-        Save a portfolio and we'll track its real performance from the day you add it —
-        value vs the S&P 500, return, drawdown, and your holdings. Forward-tracked, not
-        backtested.
-      </div>
-    </div>""", unsafe_allow_html=True)
-    with st.form("yp_login"):
-        email = st.text_input("Your email", placeholder="you@example.com",
-                              help="Beta sign-in. Keys your saved portfolios to this email.")
-        ok = st.form_submit_button("Continue", type="primary")
-    if ok:
-        e = (email or "").strip().lower()
-        if "@" not in e or "." not in e:
-            st.error("Please enter a valid email.")
-        else:
-            st.session_state["user_email"] = e
-            st.query_params["email"] = e   # survive a refresh
-            st.rerun()
-    st.caption("Beta sign-in is email-only and not secure — anyone with your email "
-               "could view these. Don't store anything sensitive yet.")
+def _render_hero():
+    # Editorial header on the white canvas, matching Home. This was a blue
+    # gradient rounded card, which made the inner pages look like a different
+    # product from the landing page.
+    st.markdown("""
+<div class="page-head">
+  <div class="page-head-eyebrow">Forward-tracked · not backtested</div>
+  <div class="page-head-title">Your Portfolios</div>
+  <p class="page-head-lede">Save a portfolio and we track its real performance from the day
+  you add it — value against the S&amp;P 500 on the same money, total return, drawdown and
+  your holdings.</p>
+</div>""", unsafe_allow_html=True)
 
 
 # ── Create form ─────────────────────────────────────────────────────────────────
@@ -170,9 +178,17 @@ def _render_edit(pid, holdings, api_key):
                             f"· since {lot['added_date']}")
                 if c2.button("Sell", key=f"sell_{pid}_{li}"):
                     today = date.today().isoformat()
+                    # Close only the lot whose button was clicked. Matching on
+                    # ticker alone closed EVERY open lot of that symbol, so a
+                    # second NVDA purchase was sold off by pressing Sell on the
+                    # first. Identity is (ticker, shares, added_date).
                     for l in holdings:
-                        if l["ticker"] == lot["ticker"] and not l.get("removed_date"):
+                        if (l["ticker"] == lot["ticker"]
+                                and l.get("added_date") == lot.get("added_date")
+                                and float(l.get("shares", 0)) == float(lot.get("shares", 0))
+                                and not l.get("removed_date")):
                             l["removed_date"] = today
+                            break
                     update_tracked_portfolio(pid, holdings)
                     st.cache_data.clear()
                     st.rerun()
@@ -206,28 +222,59 @@ def _render_card(p, api_key):
     holdings = p.get("holdings", []) or []
     pid      = p.get("id")
 
-    st.markdown(f"#### {name}")
     res = _cached_track(pid, json.dumps(holdings, sort_keys=True, default=str), holdings, api_key)
 
+    _n_lots = len([h for h in holdings if not h.get("removed_date")])
+    _since  = min((h.get("added_date") or "") for h in holdings) if holdings else ""
+
+    st.markdown(
+        f'<div class="pf-head"><div class="pf-name">{_html.escape(name)}</div>'
+        f'<div class="pf-meta">{_n_lots} position{"s" if _n_lots != 1 else ""}'
+        f'{" · since " + _since if _since else ""}</div></div>',
+        unsafe_allow_html=True)
+
     if "error" in res:
-        st.warning(res["error"])
+        # A portfolio saved in the last few days has no second closing price yet.
+        # That is the expected first state, not a failure — a warning box made a
+        # successful save look broken the moment the user arrived.
+        #
+        # Measured in calendar days rather than `added_date == today`: lots snap
+        # to the last trading day, so a portfolio created on a Saturday (or after
+        # Friday's close) carries Friday's date and would otherwise miss this.
+        _fresh = False
+        try:
+            _fresh = (date.today() - date.fromisoformat(_since)).days <= 4
+        except (TypeError, ValueError):
+            pass
+        if _fresh:
+            st.markdown(
+                '<div class="pf-fresh"><div class="pf-fresh-t">Tracking starts with '
+                'tomorrow&rsquo;s close</div><div class="pf-fresh-b">Your positions are '
+                'recorded. Performance needs a second closing price to measure against, '
+                'so the value curve and returns appear after the next trading day.'
+                '</div></div>', unsafe_allow_html=True)
+        else:
+            st.info(res["error"])
         if st.button("Delete", key=f"del_err_{pid}"):
             delete_tracked_portfolio(pid)
             st.rerun()
+        st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
         return
 
-    m = res["metrics"]
-    tr = float(m.get("Total Return", 0) or 0)
-    dd = float(m.get("Max Drawdown", 0) or 0)
-    _kpi_row([
-        ("Current Value", f"${m.get('Final Value', 0):,.0f}", ct.color.ink),
-        ("Total Return",  f"{tr:+.1f}%", ct.color.positive if tr >= 0 else ct.color.negative),
-        ("vs S&P 500",    _alpha_str(m.get("vs S&P 500")),
-                          ct.color.positive if (isinstance(m.get("vs S&P 500"), (int, float)) and m["vs S&P 500"] >= 0) else ct.color.negative),
-        ("Max Drawdown",  f"{dd:.1f}%", ct.color.negative),
+    m   = res["metrics"]
+    tr  = float(m.get("Total Return", 0) or 0)
+    dd  = float(m.get("Max Drawdown", 0) or 0)
+    vs  = m.get("vs S&P 500")
+    _vs_num = isinstance(vs, (int, float))
+    _stat_ribbon([
+        ("Current Value", f"${m.get('Final Value', 0):,.0f}", ""),
+        ("Total Return",  f"{tr:+.1f}%", "pos" if tr >= 0 else "neg"),
+        ("vs S&P 500",    _alpha_str(vs),
+                          ("pos" if vs >= 0 else "neg") if _vs_num else "na"),
+        ("Max Drawdown",  f"{dd:.1f}%", "neg" if dd < 0 else ""),
     ])
-    st.caption(f"Tracked since {res['inception_date']}  ·  "
-               f"Ann. return {m.get('Ann. Return', 'N/A')}%  ·  Sharpe {m.get('Sharpe Ratio', 'N/A')}")
+    st.caption(f"Tracked since {res['inception_date']}  ·  {_ann_return_str(m)}"
+               f"  ·  Sharpe {m.get('Sharpe Ratio', 'N/A')}")
 
     # Value vs benchmark vs contributed
     curve = res["curve"]
@@ -277,28 +324,56 @@ def _render_card(p, api_key):
 
 # ── Entry point ──────────────────────────────────────────────────────────────────
 def render_your_portfolios(api_key, is_pro=False):
+    _render_hero()
+
     email = _current_email()
     if not email:
-        _render_login_gate()
+        # The gate renders its own prominent panel and a Sign in button. The old
+        # version showed a small email box that read like an optional newsletter
+        # signup, so it wasn't obvious anything was required.
+        auth.require_sign_in(
+            feature="Your Portfolios",
+            blurb="Your portfolios are private to your account and tracked from "
+                  "the day you save them. Sign in to see yours, or create an "
+                  "account — it takes a few seconds and you'll stay signed in.")
         return
 
     top = st.columns([3, 1])
     top[0].markdown(f"**Signed in as** `{email}`")
     if top[1].button("Sign out", key="yp_signout"):
-        st.session_state["user_email"] = ""
-        st.query_params.pop("email", None)
+        auth.sign_out()
         st.rerun()
 
     _status = _storage_status()
-    if _status == "no_creds":
-        st.warning("Storage isn't configured on this app instance — Supabase keys "
-                   "(`SUPABASE_URL` / `SUPABASE_KEY`) are missing. On Streamlit Cloud, add "
-                   "them in **Settings → Secrets**. Portfolios won't save until then.")
-    elif _status == "no_table":
+    if _status != "ok":
         from database import supabase_project_url
-        st.warning(f"Connected to Supabase, but the **tracked_portfolios** table isn't in "
-                   f"this project:\n\n`{supabase_project_url()}`\n\nRun the DDL from "
-                   f"`database.py` in **that** project's SQL editor (not your local one).")
+        _proj = supabase_project_url()
+        _msg = {
+            "no_creds": (
+                "Storage isn't configured on this app instance — Supabase keys "
+                "(`SUPABASE_URL` / `SUPABASE_KEY`) are missing. Add them under "
+                "**Manage app → Settings → Secrets** (TOML), then reboot the app."),
+            "bad_url": (
+                f"`SUPABASE_URL` is set to a REST endpoint rather than the project "
+                f"URL:\n\n`{_proj}`\n\nIt should be just "
+                f"`https://<project-ref>.supabase.co` — with no `/rest/v1` on the "
+                f"end. Copy the **Project URL**, not the API endpoint, and update it "
+                f"under **Manage app → Settings → Secrets**."),
+            "bad_key": (
+                f"Connected to `{_proj}`, but the key was rejected. Check "
+                f"`SUPABASE_KEY` matches **this** project — a key from a different "
+                f"project fails exactly like this."),
+            "no_table": (
+                f"Connected to Supabase, but the **tracked_portfolios** table isn't "
+                f"in this project:\n\n`{_proj}`\n\nRun the DDL from `database.py` "
+                f"in **that** project's SQL editor (not your local one)."),
+            "unreachable": (
+                f"Couldn't reach `{_proj}` — network issue or the project is "
+                f"paused. Supabase free-tier projects pause after ~7 days idle; "
+                f"resume it from the dashboard."),
+        }.get(_status)
+        if _msg:
+            st.warning(_msg + "\n\nPortfolios won't save until this is fixed.")
 
     _render_create(email, api_key)
 

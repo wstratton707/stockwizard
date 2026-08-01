@@ -1,4 +1,7 @@
 import os
+import re
+import sys
+import csv
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -226,6 +229,7 @@ def _render_stock_news(ticker, company_name=None):
 
     st.markdown(_news_feed_html(arts, 12), unsafe_allow_html=True)
 from live_data import get_live_price, get_intraday_data, get_top_movers, get_tape_prices
+import auth
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
 from your_portfolios import render_your_portfolios
@@ -304,23 +308,22 @@ params = st.query_params
 if not DEV_MODE_FREE and "session_id" in params:
     ok, email = verify_session(params["session_id"])
     if ok:
-        st.session_state["is_pro"]     = True
-        st.session_state["user_email"] = email or ""
-        # Persist email in URL so Pro status survives page refreshes
+        st.session_state["is_pro"] = True
+        # No longer mirrors the address into ?email=. That param was how Pro
+        # survived a refresh, and it was also an authorisation hole: anyone who
+        # knew a subscriber's address could append it to the URL and be granted
+        # Pro by the lookup below. Identity now comes from the signed session.
         st.query_params.clear()
-        if email:
-            st.query_params["email"] = email
         st.success("Welcome to QuantWizard Pro!")
 
-# ── Re-verify Pro status on page refresh via saved email ──────────────────────
+# ── Re-verify Pro status on refresh, against the SIGNED-IN identity ───────────
 # DEV_MODE_FREE: skip subscription lookup — preserved, not deleted.
 elif not DEV_MODE_FREE and not st.session_state.get("is_pro"):
-    saved_email = params.get("email", "")
-    if saved_email and not st.session_state.get("_sub_checked"):
+    _auth_email = auth.current_email()
+    if _auth_email and not st.session_state.get("_sub_checked"):
         st.session_state["_sub_checked"] = True
-        if check_subscription(saved_email):
-            st.session_state["is_pro"]     = True
-            st.session_state["user_email"] = saved_email
+        if check_subscription(_auth_email):
+            st.session_state["is_pro"] = True
 
 # ── Top navigation ────────────────────────────────────────────────────────────
 # Custom sticky navbar (replaces Streamlit's empty built-in header). Uses native
@@ -336,8 +339,12 @@ def _goto(pg):
     st.rerun()
 
 with st.container(key="topnav"):
-    # Brand (left) · flexible spacer · nav links clustered to the right.
-    _nc = st.columns([2.4, 1.5, 0.95, 1.25, 0.95, 2.0, 1.85], vertical_alignment="center")
+    # Brand (left) · flexible spacer · nav links · sign-in control (far right).
+    # The trailing column is the account control; it sits outside the page-link
+    # loop because it isn't a page — it's identity, and it belongs visually
+    # separated from navigation.
+    _nc = st.columns([2.4, 0.7, 0.95, 1.25, 0.95, 2.0, 1.85, 1.5],
+                     vertical_alignment="center")
     _brand_mark = (
         f'<img class="topnav-mark-img" src="data:image/png;base64,{_MARK_B64}" alt="QuantWizard">'
         if _MARK_B64 else
@@ -353,6 +360,8 @@ with st.container(key="topnav"):
         if _nc[_i].button(_lbl, key=f"nav_{_pg}", use_container_width=True,
                           type="primary" if _page == _pg else "tertiary"):
             _goto(_pg)
+    with _nc[7]:
+        auth.render_nav_control()
 
 # ── Header ────────────────────────────────────────────────────────────────────
 _logo_html = (
@@ -507,18 +516,39 @@ with st.sidebar:
     email_input = st.text_input("", placeholder="your@email.com",
                                 key="waitlist_email", label_visibility="collapsed")
     if st.button("Join Waitlist", use_container_width=True):
-        if email_input and "@" in email_input:
-            import csv
-            csv_path = os.path.join(os.path.dirname(__file__), "waitlist.csv")
-            already_exists = os.path.exists(csv_path)
-            with open(csv_path, "a", newline="") as f:
-                writer = csv.writer(f)
-                if not already_exists:
-                    writer.writerow(["email", "timestamp"])
-                writer.writerow([email_input, datetime.now().isoformat()])
-            st.success("Thanks! We'll be in touch.")
-        else:
+        # Was: append to a local waitlist.csv. Streamlit Community Cloud runs on
+        # an ephemeral container that is rebuilt on every push and recycled when
+        # the app sleeps, so every address collected since the last restart was
+        # thrown away — we were destroying the one asset this form exists to build.
+        _wl_email = (email_input or "").strip().lower()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$", _wl_email):
+            # `"@" in email` accepted "@" itself. Not RFC-complete, deliberately —
+            # just enough to reject the obvious typos that make an address dead.
             st.error("Please enter a valid email.")
+        else:
+            from database import save_waitlist_email
+            if not save_waitlist_email(_wl_email, source=_page):
+                # Supabase unconfigured or unreachable. Never drop the signup on
+                # the floor: stderr reaches the Streamlit Cloud app log (Manage
+                # app → logs; greppable for WAITLIST-FALLBACK), and the CSV is a
+                # second chance if someone reads it before the container recycles.
+                print(f"[WAITLIST-FALLBACK] {_wl_email} "
+                      f"{datetime.now().isoformat()} source={_page}",
+                      file=sys.stderr, flush=True)
+                try:
+                    _wl_path = os.path.join(os.path.dirname(__file__), "waitlist.csv")
+                    _wl_new  = not os.path.exists(_wl_path)
+                    with open(_wl_path, "a", newline="", encoding="utf-8") as _f:
+                        _w = csv.writer(_f)
+                        if _wl_new:
+                            _w.writerow(["email", "timestamp", "source"])
+                        _w.writerow([_wl_email, datetime.now().isoformat(), _page])
+                except Exception:
+                    pass
+            # Same message either way: from the visitor's side it worked, and it
+            # did — we captured the address. Showing an error would lose the
+            # signup and look broken for a problem that isn't theirs.
+            st.success("Thanks! We'll be in touch.")
 
 # ── Payment modal ─────────────────────────────────────────────────────────────
 # DEV_MODE_FREE: modal never shown — Stripe checkout logic preserved, not deleted.
@@ -1061,9 +1091,11 @@ elif _page == "analysis":
              "performance, benchmark SPY on the <b>same contribution schedule</b>, and charge realistic "
              "rebalancing cost on traded value only."),
             ("casino", "Monte Carlo",
-             "Correlated multi-asset simulation via <b>Cholesky decomposition</b>. Per-asset drift is blended "
-             "70/30 toward a 7% long-run mean and <b>capped at 12%</b> — deliberately conservative to avoid "
-             "over-optimistic projections."),
+             "Correlated multi-asset simulation via <b>Cholesky decomposition</b> of the historical return "
+             "correlation matrix. Per-asset drift is <b>CAPM</b> — risk-free rate + beta × a 5% equity risk "
+             "premium — so the projection is driven by how much market risk a holding carries, not by which "
+             "names recently ran up. Log-normal paths with an Itô correction; a fixed seed, so the same "
+             "inputs give the same answer."),
             ("account_balance", "Fundamental Quality",
              "From EDGAR statements: <b>Piotroski F-Score</b> (9-point profitability/leverage/efficiency test), "
              "<b>Altman Z-Score</b> (distress risk), free cash flow (operating cash flow − capex), and standard "
@@ -1178,7 +1210,6 @@ elif _page == "analysis":
         if not valid:
             # Reference API may be rate-limited — try fetching price data directly
             # Only hard-stop if the ticker looks obviously wrong (non-alphanumeric)
-            import re
             if not re.match(r'^[A-Z0-9.\-]{1,10}$', ticker_input):
                 st.error(f"Ticker '{ticker_input}' not found. Check the symbol and try again.")
                 st.stop()
@@ -1465,15 +1496,21 @@ elif _page == "analysis":
                                                          end_override=date_end,
                                                          bar_size=bar_size)
 
-                # Proxy key for heavy-computation caches: ticker + last date
-                # (df content changes → last date changes → cache invalidates).
-                _last_date_key = str(df["Date"].iloc[-1]) if "Date" in df.columns and len(df) else ""
+                # Proxy key for the heavy-computation caches. It must identify the
+                # WINDOW, not just where it ends: a 1Y and a 5Y pull taken on the
+                # same day share the same last date, so keying on that alone made
+                # the Date Range slider a no-op for Monte Carlo, support/resistance
+                # and the correlation matrix — every window after the first served
+                # the first one's result from cache, computed off a different mu
+                # and sigma.
+                _win_key = (f"{df['Date'].iloc[0]}|{df['Date'].iloc[-1]}|{len(df)}"
+                            if "Date" in df.columns and len(df) else "")
 
                 corr_matrix = None
                 if do_corr:
                     progress.progress(60, text="Building correlation matrix...")
                     corr_matrix = cached_build_correlation_matrix(
-                        ticker_input, _last_date_key,
+                        ticker_input, _win_key,
                         tuple(benchmarks) if benchmarks else (), df,
                     )
 
@@ -1481,7 +1518,7 @@ elif _page == "analysis":
                 if do_sr:
                     progress.progress(65, text="Detecting support & resistance...")
                     resistance, support = cached_detect_support_resistance(
-                        ticker_input, _last_date_key, df,
+                        ticker_input, _win_key, df,
                     )
 
                 mc_sim_df = mc_summary = None
@@ -1491,23 +1528,26 @@ elif _page == "analysis":
                         progress.progress(75, text="Running Custom Forecast (GARCH + ML + Monte Carlo)...")
                         mc_sim_df, custom_garch_vols, custom_ml_drift, mc_summary = \
                             cached_run_custom_forecast(
-                                ticker_input, _last_date_key, n_sims, n_horizon, df,
+                                ticker_input, _win_key, n_sims, n_horizon, df,
                             )
                     else:
                         progress.progress(75, text="Running Monte Carlo simulation...")
                         mc_sim_df, mc_summary = cached_run_monte_carlo(
-                            ticker_input, _last_date_key, n_sims, n_horizon, df,
+                            ticker_input, _win_key, n_sims, n_horizon, df,
                         )
 
                 progress.progress(85, text="Generating summary...")
                 ret      = df["Daily_Return"].dropna()
                 ann_ret  = ret.mean() * 252
                 ann_std  = ret.std() * np.sqrt(252)
-                downside = ret[ret < 0].std() * np.sqrt(252)
                 # Excess-return Sharpe/Sortino: subtract the risk-free rate so
                 # these match the portfolio engine (portfolio_analysis.py) and
                 # the standard definition. Without it the headline ratios were
-                # inflated and inconsistent across the app.
+                # inflated and inconsistent across the app. The Sortino
+                # denominator is downside deviation about zero — see
+                # analysis.downside_deviation.
+                from analysis import downside_deviation as _dd_fn
+                downside = _dd_fn(ret)
                 rfr      = get_risk_free_rate()
                 sharpe   = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
                 sortino  = (ann_ret - rfr) / downside if downside else np.nan
@@ -3069,12 +3109,14 @@ color:var(--muted);background:var(--surface2)}
                         </div>""", unsafe_allow_html=True)
 
                 # ── Simulated price-path fan chart ────────────────────────────
-                _n_cols = min(200, mc_sim_df.shape[1])
-                if mc_sim_df.empty or _n_cols == 0:
+                # Percentiles over ALL paths, not the first 200. The metric cards
+                # above use the full set, so sampling here made the fan's endpoints
+                # disagree with the Bear/Median/Best figures printed right above it.
+                if mc_sim_df.empty or mc_sim_df.shape[1] == 0:
                     st.warning("Monte Carlo simulation produced no paths.")
                     pcts = None
                 else:
-                    pcts = np.percentile(mc_sim_df.iloc[:, :_n_cols].values, [5,25,50,75,95], axis=1)
+                    pcts = np.percentile(mc_sim_df.values, [5,25,50,75,95], axis=1)
                 if pcts is not None:
                     x      = list(range(len(pcts[0])))
                     fig_mc = go.Figure()
@@ -3328,8 +3370,12 @@ color:var(--muted);background:var(--surface2)}
                     if _mrows:
                         _mdf    = pd.DataFrame(_mrows)
                         _ticks  = _mdf["Ticker"].tolist()
-                        _colors = [_peer_colors[i % len(_peer_colors)]
-                                   for i in range(len(_ticks))]
+                        # (No per-ticker colour list here: every bar chart below
+                        # colours by VALUE — positive/negative, or Sharpe band —
+                        # not by series identity. A `_peer_colors` lookup used to
+                        # sit here, referencing a name that was never defined, so
+                        # entering any peer ticker raised NameError and took the
+                        # whole Analysis page down with a traceback.)
 
                         _mc1, _mc2 = st.columns(2)
 
