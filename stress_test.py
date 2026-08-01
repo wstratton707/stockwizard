@@ -21,11 +21,22 @@ _STRESS_CACHE: dict = {}
 CACHE_TTL     = 3600
 
 # ── Historical crash scenarios ─────────────────────────────────────────────────
+# `start`/`end` and `market_shock` MUST describe the same window: holdings with
+# price history are replayed over [start, end], while holdings too new fall back
+# to beta × market_shock, and both land in the same portfolio average. The 2008
+# entry used to pair a 2008-09-01 start (Lehman) with the −56% figure, which is
+# measured from the October-2007 peak — so the replayed names fell ~47% while the
+# estimated ones fell 56% × beta, and the card printed "−56%" beside a computed
+# SPY of −47%. The window now matches the number.
+#
+# This dict is the single definition of these scenarios; the Portfolio Builder's
+# backtest section reads it too, so the same crash can't mean two different date
+# ranges in two different tabs.
 CRASH_SCENARIOS: dict[str, dict] = {
     "2008 Financial Crisis": {
-        "start": "2008-09-01", "end": "2009-03-09",
-        "description":  "Lehman collapse  ·  S&P 500: −56%",
-        "market_shock": -56.0,
+        "start": "2007-10-09", "end": "2009-03-09",
+        "description":  "Oct-2007 peak to Mar-2009 trough  ·  S&P 500: −57%",
+        "market_shock": -56.8,
         "color":        "#dc2626",
     },
     "COVID Crash (2020)": {
@@ -47,12 +58,16 @@ CRASH_SCENARIOS: dict[str, dict] = {
         "color":        "#7c3aed",
     },
     "2018 Q4 Selloff": {
-        "start": "2018-10-01", "end": "2018-12-24",
-        "description":  "Fed tightening fears  ·  S&P 500: −20% in 12 weeks",
-        "market_shock": -20.0,
+        "start": "2018-09-20", "end": "2018-12-24",
+        "description":  "Fed tightening fears  ·  S&P 500: −20% in 13 weeks",
+        "market_shock": -19.8,
         "color":        "#0369a1",
     },
 }
+
+# The subset that can fall inside a ~5-year backtest window, for the Portfolio
+# Builder's "Historical Stress Tests" cards. Ordered most-recent-first.
+RECENT_CRASHES = ["2022 Rate-Hike Bear", "COVID Crash (2020)", "2018 Q4 Selloff"]
 
 
 # ── Parametric (beta-based) stress engine ──────────────────────────────────────
@@ -213,6 +228,9 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                     st.error(f"Number of weights ({len(raw_w)}) must match tickers ({len(tickers)}).")
                     st.stop()
                 total_w = sum(raw_w)
+                if total_w <= 0:
+                    st.error("Weights must add up to more than zero.")
+                    st.stop()
                 weights = {t: w / total_w for t, w in zip(tickers, raw_w)}
             except ValueError:
                 st.error("Invalid weights — enter numbers separated by commas.")
@@ -642,6 +660,14 @@ def render_stress_test(api_key: str, is_pro: bool = False):
                 st.plotly_chart(fig_corr, use_container_width=True)
 
         except Exception as e:
+            # st.stop() and st.rerun() raise control-flow exceptions that subclass
+            # Exception, so a bare `except Exception` swallows them. Every
+            # st.stop() above (missing Ticker column, failed fetch, no valid
+            # prices) was being reported as "check the columns" instead of the
+            # specific message it had just written. Matched by class name rather
+            # than by import: the module path moved between Streamlit versions.
+            if type(e).__name__ in ("StopException", "RerunException"):
+                raise
             st.error(f"Couldn't process that CSV — check the columns and try again. ({e})")
             import traceback as _tb; print(_tb.format_exc())   # server log, not UI
 

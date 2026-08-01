@@ -651,13 +651,24 @@ def build_stock_pptx(ticker, df, period_label,
     ret        = df["Daily_Return"].dropna()
     ann_ret    = ret.mean() * 252
     ann_std    = ret.std() * np.sqrt(252)
-    downside   = ret[ret < 0].std() * np.sqrt(252)
     # Excess-return Sharpe/Sortino (subtract the risk-free rate) so the exported
-    # deck matches the on-screen metric cards and the portfolio engine.
+    # deck matches the on-screen metric cards and the portfolio engine. The
+    # Sortino denominator is downside deviation about zero, not the std of the
+    # losing days — see analysis.downside_deviation.
+    from analysis import downside_deviation as _dd_fn
+    downside   = _dd_fn(ret)
     rfr        = get_risk_free_rate()
     sharpe     = (ann_ret - rfr) / ann_std  if ann_std  else float("nan")
     sortino    = (ann_ret - rfr) / downside if downside else float("nan")
-    max_dd     = df["Drawdown_60d"].min() * 100 if "Drawdown_60d" in df.columns else float("nan")
+    # True peak-to-trough drawdown over the whole window. This used to read
+    # Drawdown_60d.min() — the worst *60-day rolling* drawdown — while calling it
+    # "Max Drawdown", which understates any decline that took longer than a
+    # quarter to play out, and disagreed with the Word memo's figure for the same
+    # ticker. The 60-day series still drives the rolling-drawdown chart, where
+    # that IS what is being plotted.
+    _cum       = (1 + ret).cumprod()
+    max_dd     = (float((_cum / _cum.cummax() - 1).min()) * 100
+                  if len(_cum) else float("nan"))
 
     def _fmt_pct(v):
         if v is None or (isinstance(v, float) and math.isnan(v)):
@@ -841,7 +852,7 @@ def build_stock_pptx(ticker, df, period_label,
         ("Sortino Ratio",       _fmt_ratio(sortino), sortino > 1 if not math.isnan(sortino) else None),
         ("Ann. Return",         _fmt_pct(ann_ret * 100), ann_ret >= 0),
         ("Ann. Volatility",     _fmt_pct(ann_std * 100)),
-        ("Max Drawdown (60d)",  _fmt_pct(max_dd),    max_dd > -20),
+        ("Max Drawdown",        _fmt_pct(max_dd),    max_dd > -20),
     ]
     col3 = [
         ("20-Day MA",   f"${latest.get('MA20', 0):,.2f}"  if latest.get('MA20')  else "N/A"),

@@ -12,9 +12,10 @@ the same accounting the backtest engine uses.
 
 Design notes / deliberately out of scope (kept simple on purpose):
   • No rebalancing, no recurring contributions, no tax lots / cost basis beyond a
-    simple unrealised-gain figure, no dividends-as-cash / cash balance.
-  • Removing a lot means "you sold it and took the cash out" — proceeds are not
-    tracked as cash; the position simply stops being held from removed_date.
+    simple unrealised-gain figure, no dividends-as-cash.
+  • Removing a lot means "you sold it"; the proceeds stay in the book as idle
+    cash at 0%. Contributed capital only ever moves on a purchase, so a
+    profitable sale can't take more out of it than was put in.
   • Dividends are implicitly reflected via Yahoo's adjusted closes (≈ total return),
     consistent with the rest of the app.
 
@@ -157,6 +158,28 @@ def track_portfolio(holdings: list, api_key: str = "", benchmark: str = BENCHMAR
     if len(idx) < 2:
         return {"error": "Not enough price history since inception to chart."}
 
+    # Snap each lot's add/remove date FORWARD onto the master calendar. The loop
+    # below matches dates exactly, so a lot dated on a weekend, a holiday, or a
+    # day this particular ticker didn't trade was never bought at all — it just
+    # silently never appeared in the portfolio. dollars_to_lots snaps to a real
+    # bar, but holdings can also arrive hand-edited or from an import.
+    def _snap(ts):
+        if ts is None:
+            return None
+        return next((d for d in idx if d >= ts), None)
+
+    for lot in lots:
+        lot["_added"]   = _snap(lot["_added"])
+        lot["_removed"] = _snap(lot["_removed"])
+    # An add date with no bar at or after it is dated past the end of the window —
+    # a future-dated lot. Exclude it rather than silently buying it on day one.
+    _future = [lot["ticker"] for lot in lots if lot["_added"] is None]
+    if _future:
+        warnings.append(f"Ignored holding(s) dated after today: {', '.join(sorted(set(_future)))}.")
+        lots = [lot for lot in lots if lot["_added"] is not None]
+    if not lots:
+        return {"error": "No holdings with a usable start date."}
+
     # Reindex every series onto the master calendar (forward-fill gaps/holidays).
     px = {t: closes[t].reindex(idx).ffill() for t in tickers}
     has_bench = benchmark in closes
@@ -170,12 +193,24 @@ def track_portfolio(holdings: list, api_key: str = "", benchmark: str = BENCHMAR
     shares = {t: 0.0 for t in tickers}
     spy_shares = 0.0
     contrib = 0.0
+    # Sale proceeds, held as idle cash at 0%. A sale is NOT a negative
+    # contribution: `contrib -= shares * today's price` (the old behaviour)
+    # removed the position's MARKET VALUE from contributed capital, so selling a
+    # doubled holding took out more than had ever been put in — Total Contributed
+    # could fall to zero or go negative, and Total Return = gain / contributed
+    # then printed nonsense. Contributed capital only ever moves on a purchase;
+    # the proceeds stay inside the book as cash so the value curve doesn't cliff
+    # and the return stays honest.
+    realized = 0.0
+    spy_realized = 0.0
     prev_value = 0.0
     nav = 1.0
     portfolio_vals, contrib_vals, nav_vals, spy_vals = [], [], [], []
 
     for d in idx:
-        value_pre = sum(shares[t] * float(px[t].loc[d]) for t in tickers)
+        # Cash is carried in value_pre as well, so it correctly reads as a
+        # zero-return asset in the time-weighted NAV rather than vanishing.
+        value_pre = sum(shares[t] * float(px[t].loc[d]) for t in tickers) + realized
         if prev_value > 0:
             nav *= (1 + (value_pre / prev_value - 1))   # flow happens *after* this
 
@@ -187,18 +222,23 @@ def track_portfolio(holdings: list, api_key: str = "", benchmark: str = BENCHMAR
                 contrib += cost
                 if has_bench and float(spy.loc[d]) > 0:
                     spy_shares += cost / float(spy.loc[d])
-            if lot["_removed"] is not None and lot["_removed"] == d:   # sell: cash outflow
+            if lot["_removed"] is not None and lot["_removed"] == d:   # sell → cash
                 shares[lot["ticker"]] -= lot["shares"]
-                cost = lot["shares"] * p
-                contrib -= cost
+                proceeds  = lot["shares"] * p
+                realized += proceeds
+                # Benchmark sells the matching dollar amount and holds it as cash
+                # too, so the comparison stays like-for-like through the sale.
                 if has_bench and float(spy.loc[d]) > 0:
-                    spy_shares = max(0.0, spy_shares - cost / float(spy.loc[d]))
+                    _sold = min(spy_shares, proceeds / float(spy.loc[d]))
+                    spy_shares   = max(0.0, spy_shares - _sold)
+                    spy_realized += _sold * float(spy.loc[d])
 
-        value_post = sum(shares[t] * float(px[t].loc[d]) for t in tickers)
+        value_post = sum(shares[t] * float(px[t].loc[d]) for t in tickers) + realized
         portfolio_vals.append(value_post)
         contrib_vals.append(contrib)
         nav_vals.append(nav)
-        spy_vals.append(spy_shares * float(spy.loc[d]) if has_bench else np.nan)
+        spy_vals.append(spy_shares * float(spy.loc[d]) + spy_realized
+                        if has_bench else np.nan)
         prev_value = value_post
 
     curve = pd.DataFrame(index=pd.to_datetime(idx))

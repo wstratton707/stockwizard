@@ -113,6 +113,29 @@ def _enrich_ohlcv(df, w52_min_periods=21):
     return df
 
 
+def _attach_risk_ratios(df):
+    """Attach the scalar Sharpe / Sortino columns from the Daily_Return series.
+
+    One implementation for stocks, bonds and crypto. This block was pasted
+    verbatim in all three fetchers, which is how the crypto path kept a raw
+    (non-excess) Sharpe long after the other two were corrected — a copy is a
+    place a fix can fail to land.
+
+    Sortino divides by the annualised downside deviation about zero, not by the
+    standard deviation of the negative returns (see analysis.downside_deviation
+    for why that distinction matters).
+    """
+    from analysis import downside_deviation
+    ret      = df["Daily_Return"].dropna()
+    ann_ret  = ret.mean() * 252
+    ann_std  = ret.std() * np.sqrt(252)
+    downside = downside_deviation(ret)
+    rfr      = get_risk_free_rate()
+    df["Sharpe_Ratio"]  = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
+    df["Sortino_Ratio"] = (ann_ret - rfr) / downside if downside else np.nan
+    return df
+
+
 def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print,
                      start_override=None, end_override=None, bar_size="day"):
     df = fetch_ohlcv(ticker, period, api_key, log=log,
@@ -157,13 +180,7 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
                 df[col_b].rolling(60).var()
             )
 
-    ret      = df["Daily_Return"].dropna()
-    ann_ret  = ret.mean() * 252
-    ann_std  = ret.std() * np.sqrt(252)
-    downside = ret[ret < 0].std() * np.sqrt(252)
-    rfr      = get_risk_free_rate()
-    df["Sharpe_Ratio"]  = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
-    df["Sortino_Ratio"] = (ann_ret - rfr) / downside if downside else np.nan
+    _attach_risk_ratios(df)
 
     return df.sort_values("Date").reset_index(drop=True)
 
@@ -523,7 +540,13 @@ def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log
         for bench in benchmark_tickers:
             log(f"   Benchmark: {bench}")
             try:
-                bdf = fetch_ohlcv(bench, period, api_key, log=lambda m: None)
+                # Forward the date overrides. Without them a custom range fetched
+                # the bond over that window but its benchmark over the default
+                # `period`, so the merge aligned two different windows and the
+                # rolling beta was computed against a mismatched series.
+                bdf = fetch_ohlcv(bench, period, api_key, log=lambda m: None,
+                                  start_override=start_override,
+                                  end_override=end_override, bar_size=bar_size)
                 bdf[f"{bench}_Return"]     = bdf["Close"].pct_change()
                 bdf[f"{bench}_Cumulative"] = (1 + bdf[f"{bench}_Return"].fillna(0)).cumprod() * 100
                 df = pd.merge(df, bdf[["Date", f"{bench}_Return", f"{bench}_Cumulative"]],
@@ -539,13 +562,7 @@ def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log
                 df[col_b].rolling(60).var()
             )
 
-    ret      = df["Daily_Return"].dropna()
-    ann_ret  = ret.mean() * 252
-    ann_std  = ret.std() * np.sqrt(252)
-    downside = ret[ret < 0].std() * np.sqrt(252)
-    rfr      = get_risk_free_rate()
-    df["Sharpe_Ratio"]  = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
-    df["Sortino_Ratio"] = (ann_ret - rfr) / downside if downside else np.nan
+    _attach_risk_ratios(df)
 
     return df.sort_values("Date").reset_index(drop=True)
 
@@ -729,15 +746,10 @@ def fetch_crypto_data(symbol, period="1y", api_key="", log=print,
     except Exception as e:
         log(f"   Technical indicators skipped: {e}")
 
-    ret      = df["Daily_Return"].dropna()
-    ann_ret  = ret.mean() * 252
-    ann_std  = ret.std() * np.sqrt(252)
-    downside = ret[ret < 0].std() * np.sqrt(252)
-    # Excess-return Sharpe/Sortino (subtract the risk-free rate) to match the
-    # stock and bond paths — crypto was previously the only raw ann_ret/vol one.
-    rfr      = get_risk_free_rate()
-    df["Sharpe_Ratio"]  = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
-    df["Sortino_Ratio"] = (ann_ret - rfr) / downside if downside else np.nan
+    # Same excess-return Sharpe/Sortino as the stock and bond paths. Crypto was
+    # once the only raw ann_ret/vol one; sharing the helper is what stops that
+    # from happening again.
+    _attach_risk_ratios(df)
 
     return df.sort_values("Date").reset_index(drop=True)
 

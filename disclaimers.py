@@ -35,25 +35,37 @@ MONTE_CARLO = (
 
 # ── Stress test disclosure ────────────────────────────────────────────────────
 STRESS_TEST = (
-    "Stress results are model estimates, not historical replays. Each holding's move "
-    "is approximated as its market beta (estimated from ~2 years of recent daily "
-    "returns vs the S&P 500) multiplied by the index's known decline in each crisis, "
-    "floored at −95% for a long position. This is a first-order sensitivity estimate: "
-    "it assumes betas stay roughly stable, whereas betas and correlations typically "
-    "rise in a real crisis, so true drawdowns can be deeper. Holdings whose recent "
-    "returns can't be fetched are excluded from a scenario. Past crises do not predict "
-    "future drawdowns."
+    "Stress results are a hybrid. Where a holding has price history spanning the "
+    "crash window, the figure shown is its <b>actual</b> total return over that "
+    "window — a historical replay, not an estimate. Where a holding is too new to "
+    "have existed then, its move is approximated as its market beta (estimated "
+    "from ~2 years of recent daily returns vs the S&P 500) multiplied by the "
+    "index's decline in that crisis, floored at −95% for a long position; those "
+    "scenarios are labelled as containing estimates. A beta estimate is "
+    "first-order only: it assumes betas stay roughly stable, whereas betas and "
+    "correlations typically rise in a real crisis, so true drawdowns can be "
+    "deeper. Holdings with neither history nor a usable beta are excluded from a "
+    "scenario, and the portfolio figure is re-weighted across what remains. "
+    "Returns are computed from split- and dividend-adjusted prices, so they are "
+    "total returns and will differ slightly from the headline index price decline "
+    "quoted for each crisis. Past crises do not predict future drawdowns."
 )
 
 # ── Portfolio optimisation disclosure ────────────────────────────────────────
 OPTIMISATION = (
     "Portfolio weights are derived from mean-variance optimisation (Markowitz, 1952) "
-    "using 2 years of historical returns. Optimised weights are sensitive to the "
-    "input return and covariance estimates, which change over time. The 'recommended' "
-    "portfolio blends maximum-Sharpe and minimum-volatility allocations weighted by "
-    "your risk tolerance. This is a mathematical output, not a personalised financial "
-    "recommendation. Sector concentration is capped at 40% per sector; individual "
-    "positions are capped at 30%."
+    "over up to 5 years of daily returns. Expected returns are <b>not</b> historical "
+    "averages: each holding's is CAPM (risk-free rate + beta × a 5% equity risk "
+    "premium), adjusted by up to ±2%/yr for its multi-factor selection score. The "
+    "covariance matrix uses Ledoit-Wolf shrinkage, because mean-variance optimisation "
+    "is an error-maximiser — it loads onto whichever covariances estimation noise has "
+    "understated. Weights remain sensitive to those estimates, which change over "
+    "time. The 'recommended' portfolio slides along the frontier by your risk "
+    "tolerance: minimum-volatility at the conservative end, maximum-Sharpe in the "
+    "middle, maximum-expected-return at the aggressive end. Sector concentration is "
+    "capped at 40%; the per-position cap is whatever you set in the Universe step "
+    "(default 25%, range 5–40%). This is a mathematical output, not a personalised "
+    "financial recommendation."
 )
 
 # ── Dividend / price data note ────────────────────────────────────────────────

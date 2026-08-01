@@ -4,6 +4,11 @@ from scipy.optimize import minimize
 from datetime import datetime, timedelta
 
 from constants import get_risk_free_rate
+from analysis import downside_deviation
+
+# Sortino convention, applied identically everywhere in the app: excess return
+# over the risk-free rate in the numerator, annualised downside deviation about
+# ZERO in the denominator.
 
 
 # ── Individual stock metrics ──────────────────────────────────────────────────
@@ -22,7 +27,7 @@ def compute_stock_metrics(returns_df, market_returns=None):
         r       = returns_df[ticker].dropna()
         ann_ret = r.mean() * 252
         ann_std = r.std() * np.sqrt(252)
-        down    = r[r < 0].std() * np.sqrt(252)
+        down    = downside_deviation(r)
         rfr     = get_risk_free_rate()
         sharpe  = (ann_ret - rfr) / ann_std  if ann_std  else 0
         sortino = (ann_ret - rfr) / down     if down     else 0
@@ -384,6 +389,11 @@ def backtest_portfolio(close_df, weights, starting_capital, monthly_contribution
                  are never counted as investment performance
       SP500      a SPY position dollar-cost-averaged on the SAME contribution
                  schedule, so the benchmark is a like-for-like comparison
+      SP500_NAV  the same SPY position as a contribution-free index (starts at
+                 1.0), so it can be compared against NAV. Comparing NAV to the
+                 DCA'd SP500 column mixes bases: one excludes inflows and the
+                 other doesn't, and the gap between them grows with every
+                 contribution.
     """
     tickers  = list(weights.keys())
     avail    = [t for t in tickers if t in close_df.columns]
@@ -411,6 +421,7 @@ def backtest_portfolio(close_df, weights, starting_capital, monthly_contribution
     contributions    = []
     nav_values       = []
     sp500_values     = []
+    sp500_nav_values = []
 
     TRANSACTION_COST = 0.001
     total_contrib    = starting_capital
@@ -418,11 +429,15 @@ def backtest_portfolio(close_df, weights, starting_capital, monthly_contribution
     last_rebal_q     = (dates[0].month - 1) // 3
     prev_value       = starting_capital   # prior day's end-of-day account value
     nav              = 1.0
+    spy_nav          = 1.0
+    prev_spy_value   = starting_capital if has_spy else 0.0
 
     for i, date in enumerate(dates):
         current_prices = prices.iloc[i]
         # Market value using the prior day's shares, BEFORE today's contribution.
         value_pre = sum(shares[t] * current_prices[t] for t in avail)
+        # Same measurement for the benchmark, taken before its contribution too.
+        spy_value_pre = (spy_shares * float(spy_prices.iloc[i])) if has_spy else 0.0
 
         # Monthly contribution — buys shares but is NOT investment performance.
         if date.month != last_month:
@@ -453,17 +468,25 @@ def backtest_portfolio(close_df, weights, starting_capital, monthly_contribution
         day_ret = 0.0 if (i == 0 or prev_value <= 0) else (value_pre - cost) / prev_value - 1
         nav    *= (1 + day_ret)
 
+        # Benchmark, same time-weighted construction (no rebalance cost to net off).
+        spy_value_post = (spy_shares * float(spy_prices.iloc[i])) if has_spy else 0.0
+        if has_spy and i > 0 and prev_spy_value > 0:
+            spy_nav *= spy_value_pre / prev_spy_value
+
         portfolio_values.append(value_post)
         contributions.append(total_contrib)
         nav_values.append(nav)
-        sp500_values.append(spy_shares * float(spy_prices.iloc[i]) if has_spy else np.nan)
-        prev_value = value_post
+        sp500_values.append(spy_value_post if has_spy else np.nan)
+        sp500_nav_values.append(spy_nav if has_spy else np.nan)
+        prev_value     = value_post
+        prev_spy_value = spy_value_post
 
-    result_df              = pd.DataFrame(index=dates)
-    result_df["Portfolio"] = portfolio_values
-    result_df["Contrib"]   = contributions
-    result_df["NAV"]       = nav_values
-    result_df["SP500"]     = sp500_values
+    result_df                = pd.DataFrame(index=dates)
+    result_df["Portfolio"]   = portfolio_values
+    result_df["Contrib"]     = contributions
+    result_df["NAV"]         = nav_values
+    result_df["SP500"]       = sp500_values
+    result_df["SP500_NAV"]   = sp500_nav_values
     return result_df
 
 
@@ -485,20 +508,32 @@ def compute_backtest_metrics(backtest_df, starting_capital):
     # Total return on total invested capital (not starting capital only)
     total_ret = (total_gain / total_contributed) * 100 if total_contributed > 0 else 0
 
-    # Annualised return from the contribution-free daily returns
-    ann_ret = daily_ret.mean() * 252 * 100
+    # Annualised return: GEOMETRIC, from the NAV endpoints, and only when the
+    # window is long enough to justify annualising at all.
+    #
+    # This was `daily_ret.mean() * 252 * 100` — arithmetic, and unguarded. Over a
+    # short window that scaling explodes: a one-month-old tracked portfolio down
+    # ~11% reported an annualised return of **-132%**, which is not merely wrong
+    # but impossible, since you cannot lose more than everything. Compounding the
+    # actual endpoints can't produce that, and refusing to annualise under a
+    # quarter of data stops us extrapolating a fortnight into a year.
+    _n_obs = len(nav)
+    _years = _n_obs / 252.0
+    if _n_obs >= 2 and _years >= 0.25 and nav.iloc[0] > 0 and nav.iloc[-1] > 0:
+        ann_ret = ((nav.iloc[-1] / nav.iloc[0]) ** (1.0 / _years) - 1.0) * 100
+    else:
+        ann_ret = None   # callers render "n/a"; see your_portfolios._ann_return_str
 
     # Sharpe/Sortino with risk-free rate (excess return basis)
     rf_daily = get_risk_free_rate() / 252
     excess   = daily_ret - rf_daily
     sharpe   = (excess.mean() * 252) / (excess.std() * np.sqrt(252)) if excess.std() > 0 else 0
-    down_ret = excess[excess < 0]
-    # Require at least ~1 month of downside days before computing Sortino —
-    # with a tiny sample, std() is noisy and can blow the ratio up.
-    if len(down_ret) >= 20 and down_ret.std() > 0:
-        sortino = (excess.mean() * 252) / (down_ret.std() * np.sqrt(252))
-    else:
-        sortino = 0
+    # Downside deviation about zero over the whole series, not the std of the
+    # losing days. Still gated on ~1 month of down days: below that the estimate
+    # is too thin to quote regardless of which formula produced it.
+    _dd      = downside_deviation(daily_ret)
+    _n_down  = int((daily_ret < 0).sum())
+    sortino  = (excess.mean() * 252) / _dd if (_dd and _n_down >= 20) else 0
 
     # Drawdown on the NAV index, so contribution inflows can't mask drawdowns.
     peak   = nav.cummax()
@@ -526,7 +561,7 @@ def compute_backtest_metrics(backtest_df, starting_capital):
         "Total Contributed":  round(total_contributed, 2),
         "Total Gain/Loss":    round(total_gain, 2),
         "Total Return":       round(total_ret, 2),
-        "Ann. Return":        round(ann_ret, 2),
+        "Ann. Return":        (round(ann_ret, 2) if ann_ret is not None else None),
         "Ann. Volatility":    round(ann_vol, 2),
         "Sharpe Ratio":       round(sharpe, 3),
         "Sortino Ratio":      round(sortino, 3),
@@ -540,8 +575,16 @@ def compute_backtest_metrics(backtest_df, starting_capital):
 
 
 def compute_monthly_heatmap(backtest_df):
-    """Returns a pivot table of monthly returns for heatmap."""
-    port        = backtest_df["Portfolio"]
+    """Pivot table of monthly returns for the heatmap.
+
+    Built on NAV, not Portfolio. On the account value a monthly contribution is a
+    one-day step (+5% in month one of a $10k/$500 plan), so a month-over-month
+    pct_change() reads deposits as market gains — every cell was overstated by
+    roughly the contribution rate, and the grid disagreed with the Best/Worst
+    Month figures in compute_backtest_metrics, which already used NAV. Falls back
+    to Portfolio only for backtests cached before the NAV column existed.
+    """
+    port        = backtest_df["NAV"] if "NAV" in backtest_df.columns else backtest_df["Portfolio"]
     monthly_ret = port.resample("ME").last().pct_change().dropna() * 100
     monthly_ret.index = pd.to_datetime(monthly_ret.index)
     heatmap     = monthly_ret.groupby([monthly_ret.index.year, monthly_ret.index.month]).first()
@@ -751,10 +794,17 @@ def get_rebalancing_recommendations(current_holdings, target_weights, current_pr
     """
     total_val = sum(current_holdings.get(t, 0) * current_prices.get(t, 0)
                     for t in target_weights)
+    # Nothing to rebalance against a zero-value book, and every diff below is a
+    # share of total_val — dividing by it unguarded raised ZeroDivisionError
+    # whenever no price could be resolved for any holding.
+    if total_val <= 0:
+        return []
     recs = []
     for ticker, target_w in target_weights.items():
         target_val   = total_val * target_w
-        current_val  = current_holdings.get(ticker, 0) * current_prices.get(ticker, 1)
+        # Default 0.0, not 1.0: a missing price meant "one dollar a share", which
+        # silently valued the position at its share count.
+        current_val  = current_holdings.get(ticker, 0) * current_prices.get(ticker, 0.0)
         diff_val     = target_val - current_val
         diff_pct     = (diff_val / total_val) * 100
 

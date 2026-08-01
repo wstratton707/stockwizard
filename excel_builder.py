@@ -443,9 +443,12 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
     ret      = df["Daily_Return"].dropna()
     ann_ret  = ret.mean() * 252
     ann_std  = ret.std() * np.sqrt(252)
-    downside = ret[ret < 0].std() * np.sqrt(252)
     # Excess-return Sharpe/Sortino (subtract the risk-free rate) so the exported
-    # report matches the on-screen metric cards and the portfolio engine.
+    # report matches the on-screen metric cards and the portfolio engine. The
+    # Sortino denominator is downside deviation about zero, not the std of the
+    # losing days — see analysis.downside_deviation.
+    from analysis import downside_deviation as _dd_fn
+    downside = _dd_fn(ret)
     rfr      = get_risk_free_rate()
     sharpe   = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
     sortino  = (ann_ret - rfr) / downside if downside else np.nan
@@ -552,11 +555,17 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
 
     # ── Stock Scorecard — the "investment snapshot" that turns a dozen metrics
     #    into a graded profile. Descriptive (quality/attractiveness), not buy/sell.
+    # The scorecard's risk bands (-0.10 -> 85 ... -0.50 -> 30) are calibrated for a
+    # true peak-to-trough max drawdown, and compute_scorecard labels the value
+    # "Max DD". Feeding it Drawdown_60d — the worst 60-DAY rolling drawdown — was
+    # handing it a systematically shallower number, so the Risk factor scored
+    # every stock more kindly than the bands intend.
+    _sc_cum = (1 + ret).cumprod()
+    _sc_mdd = float((_sc_cum / _sc_cum.cummax() - 1).min()) if len(_sc_cum) else None
     _sc_risk = {
         "sharpe": float(sharpe)  if pd.notna(sharpe)  else None,
         "vol":    float(ann_std) if pd.notna(ann_std) else None,
-        "max_dd": (float(df["Drawdown_60d"].min())
-                   if pd.notna(df["Drawdown_60d"].min()) else None),
+        "max_dd": _sc_mdd if (_sc_mdd is not None and pd.notna(_sc_mdd)) else None,
     }
     scorecard = compute_scorecard(
         fundamentals=fundamentals, dcf=dcf,
@@ -858,19 +867,24 @@ def _build_annual_summary(wb, df):
     ws_a["A1"].alignment = Alignment(horizontal="center", vertical="center")
     ws_a.row_dimensions[1].height = 26
 
-    headers = ["Year","Annual Return","Max Drawdown","Ann. Volatility","Sharpe (approx)"]
+    headers = ["Year","Annual Return","Max Drawdown (60d)","Ann. Volatility","Sharpe"]
     for ci, h in enumerate(headers, 1):
         _hdr_cell(ws_a.cell(row=2, column=ci, value=h), bg=MID_BLUE)
 
     tmp = df[["Date","Daily_Return","Drawdown_60d"]].copy()
     tmp["Year"] = pd.to_datetime(tmp["Date"]).dt.year
 
+    # This was the one Sharpe in the app that did NOT net off the risk-free rate,
+    # so the per-year column read high by roughly Rf/vol against the Dashboard's
+    # figure and against this workbook's own Methodology sheet.
+    _rfr = get_risk_free_rate()
+
     for ri, (year, grp) in enumerate(tmp.groupby("Year"), 3):
         ret         = grp["Daily_Return"].dropna()
         yr_return   = (1 + ret).prod() - 1
         yr_drawdown = grp["Drawdown_60d"].min()
         yr_vol      = ret.std() * np.sqrt(252)
-        yr_sharpe   = (ret.mean() * 252) / yr_vol if yr_vol else np.nan
+        yr_sharpe   = ((ret.mean() * 252) - _rfr) / yr_vol if yr_vol else np.nan
 
         row_vals = [year, yr_return, yr_drawdown, yr_vol, round(yr_sharpe, 2) if pd.notna(yr_sharpe) else "N/A"]
         bg = GREY_ROW if ri % 2 == 0 else WHITE
@@ -1324,7 +1338,15 @@ def _build_fundamentals_sheet(wb, fundamentals):
         ("EV / EBITDA", _fmt(f.get("ev_ebitda"), "x")),
         ("Earnings Yield", _fmt(v["earnings_yield"], "%")),
         ("FCF Yield", _fmt(fc.get("fcf_yield"), "%")),
-        ("Reverse-DCF implied growth", _fmt(round(_ig * 100, 1) if _ig is not None else None, "%")),
+        # Labelled by BASIS, not just as "reverse-DCF implied growth". The
+        # Valuation sheet carries a different implied-growth figure — solved
+        # against free cash flow at the company's own CAPM WACC — and the two
+        # legitimately disagree (net income is not cash, and 9% is not this
+        # company's cost of capital). Presenting them under the same name made
+        # them look like one number that couldn't make up its mind.
+        ("Implied growth — earnings basis, flat 9% discount",
+         _fmt(round(_ig * 100, 1) if _ig is not None else None, "%")),
+        ("  (cross-check only; the headline reverse DCF is on the Valuation sheet)", ""),
     ])
     section("Profitability & Returns", [
         ("Gross Margin", _fmt(m["gross"], "%")), ("Operating Margin", _fmt(m["operating"], "%")),
@@ -1777,8 +1799,8 @@ def _build_methodology_sheet(wb, dcf=None):
     section("Risk & Return", [
         ("Annualised Volatility", "Standard deviation of daily returns × √252. How much the price swings; higher = riskier."),
         ("Sharpe Ratio", f"(Annualised return − risk-free rate) ÷ annualised volatility — excess return per unit of total risk. Risk-free rate = current 3-month US Treasury yield via FRED ({rfr*100:.2f}% now). Above 1 is strong."),
-        ("Sortino Ratio", "Like Sharpe, but divides by downside deviation (negative-return days only), so it doesn't penalise upside volatility."),
-        ("Max Drawdown", "Largest peak-to-trough decline over the window — how deep the worst fall was."),
+        ("Sortino Ratio", "Like Sharpe, but the denominator is downside deviation about zero — √(mean of squared shortfalls below zero, over ALL days) × √252 — so upside volatility isn't penalised. Note this is not the standard deviation of the losing days, which would understate the denominator and flatter the ratio."),
+        ("Max Drawdown (60d)", "Deepest fall from a rolling 60-day peak — how bad the worst quarter-ish stretch was. A decline that unfolds over longer than 60 trading days shows up here only in part, so this reads shallower than a full peak-to-trough figure. The Scorecard's risk factor and the PowerPoint deck use the full peak-to-trough drawdown over the whole window."),
     ])
     section("Technical Indicators", [
         ("Moving Average (20/50/200-day)", "Average close over the last N sessions; smooths the trend. Price above the average is bullish, below is cautionary."),

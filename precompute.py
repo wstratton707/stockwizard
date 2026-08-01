@@ -14,11 +14,14 @@ Run manually:
     python precompute.py
     python precompute.py --force   (recompute even if cached today)
 
-Schedule on Railway (cron job):
-    Command: python precompute.py
-    Schedule: 0 14 * * 1-5   (9 AM Eastern = 14:00 UTC, weekdays only)
+Scheduled by GitHub Actions, NOT by the host — the Streamlit Cloud app has no
+cron. Two workflows split the universe so each fits the job limit:
+    .github/workflows/precompute.yml     AM batch, cron '0 14 * * 1-5'
+    .github/workflows/precompute-pm.yml  PM batch (the remaining sectors)
+Both accept a manual `workflow_dispatch` from the Actions tab.
 
-Runtime: ~10-20 min on Polygon free tier, ~2-3 min on paid tier.
+Runtime: minutes, since prices are batched via market_data.get_bars_batch
+(~16 tickers/sec). The old serial per-ticker Polygon loop took 10-20 min for 341.
 """
 
 import os
@@ -51,6 +54,16 @@ from constants import get_risk_free_rate
 
 TODAY     = datetime.today().strftime("%Y-%m-%d")
 CACHE_KEY = f"sharpe_rankings_{TODAY}"
+
+# Rankings must outlive a weekend. portfolio_data.get_sharpe_rankings walks back
+# up to 5 days looking for the most recent set — precisely so that Sunday, and
+# Monday before the 14:00-UTC run, still get a full ranked universe instead of
+# silently falling through to the slow live-candidate path. A 26h TTL made that
+# walk-back impossible: Friday's key expired Saturday afternoon, so from then
+# until Monday's run there was nothing to find. The date is in the cache key, so
+# a longer TTL can never be mistaken for today's rankings — the UI reads
+# `_meta.computed_at` and shows the age.
+RANKINGS_TTL_HOURS = 7 * 24
 
 # Widen the universe beyond the hand-typed SECTOR_UNIVERSE. Practical only because
 # the fetch is batched now (~16 tickers/sec): 4,000 names is ~4 min, where the old
@@ -289,9 +302,16 @@ def _add_combined_scores(rankings: dict) -> dict:
     for t in tickers:
         groups[rankings[t].get("sector", "Unknown")].append(t)
 
-    # Momentum and quality are sector-relative; volatility and Sharpe stay
-    # absolute — a genuinely low-volatility name is low-volatility regardless of
-    # what its neighbours do, and that is the property being selected for.
+    # Momentum is sector-relative. Volatility, Sharpe and quality stay absolute —
+    # a genuinely low-volatility name is low-volatility regardless of what its
+    # neighbours do, and that is the property being selected for.
+    #
+    # (Quality being absolute is a real limitation, not an oversight: ranking a
+    # utility's ROE against a semiconductor's measures the sector. Making it
+    # sector-relative is worth doing, but it interacts with the "Unknown" bucket
+    # below, so it is not a one-line change. Until then, do not describe quality
+    # as sector-relative in the UI — portfolio_builder's caption did, and it
+    # wasn't true.)
     g_12m = _by_group("mom_12m_adj", groups)
     g_6m  = _by_group("mom_6m",      groups)
     g_3m  = _by_group("mom_3m",      groups)
@@ -435,7 +455,7 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
             partial = _add_combined_scores(dict(raw))
             partial["_meta"] = {"computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
                                 "partial": True, "tickers_done": done, "tickers_total": len(price_map)}
-            cache_set(CACHE_KEY, partial, ttl_hours=26)
+            cache_set(CACHE_KEY, partial, ttl_hours=RANKINGS_TTL_HOURS)
             print(f"  💾 Checkpoint saved — {len(partial) - 1} tickers ranked so far")
 
     # Add normalised combined score
@@ -489,7 +509,7 @@ def main():
         "partial": is_partial,
         "tickers_done": len(rankings),
     }
-    ok      = cache_set(CACHE_KEY, rankings, ttl_hours=26)
+    ok      = cache_set(CACHE_KEY, rankings, ttl_hours=RANKINGS_TTL_HOURS)
     elapsed = time.time() - t0
 
     print(f"\n{'='*55}")
@@ -517,8 +537,10 @@ def main():
 
 def warm_portfolio_cache(rankings: dict):
     """
-    Pre-fetch 2-year price data for the default top-18 portfolio so the
-    portfolio builder is instant even on the very first user run of the day.
+    Pre-fetch price history for the default top-18 portfolio so the portfolio
+    builder is instant even on the very first user run of the day. The window
+    must match portfolio_builder._PRICE_HISTORY_YEARS (5 years) or the warmed
+    bundle doesn't satisfy the builder's request and it cold-fetches anyway.
     """
     from collections import defaultdict
     from portfolio_data import fetch_portfolio_prices_cached

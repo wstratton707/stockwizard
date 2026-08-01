@@ -55,6 +55,31 @@ def market_beta(stock_returns, market_returns):
         return None
 
 
+def downside_deviation(returns, mar=0.0, periods=252):
+    """Annualised downside deviation about `mar` — the correct Sortino denominator.
+
+    This is NOT `returns[returns < 0].std()`, which is what every Sortino in this
+    codebase used to divide by. That expression measures how much the losing days
+    differ from EACH OTHER, around their own (negative) mean, and averages over
+    only their own count. Both mistakes shrink the denominator, so it inflated
+    every Sortino ratio the app reported — and by more the choppier the series.
+
+    The definition (Sortino & Price, 1994) is the root-mean-square shortfall below
+    the target, taken over ALL observations:
+
+        sqrt( mean( min(r - mar, 0)^2 ) ) * sqrt(periods)
+
+    Returns None when there is no measurable downside, so callers render "N/A"
+    instead of dividing by zero.
+    """
+    r = pd.Series(returns).dropna().astype(float)
+    if r.empty:
+        return None
+    shortfall = (r - mar).clip(upper=0.0)
+    dd = float(np.sqrt(float((shortfall ** 2).mean())) * np.sqrt(periods))
+    return dd if dd > 0 else None
+
+
 def cost_of_equity(beta, rf=None, erp=None):
     """CAPM cost of equity: Rf + beta x ERP."""
     from constants import get_risk_free_rate, EQUITY_RISK_PREMIUM
@@ -91,11 +116,22 @@ def estimate_wacc(fundamentals, beta, rf=None, erp=None, tax_rate=US_STATUTORY_T
     r = get_risk_free_rate() if rf is None else rf
     p = EQUITY_RISK_PREMIUM if erp is None else erp
     e = fundamentals.get("market_cap") or 0.0
+    # GROSS debt is the right weight for a WACC: the cost of debt is paid on the
+    # debt outstanding, not on debt-minus-cash. `total_debt` is now carried
+    # directly on the fundamentals dict — this used to reconstruct it as
+    # net_debt + balance["cash"], but compute_fundamentals never put a "cash" key
+    # in its balance block, so cash always read None and the weight silently
+    # became NET debt. For a net-cash company that clamped d to 0 and the WACC
+    # collapsed to the pure cost of equity.
     d = 0.0
     try:
-        nd = fundamentals.get("net_debt")
-        cash = (fundamentals.get("balance") or {}).get("cash")
-        d = max(0.0, float(nd) + float(cash or 0.0)) if nd is not None else 0.0
+        td = fundamentals.get("total_debt")
+        if td is None:
+            # Older/partial dicts: fall back to the net-debt + cash reconstruction.
+            nd   = fundamentals.get("net_debt")
+            cash = (fundamentals.get("balance") or {}).get("cash")
+            td   = (float(nd) + float(cash or 0.0)) if nd is not None else None
+        d = max(0.0, float(td)) if td is not None else 0.0
     except Exception:
         d = 0.0
     v = e + d
@@ -384,7 +420,10 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
                    "net_income": ni, "eps_diluted": eps, "rnd": rnd},
         "balance": {"assets": asts, "liabilities": _fin_val(bal, "liabilities"),
                     "equity": eq, "current_assets": ca, "current_liabilities": cl,
-                    "long_term_debt": ltd},
+                    "long_term_debt": ltd,
+                    # `cash` belongs here: estimate_wacc reads it, and its absence
+                    # is what made the WACC debt weight net rather than gross.
+                    "cash": cash_bal},
         "cashflow": {"operating": ocf,
                      "investing": _fin_val(cf, "net_cash_flow_from_investing_activities"),
                      "financing": _fin_val(cf, "net_cash_flow_from_financing_activities")},
@@ -396,6 +435,9 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
         # EV→equity bridge; None when the balance-sheet fields are unavailable.
         "net_debt": (((total_debt or 0) - (cash_bal or 0))
                      if (total_debt is not None or cash_bal is not None) else None),
+        # Gross debt, surfaced so estimate_wacc doesn't have to reconstruct it.
+        "total_debt": total_debt,
+        "cash": cash_bal,
         "ev": ev,
         "trend": trend,
         "source": financials.get("source", "Polygon") if isinstance(financials, dict) else "Polygon",
@@ -720,12 +762,18 @@ def build_correlation_matrix(df, benchmark_tickers=None):
     return pd.DataFrame(cols).dropna().corr()
 
 
-def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print):
+def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print, seed=42):
     log(f"Monte Carlo: {n_simulations:,} paths x {forecast_days} trading days...")
     returns    = df["Daily_Return"].dropna()
     mu, sigma  = returns.mean(), returns.std()
     last_price = df["Close"].iloc[-1]
-    rand          = np.random.standard_normal((forecast_days, n_simulations))
+    # Seeded local generator, matching the portfolio Monte Carlo and the efficient
+    # frontier. Drawing from global numpy state meant the same ticker over the same
+    # window produced a different P5/P50/P95 on every run — two reports generated
+    # minutes apart disagreed, which reads as a broken model rather than sampling
+    # noise. Pass seed=None for genuinely fresh draws.
+    rng           = np.random.default_rng(seed)
+    rand          = rng.standard_normal((forecast_days, n_simulations))
     daily_factors = np.exp((mu - 0.5 * sigma ** 2) + sigma * rand)
     paths         = np.zeros((forecast_days + 1, n_simulations))
     paths[0]      = last_price
@@ -810,10 +858,12 @@ def _engineer_features(df):
     # Volume ratio vs 20-day average
     f["vol_ratio"] = df["Volume"] / (df["Volume"].rolling(20).mean() + 1e-8)
 
-    # Target: next-day return
+    # Target: next-day return. Returned WITHOUT dropna() — the caller needs the
+    # final row, whose target is NaN precisely because that next-day return
+    # hasn't happened yet. That row is the one we want to predict from.
     f["target"] = ret.shift(-1)
 
-    return f.dropna()
+    return f
 
 
 def _train_ml_drift(df, log=print):
@@ -825,13 +875,22 @@ def _train_ml_drift(df, log=print):
         from sklearn.ensemble import RandomForestRegressor
         from sklearn.preprocessing import StandardScaler
 
-        feat_df = _engineer_features(df)
-        if len(feat_df) < 60:
+        feat_all  = _engineer_features(df)
+        feat_cols = [c for c in feat_all.columns if c != "target"]
+
+        # Training rows need complete features AND a realised next-day target.
+        train_df = feat_all.dropna()
+        # The prediction row is the last session with complete features. The old
+        # code dropped it along with its NaN target and then predicted from
+        # X[-1:], i.e. the SECOND-to-last session — so the "forecast drift" was a
+        # fit to a return that had already printed, one day stale by construction.
+        pred_df  = feat_all[feat_cols].dropna()
+        if len(train_df) < 60 or pred_df.empty:
             log("  ML: Not enough data — using historical mean drift.")
             return float(df["Daily_Return"].mean())
 
-        X = feat_df.drop(columns=["target"]).values
-        y = feat_df["target"].values
+        X = train_df[feat_cols].values
+        y = train_df["target"].values
 
         split     = int(len(X) * 0.8)
         X_train   = X[:split]
@@ -839,7 +898,7 @@ def _train_ml_drift(df, log=print):
 
         scaler       = StandardScaler()
         X_train_s    = scaler.fit_transform(X_train)
-        X_last_s     = scaler.transform(X[-1:])
+        X_last_s     = scaler.transform(pred_df.iloc[[-1]].values)
 
         rf = RandomForestRegressor(n_estimators=150, random_state=42, n_jobs=-1)
         rf.fit(X_train_s, y_train)
@@ -871,7 +930,7 @@ def _train_ml_drift(df, log=print):
         return float(df["Daily_Return"].mean())
 
 
-def run_custom_forecast(df, n_simulations=1000, forecast_days=252, log=print):
+def run_custom_forecast(df, n_simulations=1000, forecast_days=252, log=print, seed=42):
     """
     Custom Forecast: GARCH(1,1) volatility + ML-ensemble drift + Monte Carlo paths.
     Uses the pre-fetched Polygon dataframe (same data as the rest of the analysis).
@@ -907,7 +966,10 @@ def run_custom_forecast(df, n_simulations=1000, forecast_days=252, log=print):
 
     # ── 3. Monte Carlo with GARCH vol + ML drift ──────────────────────────────
     log(f"  Monte Carlo: {n_simulations:,} paths × {forecast_days} days (dynamic σ)...")
-    rand  = np.random.standard_normal((forecast_days, n_simulations))
+    # Seeded, for the same reason as run_monte_carlo: identical inputs must give
+    # an identical forecast, or the exported report can't be reproduced.
+    rng   = np.random.default_rng(seed)
+    rand  = rng.standard_normal((forecast_days, n_simulations))
     paths = np.zeros((forecast_days + 1, n_simulations))
     paths[0] = last_price
 

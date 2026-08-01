@@ -169,7 +169,9 @@ def _build_dashboard(wb, preferences, final_weights, stock_metrics,
         ("Final Portfolio Value",  backtest_metrics.get("Final Value",0),         '_($* #,##0.00_)', ("gt",0)),
         ("Total Gain / Loss",      backtest_metrics.get("Total Gain/Loss",0),      '_($* #,##0.00_)', ("gt",0)),
         ("Total Return %",         backtest_metrics.get("Total Return",0),         '0.00%',           ("gt",0)),
-        ("Annualised Return %",    backtest_metrics.get("Ann. Return",0),          '0.00%',           ("gt",0)),
+        # `or 0` not a .get default: the key exists but is None when the window is
+        # too short to annualise, and .get would hand that None straight to openpyxl.
+        ("Annualised Return %",    backtest_metrics.get("Ann. Return") or 0,       '0.00%',           ("gt",0)),
         ("vs S&P 500",             backtest_metrics.get("vs S&P 500","N/A"),       None,              None),
         ("Sharpe Ratio",           backtest_metrics.get("Sharpe Ratio",0),         '0.000',           ("gt",1)),
         ("Sortino Ratio",          backtest_metrics.get("Sortino Ratio",0),        '0.000',           ("gt",1)),

@@ -7,7 +7,8 @@ Why a separate module?
   • Centralises TTL / max_entries decisions so they're easy to tune.
 
 Gotchas handled here:
-  • max_entries set on every decorator so Railway's ~512MB worker can't OOM.
+  • max_entries set on every decorator so the host can't OOM. (Streamlit
+    Community Cloud gives ~1GB per app, shared with matplotlib report rendering.)
   • API keys passed as `_api_key` so they're not part of the cache hash.
   • Heavy functions that take DataFrames cache by proxy keys (ticker + last
     date + params) with the df passed as unhashable — avoids slow content
@@ -50,7 +51,7 @@ _TTL_LONG    = 6 * 60 * 60   # 6h    — earnings dates
 _TTL_XLONG   = 24 * 60 * 60  # 24h   — company metadata, asset-type detection
 _TTL_FMP     = 48 * 60 * 60  # 48h   — ETF details (FMP is 250 req/day)
 
-_MAX_ENTRIES = 50   # per decorator — fits comfortably on 512MB Railway worker
+_MAX_ENTRIES = 50   # per decorator — sized for Streamlit Cloud's ~1GB app limit
 
 
 # ── Data fetchers ─────────────────────────────────────────────────────────────
@@ -167,27 +168,34 @@ def cached_fetch_etf_details(ticker, _fmp_key):
 
 
 # ── Heavy computations ────────────────────────────────────────────────────────
-# DataFrames are expensive to hash by content. These wrappers hash by proxy
-# keys (ticker + last date + params) and take the df as unhashable via `_df`.
+# DataFrames are expensive to hash by content. These wrappers hash by proxy keys
+# (ticker + window key + params) and take the df as unhashable via `_df`.
+#
+# `window_key` must identify the whole window — first date, last date and row
+# count — NOT just the last date. Every one of these functions derives its answer
+# from the entire series (mu and sigma for the simulations, pivots for S/R,
+# pairwise returns for the correlation matrix), and a 1Y and a 5Y pull taken on
+# the same day end on the same date. Keying on the end alone meant the second
+# window the user selected got served the first one's numbers.
 
 @st.cache_data(ttl=_TTL_MEDIUM, max_entries=10, show_spinner=False)
-def cached_run_monte_carlo(ticker, last_date, n_simulations, forecast_days, _df):
+def cached_run_monte_carlo(ticker, window_key, n_simulations, forecast_days, _df):
     return _run_monte_carlo(_df, n_simulations=n_simulations,
                             forecast_days=forecast_days, log=lambda m: None)
 
 
 @st.cache_data(ttl=_TTL_MEDIUM, max_entries=10, show_spinner=False)
-def cached_run_custom_forecast(ticker, last_date, n_simulations, forecast_days, _df):
+def cached_run_custom_forecast(ticker, window_key, n_simulations, forecast_days, _df):
     return _run_custom_forecast(_df, n_simulations=n_simulations,
                                 forecast_days=forecast_days, log=lambda m: None)
 
 
 @st.cache_data(ttl=_TTL_MEDIUM, max_entries=_MAX_ENTRIES, show_spinner=False)
-def cached_detect_support_resistance(ticker, last_date, _df):
+def cached_detect_support_resistance(ticker, window_key, _df):
     return _detect_support_resistance(_df)
 
 
 @st.cache_data(ttl=_TTL_MEDIUM, max_entries=_MAX_ENTRIES, show_spinner=False)
-def cached_build_correlation_matrix(ticker, last_date, benchmarks_tuple, _df):
+def cached_build_correlation_matrix(ticker, window_key, benchmarks_tuple, _df):
     benchmarks = list(benchmarks_tuple) if benchmarks_tuple else None
     return _build_correlation_matrix(_df, benchmarks)
