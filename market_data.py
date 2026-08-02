@@ -395,3 +395,62 @@ def get_financials_supplement(ticker: str) -> dict | None:
         "total_debt":        _yf_row(bs, "Total Debt"),
     }
     return out if any(v for v in out.values()) else None
+
+
+def _yf_profile(ticker: str) -> dict:
+    """One ticker's company profile from yfinance .info, normalised and None-safe."""
+    out = {"name": ticker, "sector": None, "industry": None, "pe": None,
+           "div_yield": None, "beta": None, "rev_growth": None,
+           "eps_growth": None, "market_cap": None, "quote_type": None}
+    try:
+        import yfinance as yf
+        info = yf.Ticker(to_yahoo_symbol(ticker)).get_info() or {}
+    except Exception:
+        return out
+
+    def num(*keys):
+        for k in keys:
+            v = info.get(k)
+            if isinstance(v, (int, float)) and v == v:
+                return float(v)
+        return None
+
+    qt = str(info.get("quoteType") or "").upper()
+    out["quote_type"] = qt
+    out["name"]       = info.get("longName") or info.get("shortName") or ticker
+    is_fund = qt in ("ETF", "MUTUALFUND", "MONEYMARKET", "INDEX")
+    # Funds have no sector/industry of their own; label them as a bucket rather
+    # than leaving "Unknown", which would read as missing data in the report.
+    out["sector"]   = info.get("sector") or ("Fund / ETF" if is_fund else None)
+    out["industry"] = info.get("industry") or (info.get("category") if is_fund else None) \
+                      or ("Fund / ETF" if is_fund else None)
+    out["pe"]         = num("trailingPE")
+    out["beta"]       = num("beta", "beta3Year")
+    out["market_cap"] = num("marketCap", "totalAssets")
+    # yfinance's dividendYield changed convention (fraction → percent) across
+    # versions, so prefer rate/price which is unambiguous; the >0.25 heuristic
+    # catches the percent form on the fallback (no real yield exceeds 25%).
+    rate, px = num("trailingAnnualDividendRate"), num("currentPrice", "regularMarketPrice")
+    if rate is not None and px:
+        out["div_yield"] = rate / px
+    else:
+        dy = num("dividendYield", "yield")
+        out["div_yield"] = (dy / 100 if dy is not None and dy > 0.25 else dy)
+    # YoY fractions as reported (revenueGrowth / earningsGrowth)
+    out["rev_growth"] = num("revenueGrowth")
+    out["eps_growth"] = num("earningsGrowth")
+    return out
+
+
+def get_ticker_profiles(tickers: list) -> dict:
+    """{ticker: profile dict} for the portfolio Excel report — threaded batch.
+
+    Every field may be None (funds, data gaps, yfinance failures); callers must
+    render "N/A" rather than assume coverage.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    tickers = list(dict.fromkeys(t.upper() for t in tickers if t))
+    if not tickers:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as ex:
+        return dict(zip(tickers, ex.map(_yf_profile, tickers)))

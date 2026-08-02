@@ -23,6 +23,8 @@ import auth
 import chart_theme as ct
 
 from tracker import track_portfolio, dollars_to_lots, amount_to_shares
+from market_data import get_ticker_profiles
+from portfolio_excel import build_tracked_portfolio_excel
 from database import (
     save_tracked_portfolio, load_tracked_portfolios,
     update_tracked_portfolio, delete_tracked_portfolio,
@@ -57,6 +59,13 @@ def _stat_ribbon(items):
         f'<div class="pf-stat-lbl">{label}</div></div>'
         for label, val, tone in items)
     st.markdown(f'<div class="pf-ribbon">{cells}</div>', unsafe_allow_html=True)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _cached_profiles(tickers_key):
+    # Company metadata (sector/industry/P/E/beta) moves slowly — a day's TTL
+    # keeps repeat exports instant without re-hitting Yahoo per ticker.
+    return get_ticker_profiles(list(tickers_key))
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -315,6 +324,25 @@ def _render_card(p, api_key):
         st.caption(f"{w}")
 
     _render_edit(pid, holdings, api_key)
+
+    b1, b2, _sp = st.columns([1.2, 1, 2.8])
+    _xk = f"xlsx_{pid}"
+    if b1.button("Export Excel report", key=f"exp_{pid}"):
+        with st.spinner("Building report…"):
+            try:
+                tickers = tuple(sorted(h["ticker"] for h in res["holdings"]))
+                buf = build_tracked_portfolio_excel(name, res, _cached_profiles(tickers))
+                st.session_state[_xk] = buf.getvalue()
+            except Exception as e:
+                st.error(f"Couldn't build the report: {e}")
+                import traceback as _tb; print(_tb.format_exc())   # server log, not UI
+    if _xk in st.session_state:
+        _safe = "".join(c if c.isalnum() or c in " -_" else "" for c in name).strip() or "Portfolio"
+        b2.download_button(
+            "Download .xlsx", data=st.session_state[_xk],
+            file_name=f"QuantWizard {_safe} {date.today().isoformat()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"dl_{pid}")
 
     if st.button("Delete portfolio", key=f"del_{pid}"):
         delete_tracked_portfolio(pid)

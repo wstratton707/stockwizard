@@ -5,8 +5,9 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.chart import LineChart, BarChart, Reference
-from openpyxl.formatting.rule import ColorScaleRule, CellIsRule
+from openpyxl.chart import LineChart, BarChart, PieChart, Reference
+from openpyxl.chart.label import DataLabelList
+from openpyxl.formatting.rule import ColorScaleRule, CellIsRule, DataBarRule
 from datetime import datetime
 
 DARK_BLUE = "1F4E79"
@@ -475,6 +476,521 @@ def build_portfolio_excel(preferences, final_weights, stock_metrics,
     for i, name in enumerate(ordered + extras):
         wb.move_sheet(name, offset=wb.sheetnames.index(name) - i)
 
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tracked-portfolio report — the "Your Portfolios" page export.
+# Input is the (already cached) tracker.track_portfolio result plus per-ticker
+# profiles from market_data.get_ticker_profiles. Every profile field may be None;
+# each sheet renders an em-dash rather than assuming coverage.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DASH = "—"
+
+
+def _num(ws, row, col, val, fmt=None, bold=False, fill=None):
+    """Numeric cell, or a right-aligned grey em-dash when the value is missing."""
+    if val is None or (isinstance(val, float) and val != val):
+        c = ws.cell(row=row, column=col, value=DASH)
+        c.font = Font(name="Arial", size=10, color="999999")
+    else:
+        c = ws.cell(row=row, column=col, value=val)
+        c.font = Font(name="Arial", size=10, bold=bold)
+        if fmt:
+            c.number_format = fmt
+    c.alignment = Alignment(horizontal="right")
+    c.border = _border()
+    if fill:
+        c.fill = PatternFill("solid", fgColor=fill)
+    return c
+
+
+def _tp_title(ws, title, sub_lines, ncols=6):
+    ws.sheet_view.showGridLines = False
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    ws.cell(row=1, column=1, value=title).font = Font(size=16, bold=True,
+                                                      color=DARK_BLUE, name="Arial")
+    ws.row_dimensions[1].height = 26
+    for i, line in enumerate(sub_lines, 2):
+        ws.merge_cells(start_row=i, start_column=1, end_row=i, end_column=ncols)
+        ws.cell(row=i, column=1, value=line).font = Font(size=9, italic=True,
+                                                         color="888888", name="Arial")
+    return 2 + len(sub_lines) + 1   # first free row
+
+
+def _derive_portfolio_stats(tracked, profiles):
+    """One shared analytics pass every sheet reads from.
+
+    Weighted P/E is harmonic (earnings-weighted) over positive-P/E holdings —
+    an arithmetic mean of P/Es lets one richly valued position dominate.
+    Dividend yield counts non-payers as zero (a portfolio's yield includes
+    them); growth is renormalised over covered weight because a missing growth
+    figure is unknown, not zero.
+    """
+    from portfolio_analysis import portfolio_beta
+
+    rows = []
+    for h in tracked["holdings"]:
+        p = profiles.get(h["ticker"], {}) or {}
+        rows.append({**h, "w": h["weight_pct"] / 100.0,
+                     "name":       p.get("name") or h["ticker"],
+                     "sector":     p.get("sector") or "Unknown",
+                     "industry":   p.get("industry") or "Unknown",
+                     "pe":         p.get("pe"),
+                     "div_yield":  p.get("div_yield"),
+                     "beta":       p.get("beta"),
+                     "rev_growth": p.get("rev_growth"),
+                     "eps_growth": p.get("eps_growth")})
+    rows.sort(key=lambda r: -r["w"])
+
+    total_value = sum(r["value"] for r in rows)
+    weights = {r["ticker"]: r["w"] for r in rows}
+
+    def _wavg(field):
+        cov = [(r["w"], r[field]) for r in rows if r[field] is not None]
+        wsum = sum(w for w, _ in cov)
+        return (sum(w * v for w, v in cov) / wsum if wsum > 0 else None), wsum
+
+    betas = {r["ticker"]: r["beta"] for r in rows if r["beta"] is not None}
+    beta_cov = sum(r["w"] for r in rows if r["beta"] is not None)
+    port_beta = portfolio_beta(weights, betas) if betas else None
+
+    pe_rows = [(r["w"], r["pe"]) for r in rows if r["pe"] and r["pe"] > 0]
+    pe_cov = sum(w for w, _ in pe_rows)
+    wpe = pe_cov / sum(w / pe for w, pe in pe_rows) if pe_cov > 0 else None
+
+    div_yield = sum(r["w"] * (r["div_yield"] or 0.0) for r in rows)
+    eps_g, eps_cov = _wavg("eps_growth")
+    rev_g, rev_cov = _wavg("rev_growth")
+
+    def _group(field):
+        d = {}
+        for r in rows:
+            d[r[field]] = d.get(r[field], 0.0) + r["value"]
+        return sorted(d.items(), key=lambda kv: -kv[1])
+
+    sectors, industries = _group("sector"), _group("industry")
+    ws_ = [r["w"] for r in rows]
+    hhi = sum(w * w for w in ws_)
+
+    return {
+        "rows": rows, "total_value": total_value, "n": len(rows),
+        "largest": rows[0] if rows else None,
+        "top5":  sum(ws_[:5]),
+        "top10": sum(ws_[:10]),
+        "beta": port_beta, "beta_cov": beta_cov,
+        "wpe": wpe, "pe_cov": pe_cov,
+        "div_yield": div_yield,
+        "eps_growth": eps_g, "eps_cov": eps_cov,
+        "rev_growth": rev_g, "rev_cov": rev_cov,
+        "sectors": sectors, "industries": industries,
+        "hhi": hhi, "eff_n": (1.0 / hhi if hhi > 0 else None),
+        "vol": tracked["metrics"].get("Ann. Volatility"),
+        "n_days": len(tracked["curve"]),
+    }
+
+
+def _risk_observations(s, metrics):
+    """Concise, professional commentary — statements a human analyst would sign."""
+    obs = []
+    n, hhi, eff_n = s["n"], s["hhi"], s["eff_n"]
+    if hhi < 0.10 and n >= 15:
+        obs.append(f"The portfolio is well diversified: {n} positions with an "
+                   f"effective holding count of ~{eff_n:.0f} once weights are accounted for.")
+    elif hhi <= 0.18:
+        obs.append(f"Diversification is moderate: {n} positions, but weight is "
+                   f"concentrated enough that the portfolio behaves like ~{eff_n:.0f} "
+                   f"equal-sized holdings.")
+    else:
+        obs.append(f"The portfolio has elevated concentration risk: despite {n} "
+                   f"position{'s' if n != 1 else ''}, it behaves like ~{max(eff_n or 1, 1):.0f} "
+                   f"equal-sized holdings.")
+    lg = s["largest"]
+    if lg:
+        line = (f"The largest position, {lg['ticker']}, represents {lg['w']:.1%} of assets"
+                f"{' — outsized single-name exposure.' if lg['w'] > 0.25 else '.'}")
+        obs.append(line)
+    if s["top5"] > 0.60 and n > 5:
+        obs.append(f"The top 5 holdings account for {s['top5']:.1%} of the portfolio — "
+                   f"performance will be driven largely by these names.")
+    for sec, val in s["sectors"]:
+        w = val / s["total_value"] if s["total_value"] else 0
+        if w > 0.30 and sec not in ("Unknown", "Fund / ETF"):
+            obs.append(f"{sec} exposure is {w:.1%} of assets, exceeding the 30% level "
+                       f"typically treated as a sector concentration.")
+    fund_w = sum(val for sec, val in s["sectors"] if sec == "Fund / ETF")
+    if s["total_value"] and fund_w / s["total_value"] > 0.40:
+        obs.append(f"Funds/ETFs make up {fund_w / s['total_value']:.1%} of assets; "
+                   f"look-through sector exposure is broader than the single-name "
+                   f"figures above suggest.")
+    if s["beta"] is not None:
+        if s["beta"] > 1.2:
+            obs.append(f"A weighted beta of {s['beta']:.2f} implies meaningfully more "
+                       f"market sensitivity than the S&P 500.")
+        elif s["beta"] < 0.8:
+            obs.append(f"A weighted beta of {s['beta']:.2f} gives the portfolio a "
+                       f"defensive tilt relative to the S&P 500.")
+    if s["n_days"] < 63:
+        obs.append(f"Volatility and risk statistics are measured over only "
+                   f"{s['n_days']} trading days since inception and should be read "
+                   f"as indicative, not established.")
+    if s["beta_cov"] < 0.9 and s["beta"] is not None:
+        obs.append("Positions without a published beta are assumed to have β = 1.0 "
+                   "in the portfolio figure.")
+    return obs
+
+
+def _intel_insights(s):
+    """(label, commentary) pairs — what the portfolio actually looks like."""
+    rows, out = s["rows"], []
+    lg = s["largest"]
+    if lg:
+        out.append(("Position Intelligence", None))
+        out.append(("Largest holding",
+                    f"{lg['ticker']} ({lg['name']}) at {lg['w']:.1%} of the portfolio "
+                    f"(${lg['value']:,.0f})."))
+        gains = [r for r in rows if r.get("gain_pct") is not None]
+        if gains:
+            best = max(gains, key=lambda r: r["gain_pct"])
+            worst = min(gains, key=lambda r: r["gain_pct"])
+            out.append(("Best performer since inception",
+                        f"{best['ticker']} is {'up' if best['gain_pct'] >= 0 else 'down'} "
+                        f"{abs(best['gain_pct']):.1f}% since it was added."))
+            if worst is not best:
+                out.append(("Laggard",
+                            f"{worst['ticker']} is {'down' if worst['gain_pct'] < 0 else 'up only'} "
+                            f"{abs(worst['gain_pct']):.1f}% since it was added."))
+
+    out.append(("Fundamental Standouts", None))
+    def _pick(field, top=True):
+        c = [r for r in rows if r[field] is not None]
+        return (max if top else min)(c, key=lambda r: r[field]) if c else None
+    fg = _pick("rev_growth")
+    if fg and fg["rev_growth"] > 0:
+        out.append(("Fastest-growing company",
+                    f"{fg['ticker']} — revenue up {fg['rev_growth']:.1%} year over year."))
+    dp = _pick("div_yield")
+    if dp and (dp["div_yield"] or 0) > 0.001:
+        out.append(("Highest dividend payer",
+                    f"{dp['ticker']} yields {dp['div_yield']:.2%}, against a portfolio "
+                    f"yield of {s['div_yield']:.2%}."))
+    hb, db = _pick("beta"), _pick("beta", top=False)
+    if hb:
+        out.append(("Highest-beta holding",
+                    f"{hb['ticker']} (β {hb['beta']:.2f}) contributes the most market "
+                    f"sensitivity."))
+    if db and hb is not db:
+        out.append(("Most defensive holding",
+                    f"{db['ticker']} (β {db['beta']:.2f}) is the steadiest name in the book."))
+
+    out.append(("Composition", None))
+    if s["sectors"] and s["total_value"]:
+        sec, val = s["sectors"][0]
+        out.append(("Largest sector",
+                    f"{sec} at {val / s['total_value']:.1%} of assets"
+                    + (f", roughly {val / s['total_value'] * s['n']:.1f}× an equal spread "
+                       f"across this portfolio's holdings." if s["n"] > 1 else ".")))
+    if s["eff_n"] is not None:
+        out.append(("Diversification",
+                    f"{s['n']} positions behaving like ~{s['eff_n']:.0f} equal-sized "
+                    f"holdings (HHI {s['hhi']:.3f})."))
+    if s["wpe"] is not None:
+        out.append(("Valuation profile",
+                    f"Weighted P/E of {s['wpe']:.1f}× across the {s['pe_cov']:.0%} of the "
+                    f"portfolio with positive earnings."))
+    return out
+
+
+# ── Sheet 1 — Portfolio Summary ───────────────────────────────────────────────
+def _build_tp_summary(wb, name, tracked, s):
+    ws = wb.create_sheet("Portfolio_Summary")
+    m = tracked["metrics"]
+    row = _tp_title(ws, "◈ QuantWizard — Portfolio Report",
+                    [f"{name}  ·  tracked since {tracked['inception_date']}",
+                     f"Generated {datetime.now().strftime('%B %d, %Y')}  |  "
+                     f"Data: Yahoo Finance · Polygon  |  Not investment advice"])
+    for col, w in zip("ABCDEFGH", [30, 16, 3, 14, 20, 13, 4, 12]):
+        ws.column_dimensions[col].width = w
+
+    _sec_hdr(ws, row, "Portfolio Snapshot", col_end=2); row += 1
+    lg = s["largest"]
+    pairs = [
+        ("Total Portfolio Value", s["total_value"], '_($* #,##0_)'),
+        ("Number of Holdings",    s["n"], '0'),
+        ("Largest Position",      f"{lg['ticker']}  ({lg['w']:.1%})" if lg else DASH, None),
+        ("Top 5 Concentration",   s["top5"], '0.0%'),
+        ("Portfolio Beta",        s["beta"], '0.00'),
+        ("Ann. Volatility",       (s["vol"] / 100 if s["vol"] is not None else None), '0.0%'),
+        ("Dividend Yield",        s["div_yield"], '0.00%'),
+        ("Weighted P/E",          s["wpe"], '0.0"×"'),
+        ("Weighted Earnings Growth (YoY)", s["eps_growth"], '0.0%'),
+        ("Sectors Represented",   len([1 for k, _ in s["sectors"] if k != "Unknown"]), '0'),
+        ("Industries Represented", len([1 for k, _ in s["industries"] if k != "Unknown"]), '0'),
+        ("Total Return (since inception)",
+         (m.get("Total Return", 0) or 0) / 100, '+0.0%;-0.0%'),
+        ("vs S&P 500 (same money)",
+         (m["vs S&P 500"] / 100 if isinstance(m.get("vs S&P 500"), (int, float)) else None),
+         '+0.0%;-0.0%'),
+    ]
+    for label, val, fmt in pairs:
+        if isinstance(val, str):
+            _kv(ws, row, label, val)
+        else:
+            ws.cell(row=row, column=1, value=label).font = Font(name="Arial", size=10)
+            ws.cell(row=row, column=1).border = _border()
+            _num(ws, row, 2, val, fmt, bold=True)
+            if row % 2 == 0:
+                for c in (1, 2):
+                    ws.cell(row=row, column=c).fill = PatternFill("solid", fgColor=GREY_ROW)
+        row += 1
+
+    # Top holdings table — doubles as the pie chart's data range.
+    th_hdr = row + 1
+    _sec_hdr(ws, th_hdr, "Top Holdings", col_start=4, col_end=6)
+    for ci, h in enumerate(["Ticker", "Company", "Value"], 4):
+        _hdr(ws.cell(row=th_hdr + 1, column=ci, value=h), bg=MID_BLUE)
+    top = s["rows"][:8]
+    r = th_hdr + 2
+    for h in top:
+        ws.cell(row=r, column=4, value=h["ticker"]).font = Font(name="Arial", size=10, bold=True)
+        ws.cell(row=r, column=5, value=h["name"][:28]).font = Font(name="Arial", size=10)
+        _num(ws, r, 6, h["value"], '_($* #,##0_)')
+        for c in (4, 5):
+            ws.cell(row=r, column=c).border = _border()
+        if r % 2 == 0:
+            for c in (4, 5, 6):
+                ws.cell(row=r, column=c).fill = PatternFill("solid", fgColor=GREY_ROW)
+        r += 1
+    rest = s["rows"][8:]
+    if rest:
+        ws.cell(row=r, column=4, value=f"Other ({len(rest)})").font = Font(
+            name="Arial", size=10, italic=True)
+        ws.cell(row=r, column=5, value="").border = _border()
+        ws.cell(row=r, column=4).border = _border()
+        _num(ws, r, 6, sum(h["value"] for h in rest), '_($* #,##0_)')
+        r += 1
+
+    pie = PieChart()
+    pie.title = "Asset Allocation"
+    pie.height, pie.width = 9, 13
+    pie.add_data(Reference(ws, min_col=6, min_row=th_hdr + 1, max_row=r - 1),
+                 titles_from_data=True)
+    pie.set_categories(Reference(ws, min_col=4, min_row=th_hdr + 2, max_row=r - 1))
+    pie.dataLabels = DataLabelList()
+    pie.dataLabels.showPercent = True
+    ws.add_chart(pie, f"D{r + 2}")
+    ws.freeze_panes = "A4"
+
+
+# ── Sheet 2 — Holdings Analysis ───────────────────────────────────────────────
+def _build_tp_holdings(wb, s):
+    ws = wb.create_sheet("Holdings_Analysis")
+    headers = ["Ticker", "Company", "Shares", "Price", "Market Value", "Weight",
+               "Sector", "Industry", "P/E", "Rev Growth", "EPS Growth",
+               "Div Yield", "Beta"]
+    ws.append(headers)
+    _style_header_row(ws, bg=DARK_BLUE)
+
+    fmts = {3: '#,##0.00', 4: '_($* #,##0.00_)', 5: '_($* #,##0_)', 6: '0.0%',
+            9: '0.0', 10: '0.0%', 11: '0.0%', 12: '0.00%', 13: '0.00'}
+    for ri, h in enumerate(s["rows"], 2):
+        vals = [h["ticker"], h["name"][:34], h["shares"], h["last_price"], h["value"],
+                h["w"], h["sector"], h["industry"], h["pe"], h["rev_growth"],
+                h["eps_growth"], h["div_yield"], h["beta"]]
+        for ci, v in enumerate(vals, 1):
+            if ci in fmts:
+                _num(ws, ri, ci, v, fmts[ci])
+            else:
+                c = ws.cell(row=ri, column=ci, value=v)
+                c.font = Font(name="Arial", size=10, bold=(ci == 1))
+                c.border = _border()
+        if ri % 2 == 0:
+            for ci in range(1, 14):
+                ws.cell(row=ri, column=ci).fill = PatternFill("solid", fgColor=GREY_ROW)
+
+    last = ws.max_row
+    ws.conditional_formatting.add(
+        f"F2:F{last}", DataBarRule(start_type="num", start_value=0,
+                                   end_type="max", color=MID_BLUE))
+    for col in ("J", "K"):   # growth columns: red below zero, green above
+        ws.conditional_formatting.add(
+            f"{col}2:{col}{last}",
+            ColorScaleRule(start_type="min", start_color="F4CCCC",
+                           mid_type="num", mid_value=0, mid_color="FFFFFF",
+                           end_type="max", end_color="D9EAD3"))
+    _auto_width(ws, max_w=34)
+    ws.freeze_panes = "C2"
+    ws.auto_filter.ref = f"A1:M{last}"
+
+
+# ── Sheet 3 — Allocation Analysis ─────────────────────────────────────────────
+def _build_tp_allocation(wb, s):
+    ws = wb.create_sheet("Allocation_Analysis")
+    row = _tp_title(ws, "Allocation Analysis",
+                    ["By security, sector and industry — dollar value and weight"], ncols=4)
+    ws.column_dimensions["A"].width = 30
+    for col in "BC":
+        ws.column_dimensions[col].width = 15
+
+    total = s["total_value"] or 1.0
+    blocks = [
+        ("By Security", [(f"{h['ticker']} — {h['name'][:22]}", h["value"]) for h in s["rows"]]),
+        ("By Sector",   s["sectors"]),
+        ("By Industry", s["industries"]),
+    ]
+    anchors = {}
+    for title, items in blocks:
+        _sec_hdr(ws, row, title, col_end=3); row += 1
+        for ci, h in enumerate(["Name", "Value", "Weight"], 1):
+            _hdr(ws.cell(row=row, column=ci, value=h), bg=MID_BLUE)
+        hdr = row; row += 1
+        for i, (label, val) in enumerate(items):
+            top = (i == 0)   # lists arrive sorted desc — the largest gets flagged
+            c = ws.cell(row=row, column=1, value=label + ("   ◂ largest" if top else ""))
+            c.font = Font(name="Arial", size=10, bold=top)
+            c.border = _border()
+            _num(ws, row, 2, val, '_($* #,##0_)', bold=top)
+            _num(ws, row, 3, val / total, '0.0%', bold=top)
+            if top:
+                for ci in (1, 2, 3):
+                    ws.cell(row=row, column=ci).fill = PatternFill("solid", fgColor=LIGHT_BG)
+            elif row % 2 == 0:
+                for ci in (1, 2, 3):
+                    ws.cell(row=row, column=ci).fill = PatternFill("solid", fgColor=GREY_ROW)
+            row += 1
+        anchors[title] = (hdr, row - 1)
+        row += 2
+
+    sec_hdr, sec_last = anchors["By Sector"]
+    ch = BarChart(); ch.type = "col"
+    ch.title = "Sector Allocation"
+    ch.height, ch.width, ch.legend = 8, 15, None
+    ch.add_data(Reference(ws, min_col=2, min_row=sec_hdr, max_row=sec_last),
+                titles_from_data=True)
+    ch.set_categories(Reference(ws, min_col=1, min_row=sec_hdr + 1, max_row=sec_last))
+    ws.add_chart(ch, "E4")
+
+    pos_hdr, pos_last = anchors["By Security"]
+    ch2 = BarChart(); ch2.type = "bar"
+    ch2.title = "Position Weights"
+    ch2.height, ch2.width, ch2.legend = max(8, min(20, s["n"] * 0.55)), 15, None
+    ch2.add_data(Reference(ws, min_col=3, min_row=pos_hdr, max_row=pos_last),
+                 titles_from_data=True)
+    ch2.set_categories(Reference(ws, min_col=1, min_row=pos_hdr + 1, max_row=pos_last))
+    ws.add_chart(ch2, "E22")
+    ws.freeze_panes = "A4"
+
+
+# ── Sheet 4 — Risk & Diversification ──────────────────────────────────────────
+def _build_tp_risk(wb, tracked, s):
+    ws = wb.create_sheet("Risk_Diversification")
+    m = tracked["metrics"]
+    row = _tp_title(ws, "Risk & Diversification",
+                    [f"Statistics measured over {s['n_days']} trading days since "
+                     f"{tracked['inception_date']}"], ncols=4)
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 15
+    for col in "CD":
+        ws.column_dimensions[col].width = 22
+
+    _sec_hdr(ws, row, "Risk Metrics", col_end=2); row += 1
+    conc_label = ("Low" if s["hhi"] < 0.10 else "Moderate" if s["hhi"] <= 0.18 else "High")
+    lg = s["largest"]
+    pairs = [
+        ("Portfolio Beta",          s["beta"], '0.00'),
+        ("Ann. Volatility",         (s["vol"] / 100 if s["vol"] is not None else None), '0.0%'),
+        ("Sharpe Ratio",            m.get("Sharpe Ratio"), '0.00'),
+        ("Max Drawdown",            (m.get("Max Drawdown", 0) or 0) / 100, '0.0%'),
+        ("Concentration (HHI)",     s["hhi"], '0.000'),
+        ("Concentration Level",     conc_label, None),
+        ("Effective # of Holdings", s["eff_n"], '0.0'),
+        ("Largest Position",        lg["w"] if lg else None, '0.0%'),
+        ("Top 5 Concentration",     s["top5"], '0.0%'),
+        ("Top 10 Concentration",    s["top10"], '0.0%'),
+    ]
+    for label, val, fmt in pairs:
+        if isinstance(val, str):
+            _kv(ws, row, label, val)
+        else:
+            ws.cell(row=row, column=1, value=label).font = Font(name="Arial", size=10)
+            ws.cell(row=row, column=1).border = _border()
+            _num(ws, row, 2, val, fmt, bold=True)
+            if row % 2 == 0:
+                for c in (1, 2):
+                    ws.cell(row=row, column=c).fill = PatternFill("solid", fgColor=GREY_ROW)
+        row += 1
+
+    row += 1
+    _sec_hdr(ws, row, "Observations", col_end=4); row += 1
+    for i, text in enumerate(_risk_observations(s, m)):
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=1, value=f"•  {text}")
+        c.font = Font(name="Arial", size=10)
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+        if i % 2 == 1:
+            for ci in range(1, 5):
+                ws.cell(row=row, column=ci).fill = PatternFill("solid", fgColor=GREY_ROW)
+        ws.row_dimensions[row].height = max(15, 13 * (len(text) // 80 + 1))
+        row += 1
+    ws.freeze_panes = "A4"
+
+
+# ── Sheet 5 — Portfolio Intelligence ──────────────────────────────────────────
+def _build_tp_intel(wb, s):
+    ws = wb.create_sheet("Portfolio_Intelligence")
+    row = _tp_title(ws, "Portfolio Intelligence",
+                    ["What the portfolio actually looks like — generated from your "
+                     "holdings, not a template"], ncols=5)
+    ws.column_dimensions["A"].width = 28
+    for col in "BCDE":
+        ws.column_dimensions[col].width = 18
+
+    for label, text in _intel_insights(s):
+        if text is None:                      # section header row
+            _sec_hdr(ws, row, label, col_end=5)
+            row += 1
+            continue
+        c = ws.cell(row=row, column=1, value=label)
+        c.font = Font(name="Arial", size=10, bold=True)
+        c.alignment = Alignment(vertical="top")
+        c.border = _border()
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        t = ws.cell(row=row, column=2, value=text)
+        t.font = Font(name="Arial", size=10)
+        t.alignment = Alignment(wrap_text=True, vertical="top")
+        t.border = _border()
+        ws.row_dimensions[row].height = max(15, 13 * (len(text) // 70 + 1))
+        if row % 2 == 0:
+            for ci in range(1, 6):
+                ws.cell(row=row, column=ci).fill = PatternFill("solid", fgColor=GREY_ROW)
+        row += 1
+
+    row += 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
+    ws.cell(row=row, column=1,
+            value="Fundamental data: Yahoo Finance, as of report generation. Figures "
+                  "may be delayed or unavailable for some securities. For information "
+                  "only — not investment advice.").font = Font(name="Arial", size=8,
+                                                               italic=True, color="888888")
+
+
+# ── Master builder ────────────────────────────────────────────────────────────
+def build_tracked_portfolio_excel(portfolio_name, tracked, profiles):
+    """The Your Portfolios export: tracker.track_portfolio result + profiles → xlsx buffer."""
+    s = _derive_portfolio_stats(tracked, profiles)
+    wb = Workbook()
+    wb.remove(wb.active)
+    _build_tp_summary(wb, portfolio_name, tracked, s)
+    _build_tp_holdings(wb, s)
+    _build_tp_allocation(wb, s)
+    _build_tp_risk(wb, tracked, s)
+    _build_tp_intel(wb, s)
+    for name in wb.sheetnames:
+        wb[name].sheet_properties.tabColor = DARK_BLUE
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
