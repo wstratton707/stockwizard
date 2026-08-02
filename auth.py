@@ -183,10 +183,16 @@ def render_nav_control() -> None:
 
     if is_signed_in():
         with st.popover(_short_label(), use_container_width=True):
-            st.markdown(f"**{current_name()}**")
-            st.caption(current_email() or "")
+            _name  = current_name()
+            _email = current_email() or ""
+            st.markdown(f"**{_name or _email}**")
+            # Auth0 hands back the address as the display name for email+password
+            # signups, so a plain name-then-email popover printed the same string
+            # twice. Only show the address when it adds something.
+            if _email and _email != _name:
+                st.caption(_email)
             if not email_verified():
-                st.caption("Email not yet verified.")
+                st.caption("Unverified — check your inbox for the confirmation link.")
             if st.button("Sign out", key="nav_signout", use_container_width=True):
                 sign_out()
                 st.rerun()
@@ -204,6 +210,10 @@ def _short_label() -> str:
     so the chip only has to be recognisably *you*.
     """
     name = (current_name() or "").strip()
+    # Email+password signups come back with the address as the display name, so
+    # the chip would read "wstratton90@gmai…". Use the part before the @ instead.
+    if "@" in name:
+        name = name.split("@")[0]
     first = name.split()[0] if name else ""
     if not first:
         email = current_email() or ""
