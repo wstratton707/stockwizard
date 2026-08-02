@@ -45,6 +45,7 @@ URL allow-listed in Auth0.
 
 from __future__ import annotations
 
+import os
 import shutil
 import time
 from pathlib import Path
@@ -56,51 +57,97 @@ import streamlit as st
 # open to Google/Apple later without touching this code.
 PROVIDER = "auth0"
 
-# Where Render exposes a Secret File. Streamlit only ever reads
-# `.streamlit/secrets.toml` relative to the working directory, so on Render the
-# uploaded file and the path Streamlit searches never meet — the app boots with
-# no `[auth]` section and correctly reports sign-in as unconfigured.
+# ── Making `[auth]` reachable from environment variables ─────────────────────
 #
-# Env vars are not an option for this: `[auth]` is nested TOML, and Streamlit
-# copies st.secrets INTO os.environ, never the reverse.
+# Streamlit reads auth config ONLY from `.streamlit/secrets.toml`, relative to
+# the working directory. Its secrets flow is one-directional — st.secrets is
+# copied into os.environ, never the reverse — so an environment variable can
+# never become an `[auth]` key on its own, and `[auth.auth0]` is nested TOML
+# that a flat variable cannot express anyway.
 #
-# Doing this in code rather than in Render's Start Command keeps the fix in the
-# repo, where it is reviewable and survives someone editing that field.
-_RENDER_SECRET_CANDIDATES = (
-    "/etc/secrets/secrets.toml",            # Render's documented mount point
+# Hosts that have no secrets-pane hit this hard. Render exposes Secret Files
+# under /etc/secrets/, which Streamlit never looks at: the file is present,
+# correct, and completely ignored, and the app reports sign-in as unconfigured
+# while holding a valid config.
+#
+# So rather than read env vars as secrets, we WRITE the file from them at
+# import — before anything can touch st.secrets, which parses once and caches.
+# That makes ordinary environment variables the single place all config lives,
+# on every host, which is what everything else in this app already does.
+_STREAMLIT_SECRETS = Path(".streamlit/secrets.toml")
+
+# Mounted-file locations, tried before falling back to env vars so an existing
+# Render Secret File keeps working without being reconfigured.
+_MOUNTED_SECRET_CANDIDATES = (
+    "/etc/secrets/secrets.toml",             # Render's documented mount point
     "/etc/secrets/.streamlit/secrets.toml",  # if the file was named with the path
     "secrets.toml",                          # Render also drops it in the project root
 )
-_STREAMLIT_SECRETS = Path(".streamlit/secrets.toml")
+
+# All five are required — a partial config produces a button that fails at click
+# time instead of rendering as unconfigured, which is strictly worse.
+_ENV_REDIRECT_URI  = "AUTH_REDIRECT_URI"
+_ENV_COOKIE_SECRET = "AUTH_COOKIE_SECRET"
+_ENV_CLIENT_ID     = "AUTH_CLIENT_ID"
+_ENV_CLIENT_SECRET = "AUTH_CLIENT_SECRET"
+_ENV_METADATA_URL  = "AUTH_SERVER_METADATA_URL"
 
 
-def _stage_mounted_secrets() -> None:
-    """Copy a host-mounted secrets file into the path Streamlit reads.
+def _toml_str(value: str) -> str:
+    """Quote a value as a TOML basic string.
 
-    Runs at import, before anything can touch `st.secrets` — Streamlit parses
-    the file on first access and caches it, so this has to happen first.
+    Escaped rather than interpolated raw: a stray quote or backslash in a
+    generated cookie secret would otherwise produce a file that fails to parse,
+    and Streamlit reports that as no configuration at all.
+    """
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
-    No-op everywhere else: on Streamlit Cloud the Secrets pane already IS
-    `.streamlit/secrets.toml`, and locally the developer's own file is left
-    alone. Never overwrites an existing file.
+
+def _stage_secrets() -> None:
+    """Put an `[auth]` block where Streamlit will find it.
+
+    Order: an existing file wins (Streamlit Cloud's Secrets pane already IS this
+    file, and a developer's local one must not be clobbered), then a
+    host-mounted file, then environment variables.
     """
     try:
         if _STREAMLIT_SECRETS.exists():
             return
-        for candidate in _RENDER_SECRET_CANDIDATES:
+
+        for candidate in _MOUNTED_SECRET_CANDIDATES:
             src = Path(candidate)
             if src.is_file():
                 _STREAMLIT_SECRETS.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(src, _STREAMLIT_SECRETS)
                 return
+
+        env = {k: (os.environ.get(k) or "").strip() for k in (
+            _ENV_REDIRECT_URI, _ENV_COOKIE_SECRET,
+            _ENV_CLIENT_ID, _ENV_CLIENT_SECRET, _ENV_METADATA_URL)}
+        if not all(env.values()):
+            return
+
+        _STREAMLIT_SECRETS.parent.mkdir(parents=True, exist_ok=True)
+        _STREAMLIT_SECRETS.write_text(
+            "# Generated at startup from environment variables by auth.py.\n"
+            "# Do not edit — it is rebuilt on every boot and is gitignored.\n"
+            "[auth]\n"
+            f"redirect_uri = {_toml_str(env[_ENV_REDIRECT_URI])}\n"
+            f"cookie_secret = {_toml_str(env[_ENV_COOKIE_SECRET])}\n"
+            "\n"
+            f"[auth.{PROVIDER}]\n"
+            f"client_id = {_toml_str(env[_ENV_CLIENT_ID])}\n"
+            f"client_secret = {_toml_str(env[_ENV_CLIENT_SECRET])}\n"
+            f"server_metadata_url = {_toml_str(env[_ENV_METADATA_URL])}\n",
+            encoding="utf-8")
     except OSError:
-        # A read-only filesystem or a missing mount must not stop the app
-        # booting — the Sign in button degrades to disabled, as it does when
-        # nothing is configured at all.
+        # A read-only filesystem must not stop the app booting — the Sign in
+        # button degrades to disabled, exactly as when nothing is configured.
         pass
 
 
-_stage_mounted_secrets()
+_stage_secrets()
 
 
 # ── State ─────────────────────────────────────────────────────────────────────
