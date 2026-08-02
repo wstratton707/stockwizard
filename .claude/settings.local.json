@@ -4,7 +4,8 @@
       "Bash(python -c ' *)",
       "mcp__playwright__browser_evaluate",
       "mcp__playwright__browser_type",
-      "mcp__playwright__browser_resize"
+      "mcp__playwright__browser_resize",
+      "Bash(git fetch *)"
     ]
   }
 }
