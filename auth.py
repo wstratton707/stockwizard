@@ -45,7 +45,9 @@ URL allow-listed in Auth0.
 
 from __future__ import annotations
 
+import shutil
 import time
+from pathlib import Path
 
 import streamlit as st
 
@@ -53,6 +55,52 @@ import streamlit as st
 # database connections give real email+password, while still leaving the door
 # open to Google/Apple later without touching this code.
 PROVIDER = "auth0"
+
+# Where Render exposes a Secret File. Streamlit only ever reads
+# `.streamlit/secrets.toml` relative to the working directory, so on Render the
+# uploaded file and the path Streamlit searches never meet — the app boots with
+# no `[auth]` section and correctly reports sign-in as unconfigured.
+#
+# Env vars are not an option for this: `[auth]` is nested TOML, and Streamlit
+# copies st.secrets INTO os.environ, never the reverse.
+#
+# Doing this in code rather than in Render's Start Command keeps the fix in the
+# repo, where it is reviewable and survives someone editing that field.
+_RENDER_SECRET_CANDIDATES = (
+    "/etc/secrets/secrets.toml",            # Render's documented mount point
+    "/etc/secrets/.streamlit/secrets.toml",  # if the file was named with the path
+    "secrets.toml",                          # Render also drops it in the project root
+)
+_STREAMLIT_SECRETS = Path(".streamlit/secrets.toml")
+
+
+def _stage_mounted_secrets() -> None:
+    """Copy a host-mounted secrets file into the path Streamlit reads.
+
+    Runs at import, before anything can touch `st.secrets` — Streamlit parses
+    the file on first access and caches it, so this has to happen first.
+
+    No-op everywhere else: on Streamlit Cloud the Secrets pane already IS
+    `.streamlit/secrets.toml`, and locally the developer's own file is left
+    alone. Never overwrites an existing file.
+    """
+    try:
+        if _STREAMLIT_SECRETS.exists():
+            return
+        for candidate in _RENDER_SECRET_CANDIDATES:
+            src = Path(candidate)
+            if src.is_file():
+                _STREAMLIT_SECRETS.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, _STREAMLIT_SECRETS)
+                return
+    except OSError:
+        # A read-only filesystem or a missing mount must not stop the app
+        # booting — the Sign in button degrades to disabled, as it does when
+        # nothing is configured at all.
+        pass
+
+
+_stage_mounted_secrets()
 
 
 # ── State ─────────────────────────────────────────────────────────────────────
