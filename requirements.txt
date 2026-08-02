@@ -23,3 +23,7 @@ scikit-learn==1.9.0
 xgboost==3.2.0
 yfinance==1.4.1   # multi-source market data (history/quotes) via market_data.py
 anthropic==0.120.0   # Claude Haiku — grounded, source-cited AI news briefs (news_research.py)
+# REQUIRED by st.login / st.user (auth.py). Streamlit does not declare it as a
+# dependency, so without this line the app installs and starts fine and only
+# fails when someone clicks Sign in — StreamlitAuthError, at click time.
+Authlib==1.7.2
