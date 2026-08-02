@@ -1692,9 +1692,21 @@ section[data-testid="stMain"], .stMain { scroll-behavior: smooth; }
   border-left-color: var(--accent);
 }
 
-/* Below ~1560px the gutter is narrower than the rail, so it would either clip
-   off-screen or sit on top of the content. It stands down instead of covering
-   the page — the sections are all still reachable by scrolling. */
+/* Mid-width screens: the rail narrows and tucks into the whitespace that is
+   already there — the page's outer margin plus the 2.5rem container padding.
+   Nothing reflows: the content column keeps its width and the top nav still
+   spans the page. Shifting the layout to make room read as a broken page. */
 @media (max-width: 1559px) {
+  .jump-rail {
+    width: 112px;
+    left: 10px;
+  }
+  .jump-rail a { font-size: 0.66rem; padding-left: 0.7rem; }
+  .jump-rail-head { padding-left: 0.7rem; }
+}
+
+/* Under ~1400px the container padding is all that's left and the rail would
+   have to sit on the content, so it stands down. */
+@media (max-width: 1399px) {
   .jump-rail { display: none; }
 }
