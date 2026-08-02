@@ -287,8 +287,11 @@ def _technical_posture(df):
                       f"50-day MA is {'above' if up else 'below'} the 200-day MA "
                       f"({'uptrend' if up else 'downtrend'} structure)"))
     if rsi is not None:
+        # Five zones, shared with analysis.generate_summary_paragraph — the two
+        # once disagreed about the same number ("positive" here, "neutral" there).
         zone = ("overbought" if rsi > 70 else "oversold" if rsi < 30
-                else "positive momentum" if rsi >= 50 else "soft momentum")
+                else "positive momentum" if rsi > 55
+                else "neutral" if rsi >= 45 else "soft momentum")
         comps.append((max(0.0, min(1.0, (rsi - 30) / 40.0)), f"RSI is {rsi:.0f} — {zone}"))
     if macd_h is not None:
         up = macd_h > 0
@@ -375,6 +378,32 @@ def _recent_changes(df, ticker, lookback=5):
                            f"{abs(diff) * 100:.1f} pts over the last {lookback} sessions.")
 
     return bullets[:5]
+
+
+def _coerce_metric(v):
+    """('25.6%', '43.14', 1000) → typed cell value + number format.
+
+    The Monte Carlo summary arrives as display strings; writing them verbatim
+    left a column of numbers-as-text (left-aligned, green error triangles,
+    unusable in formulas). Anything that doesn't parse cleanly stays text.
+    """
+    if isinstance(v, bool) or v is None:
+        return v, None
+    if isinstance(v, (int, float)):
+        return v, ("0" if float(v).is_integer() and abs(v) >= 100 else "0.00")
+    s = str(v).strip()
+    if s.endswith("%"):
+        try:
+            return float(s[:-1].replace(",", "")) / 100, "0.0%"
+        except ValueError:
+            return v, None
+    try:
+        f = float(s.replace(",", "").replace("$", ""))
+    except ValueError:
+        return v, None
+    if f.is_integer() and abs(f) >= 100:      # counts: horizon days, simulations
+        return int(f), "0"
+    return f, '"$"#,##0.00'                   # everything else here is a price
 
 
 def _mc_plain_language(mc_summary):
@@ -489,32 +518,43 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
             cv.number_format = fmt
         if rag and isinstance(value, (int, float)):
             direction, thresh = rag
-            colour = (GREEN_OK if value > thresh else RED_BAD) if direction == "gt" \
-                     else (RED_BAD if value < thresh else GREEN_OK)
-            cv.fill = PatternFill("solid", fgColor=colour)
-            cv.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
+            # Neutral band around a zero threshold: -0.7% vs the 50-day MA was
+            # getting the same solid-red alarm as -72%. Within ±2% (or ±2 pts
+            # for point-spread cells) the cell stays unfilled.
+            band = 2.0 if (fmt and "pts" in fmt) else 0.02
+            if direction == "gt" and thresh == 0 and abs(value) <= band:
+                pass
+            else:
+                colour = (GREEN_OK if value > thresh else RED_BAD) if direction == "gt" \
+                         else (RED_BAD if value < thresh else GREEN_OK)
+                cv.fill = PatternFill("solid", fgColor=colour)
+                cv.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
         bg = GREY_ROW if row % 2 == 0 else WHITE
         for col in [1, 2]:
             c = ws.cell(row=row, column=col)
             if not c.fill or c.fill.fgColor.rgb in ("00000000", "FFFFFFFF", WHITE):
                 c.fill = PatternFill("solid", fgColor=bg)
 
+    # Plain currency, not the accounting format: in a 24-wide column the
+    # accounting '$' floats an inch left of the digits and reads unfinished.
+    USD = '"$"#,##0.00'
+
     sec_hdr(4, "Price & Performance")
-    kv(5,  "Current Price ($)",        latest["Close"],              fmt='_($* #,##0.00_)')
+    kv(5,  "Current Price ($)",        latest["Close"],              fmt=USD)
     kv(6,  "Period Return",            period_ret / 100,             fmt="0.00%", rag=("gt", 0))
-    kv(7,  "52-Week High ($)",         latest.get("52W_High"),       fmt='_($* #,##0.00_)')
-    kv(8,  "52-Week Low ($)",          latest.get("52W_Low"),        fmt='_($* #,##0.00_)')
+    kv(7,  "52-Week High ($)",         latest.get("52W_High"),       fmt=USD)
+    kv(8,  "52-Week Low ($)",          latest.get("52W_Low"),        fmt=USD)
     kv(9,  "% from 52W High",          latest.get("Pct_From_52W_High"), fmt="0.00%", rag=("gt", -0.10))
-    kv(10, "20-Day MA ($)",            latest.get("MA20"),           fmt='_($* #,##0.00_)')
-    kv(11, "50-Day MA ($)",            latest.get("MA50"),           fmt='_($* #,##0.00_)')
-    kv(12, "200-Day MA ($)",           latest.get("MA200"),          fmt='_($* #,##0.00_)')
+    kv(10, "20-Day MA ($)",            latest.get("MA20"),           fmt=USD)
+    kv(11, "50-Day MA ($)",            latest.get("MA50"),           fmt=USD)
+    kv(12, "200-Day MA ($)",           latest.get("MA200"),          fmt=USD)
     kv(13, "Price vs 50-Day MA",       latest.get("Close_vs_MA50"),  fmt="0.00%", rag=("gt", 0))
 
     if "BB_Upper" in df.columns:
         sec_hdr(15, "Bollinger Bands (20-day, 2σ)")
-        kv(16, "BB Upper ($)",  latest.get("BB_Upper"),  fmt='_($* #,##0.00_)')
-        kv(17, "BB Middle ($)", latest.get("BB_Middle"), fmt='_($* #,##0.00_)')
-        kv(18, "BB Lower ($)",  latest.get("BB_Lower"),  fmt='_($* #,##0.00_)')
+        kv(16, "BB Upper ($)",  latest.get("BB_Upper"),  fmt=USD)
+        kv(17, "BB Middle ($)", latest.get("BB_Middle"), fmt=USD)
+        kv(18, "BB Lower ($)",  latest.get("BB_Lower"),  fmt=USD)
         kv(19, "BB Width",      latest.get("BB_Width"),  fmt="0.0000")
         kv(20, "BB %B",         latest.get("BB_Pct"),    fmt="0.00%")
         risk_start = 22
@@ -637,7 +677,10 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
         row_cursor += 1
         t_ret = rel_rows[0][1]
         for name, _t, _b, diff in rel_rows:
-            kv(row_cursor, f"vs {name}", diff, fmt="+0.0%;-0.0%", rag=("gt", 0))
+            # The gap between two cumulative returns is percentage POINTS, not a
+            # return — "-151.8%" formatted as a percent reads as an impossible loss.
+            kv(row_cursor, f"vs {name} (difference)", diff * 100,
+               fmt='+0.0" pts";-0.0" pts"', rag=("gt", 0))
             row_cursor += 1
         abs_bits = [f"{ticker} {t_ret*100:+.1f}%"] + \
                    [f"{n.split(' (')[0]} {b*100:+.1f}%" for n, _t, b, _d in rel_rows]
@@ -659,7 +702,7 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
                 c.alignment = Alignment(horizontal="center" if ci > 1 else "left")
             row_cursor += 1
             for label, tr, br, diff in periods:
-                vals = [label, tr, br, diff]
+                vals = [label, tr, br, diff * 100]
                 for ci, v in enumerate(vals, 1):
                     c = ws.cell(row=row_cursor, column=ci, value=v)
                     c.font   = Font(name="Calibri", size=10,
@@ -668,7 +711,8 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
                                            else RED_BAD if ci == 4 else "000000"))
                     c.border = _border()
                     if ci > 1:
-                        c.number_format = "+0.0%;-0.0%"
+                        c.number_format = ('+0.0" pts";-0.0" pts"' if ci == 4
+                                           else "+0.0%;-0.0%")
                         c.alignment = Alignment(horizontal="right")
                 row_cursor += 1
             row_cursor += 1
@@ -743,7 +787,7 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
         else:
             kv(row_cursor, "Market-Implied FCF Growth", "Outside solvable range")
         row_cursor += 1
-        kv(row_cursor, "DCF Fair Value / Share", dcf["fair_value"], fmt='_($* #,##0.00_)')
+        kv(row_cursor, "DCF Fair Value / Share", dcf["fair_value"], fmt='"$"#,##0.00')
         row_cursor += 1
         if up is not None:
             kv(row_cursor, "Upside / Downside", up, fmt="+0.0%;-0.0%", rag=("gt", 0))
@@ -792,15 +836,35 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
     if resistance_levels or support_levels:
         sec_hdr(row_cursor, "Support & Resistance Levels")
         row_cursor += 1
-        kv(row_cursor,   "Resistance", "  |  ".join([f"${r:,.2f}" for r in (resistance_levels or [])]))
-        kv(row_cursor+1, "Support",    "  |  ".join([f"${s:,.2f}" for s in (support_levels or [])]))
-        row_cursor += 3
+
+        # Levels get their own left-aligned merged row: five joined prices
+        # right-aligned in column B clipped the leading levels clean off.
+        def _levels_row(row, label, levels):
+            lc = ws.cell(row=row, column=1, value=label)
+            lc.font, lc.border = Font(name="Calibri", size=10), _border()
+            ws.merge_cells(f"B{row}:D{row}")
+            vc = ws.cell(row=row, column=2,
+                         value="   |   ".join(f"${v:,.2f}" for v in levels) if levels else "—")
+            vc.font      = Font(name="Calibri", size=10, bold=True)
+            vc.alignment = Alignment(horizontal="left")
+            vc.border    = _border()
+
+        _levels_row(row_cursor,     "Resistance (above price)", resistance_levels or [])
+        _levels_row(row_cursor + 1, "Support (below price)",    support_levels or [])
+        row_cursor += 2
+        ws.merge_cells(f"A{row_cursor}:D{row_cursor}")
+        cap = ws.cell(row=row_cursor, column=1,
+                      value="Swing highs/lows from the last 12 months, nearest to "
+                            "the current price first.")
+        cap.font = Font(name="Calibri", size=8, italic=True, color="888888")
+        row_cursor += 2
 
     if mc_summary:
         sec_hdr(row_cursor, "Monte Carlo Forecast")
         row_cursor += 1
         for k, v in mc_summary.items():
-            kv(row_cursor, k, str(v))
+            val, vfmt = _coerce_metric(v)
+            kv(row_cursor, k, val, fmt=vfmt)
             row_cursor += 1
         mc_lines = _mc_plain_language(mc_summary)
         if mc_lines:
@@ -816,9 +880,14 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
         sec_hdr(row_cursor, "Company Information")
         row_cursor += 1
         for k, v in company_details.items():
-            if k != "Description":
-                kv(row_cursor, k, _humanize_company_value(k, v))
-                row_cursor += 1
+            if k == "Description":
+                continue
+            # Polygon has one SIC description, not a sector/industry pair —
+            # printing it twice under two labels reads as a data glitch.
+            if k == "Industry" and v == company_details.get("Sector"):
+                continue
+            kv(row_cursor, k, _humanize_company_value(k, v))
+            row_cursor += 1
         row_cursor += 1
 
     sec_hdr(row_cursor, "Automated Analysis Summary", col_end="D")
@@ -850,7 +919,8 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
                 img = XLImage(buf)
                 img.width, img.height = 130, 35
                 ws.add_image(img, f"E{row+1}")
-            ws.row_dimensions[row+1].height = 28
+            # No row-height bump: images float over the grid, and stretching
+            # rows 6/9/12/15/18 made every third KV row read double-height.
 
     return ws
 
@@ -879,6 +949,10 @@ def _build_annual_summary(wb, df):
     # figure and against this workbook's own Methodology sheet.
     _rfr = get_risk_free_rate()
 
+    # A partial current year printed as a bare "2026" reads as a full annual
+    # return; a YTD marker keeps the -31% honest.
+    _last_dt = pd.to_datetime(tmp["Date"]).max()
+
     for ri, (year, grp) in enumerate(tmp.groupby("Year"), 3):
         ret         = grp["Daily_Return"].dropna()
         yr_return   = (1 + ret).prod() - 1
@@ -886,7 +960,10 @@ def _build_annual_summary(wb, df):
         yr_vol      = ret.std() * np.sqrt(252)
         yr_sharpe   = ((ret.mean() * 252) - _rfr) / yr_vol if yr_vol else np.nan
 
-        row_vals = [year, yr_return, yr_drawdown, yr_vol, round(yr_sharpe, 2) if pd.notna(yr_sharpe) else "N/A"]
+        _ytd = (year == _last_dt.year
+                and not (_last_dt.month == 12 and _last_dt.day >= 28))
+        row_vals = [f"{year} (YTD)" if _ytd else year, yr_return, yr_drawdown,
+                    yr_vol, round(yr_sharpe, 2) if pd.notna(yr_sharpe) else "N/A"]
         bg = GREY_ROW if ri % 2 == 0 else WHITE
         for ci, val in enumerate(row_vals, 1):
             c = ws_a.cell(row=ri, column=ci, value=val)
@@ -1029,7 +1106,17 @@ def _build_news_sheet(wb, news_list):
                 c.alignment = Alignment(horizontal="center")
             if key == "Relevance":
                 c.alignment = Alignment(horizontal="center")
-    for col, w in zip("ABCDEF", (18, 74, 20, 12, 11, 50)):
+            # A real hyperlink, not a column of raw 120-char URLs.
+            if key == "URL":
+                url = item.get("URL") or ""
+                if url:
+                    c.value     = "Open article"
+                    c.hyperlink = url
+                    c.font      = Font(name="Calibri", size=10, color=MID_BLUE,
+                                       underline="single")
+                else:
+                    c.value = ""
+    for col, w in zip("ABCDEFG", (18, 74, 20, 12, 11, 11, 14)):
         ws_n.column_dimensions[col].width = w
     ws_n.freeze_panes = "A2"
     ws_n.auto_filter.ref = f"A1:{get_column_letter(len(cols))}1"
@@ -1074,18 +1161,22 @@ def _build_sector_sheet(wb, ticker, df, sector_df):
 
 
 # ── Correlation matrix sheet ──────────────────────────────────────────────────
-def _build_correlation_sheet(wb, corr_matrix):
+def _build_correlation_sheet(wb, corr_matrix, ticker=None):
     if corr_matrix is None:
         return
     ws_corr = wb.create_sheet("Correlation_Matrix")
     labels  = list(corr_matrix.columns)
+    # build_correlation_matrix labels the subject column "Stock" — show the
+    # actual ticker in the headers instead of template residue.
+    def _disp(lbl):
+        return ticker if (lbl == "Stock" and ticker) else lbl
     ws_corr.cell(row=1, column=1, value="Correlation Matrix (Daily Returns)")
     ws_corr.cell(row=1, column=1).font = Font(bold=True, size=12, color=DARK_BLUE, name="Calibri")
     ws_corr.merge_cells(f"A1:{get_column_letter(len(labels)+1)}1")
     for ci, lbl in enumerate(labels, 2):
-        _hdr_cell(ws_corr.cell(row=2, column=ci, value=lbl), bg=MID_BLUE)
+        _hdr_cell(ws_corr.cell(row=2, column=ci, value=_disp(lbl)), bg=MID_BLUE)
     for ri, lbl in enumerate(labels, 3):
-        _hdr_cell(ws_corr.cell(row=ri, column=1, value=lbl), bg=MID_BLUE)
+        _hdr_cell(ws_corr.cell(row=ri, column=1, value=_disp(lbl)), bg=MID_BLUE)
         for ci, col_lbl in enumerate(labels, 2):
             val  = corr_matrix.loc[lbl, col_lbl]
             cell = ws_corr.cell(row=ri, column=ci, value=round(float(val), 4))
@@ -1105,7 +1196,6 @@ def _build_correlation_sheet(wb, corr_matrix):
 def _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary):
     if mc_sim_df is None:
         return None, None, None
-    pct_col_start = 53
     ws_mc = wb.create_sheet("Monte_Carlo")
     ws_mc["A1"] = "Monte Carlo Simulation Summary"
     ws_mc["A1"].font = Font(bold=True, size=13, color=DARK_BLUE, name="Calibri")
@@ -1114,30 +1204,38 @@ def _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary):
     for cell in ws_mc[2]:
         _hdr_cell(cell, bg=MID_BLUE)
     for i, (k, v) in enumerate(mc_summary.items(), 3):
-        ws_mc.cell(row=i, column=1, value=k).font      = Font(name="Calibri", size=10)
-        ws_mc.cell(row=i, column=2, value=str(v)).font = Font(name="Calibri", size=10, bold=True)
-    summary_end  = 3 + len(mc_summary)
-    start_row_mc = summary_end + 2
-    ws_mc.cell(row=start_row_mc, column=1, value="Day")
-    for j in range(50):
-        ws_mc.cell(row=start_row_mc, column=j+2, value=f"Sim {j+1}")
-    for day_idx, row_data in enumerate(mc_sim_df.iloc[:, :50].itertuples(index=False)):
-        r = start_row_mc + 1 + day_idx
-        ws_mc.cell(row=r, column=1, value=day_idx)
-        for j, price in enumerate(row_data):
-            ws_mc.cell(row=r, column=j+2, value=round(price, 2)).number_format = '_($* #,##0.00_)'
-    pct_labels = ["P5 (Bear)","P25 (Low)","P50 (Median)","P75 (Bull)","P95 (Best)"]
-    ws_mc.cell(row=start_row_mc, column=pct_col_start, value="Day")
+        ws_mc.cell(row=i, column=1, value=k).font = Font(name="Calibri", size=10)
+        val, vfmt = _coerce_metric(v)
+        cv = ws_mc.cell(row=i, column=2, value=val)
+        cv.font      = Font(name="Calibri", size=10, bold=True)
+        cv.alignment = Alignment(horizontal="right")
+        if vfmt:
+            cv.number_format = vfmt
+    summary_end = 3 + len(mc_summary)
+
+    # Percentile paths only. The old sheet dumped 50 raw simulated paths under
+    # a header claiming 1,000 simulations — individual paths are noise, they
+    # tripled the file size, and the fan chart draws from percentiles anyway.
+    start_row_mc = summary_end + 3
+    cap = ws_mc.cell(row=start_row_mc - 1, column=1,
+                     value=f"Percentile price paths across all {mc_sim_df.shape[1]:,} "
+                           f"simulations — the bands the forecast chart draws.")
+    cap.font = Font(name="Calibri", size=9, italic=True, color="888888")
+    pct_labels = ["P5 (Bear)", "P25 (Low)", "P50 (Median)", "P75 (Bull)", "P95 (Best)"]
+    _hdr_cell(ws_mc.cell(row=start_row_mc, column=1, value="Day"), bg=MID_BLUE)
     for j, lbl in enumerate(pct_labels):
-        _hdr_cell(ws_mc.cell(row=start_row_mc, column=pct_col_start+j+1, value=lbl), bg=MID_BLUE)
+        _hdr_cell(ws_mc.cell(row=start_row_mc, column=j + 2, value=lbl), bg=MID_BLUE)
     for day_idx in range(len(mc_sim_df)):
         row_prices = mc_sim_df.iloc[day_idx].values
-        ws_mc.cell(row=start_row_mc+1+day_idx, column=pct_col_start, value=day_idx)
-        for j, pct in enumerate([5,25,50,75,95]):
-            ws_mc.cell(row=start_row_mc+1+day_idx, column=pct_col_start+j+1,
-                       value=round(np.percentile(row_prices, pct), 2)).number_format = '_($* #,##0.00_)'
-    ws_mc.freeze_panes = f"A{start_row_mc+1}"
-    return ws_mc, start_row_mc, pct_col_start
+        r = start_row_mc + 1 + day_idx
+        ws_mc.cell(row=r, column=1, value=day_idx)
+        for j, pct in enumerate([5, 25, 50, 75, 95]):
+            ws_mc.cell(row=r, column=j + 2,
+                       value=round(np.percentile(row_prices, pct), 2)).number_format = '"$"#,##0.00'
+    for col, w in zip("ABCDEF", (8, 13, 13, 13, 13, 13)):
+        ws_mc.column_dimensions[col].width = w
+    ws_mc.freeze_panes = f"A{start_row_mc + 1}"
+    return ws_mc, start_row_mc, 1
 
 
 # ── Chart helpers (matplotlib) ────────────────────────────────────────────────
@@ -1302,11 +1400,10 @@ def _build_fundamentals_sheet(wb, fundamentals):
     v, m, r, l, g = f["valuation"], f["margins"], f["returns"], f["leverage"], f["growth"]
     q, fc = f.get("quality", {}), f.get("fcf", {})
 
-    def _fmt(x, suffix=""):
-        return f"{x}{suffix}" if x is not None else "N/A"
-
-    def _bn(x):
-        return f"${x/1e9:,.1f}B" if isinstance(x, (int, float)) else "N/A"
+    def _pctv(x):
+        # compute_fundamentals returns percents as 4.9-style numbers; Excel's
+        # percent format wants the fraction.
+        return x / 100 if isinstance(x, (int, float)) else None
 
     row = 1
     tc = ws.cell(row=row, column=1,
@@ -1316,51 +1413,68 @@ def _build_fundamentals_sheet(wb, fundamentals):
     row += 2
 
     def section(title, pairs):
+        # (label, value, number_format) triples. Values are written as real
+        # numbers — the old string cells ("20.55x", "$2.2B") could not be
+        # referenced, sorted or charted, and Excel flagged every one.
         nonlocal row
         for col in (1, 2):
             c = ws.cell(row=row, column=col, value=title if col == 1 else None)
             c.font = Font(bold=True, color=WHITE, name="Calibri", size=11)
             c.fill = PatternFill("solid", fgColor=DARK_BLUE)
         row += 1
-        for lbl, val in pairs:
+        for lbl, val, vfmt in pairs:
             cl = ws.cell(row=row, column=1, value=lbl)
-            cv = ws.cell(row=row, column=2, value=val)
-            cl.font, cv.font = Font(name="Calibri", size=10), Font(name="Calibri", size=10, bold=True)
+            cv = ws.cell(row=row, column=2, value="N/A" if val is None else val)
+            cl.font = Font(name="Calibri", size=10)
+            cv.font = Font(name="Calibri", size=10, bold=True,
+                           color="999999" if val is None else "000000")
+            cv.alignment = Alignment(horizontal="right")
             cl.border = cv.border = _border()
+            if val is not None and vfmt and isinstance(val, (int, float)):
+                cv.number_format = vfmt
             if row % 2 == 0:
                 cl.fill = cv.fill = PatternFill("solid", fgColor=GREY_ROW)
             row += 1
         row += 1
 
     _ig = f.get("implied_growth")
+    X   = '0.00"x"'
+    BN  = '"$"#,##0.0,,,"B"'
     section("Valuation", [
-        ("P/E", _fmt(v["pe"], "x")), ("P/S", _fmt(v["ps"], "x")), ("P/B", _fmt(v["pb"], "x")),
-        ("EV / EBITDA", _fmt(f.get("ev_ebitda"), "x")),
-        ("Earnings Yield", _fmt(v["earnings_yield"], "%")),
-        ("FCF Yield", _fmt(fc.get("fcf_yield"), "%")),
+        ("P/E", v["pe"], X), ("P/S", v["ps"], X), ("P/B", v["pb"], X),
+        ("EV / EBITDA", f.get("ev_ebitda"), X),
+        ("Earnings Yield", _pctv(v["earnings_yield"]), "0.0%"),
+        ("FCF Yield", _pctv(fc.get("fcf_yield")), "0.0%"),
         # Labelled by BASIS, not just as "reverse-DCF implied growth". The
         # Valuation sheet carries a different implied-growth figure — solved
         # against free cash flow at the company's own CAPM WACC — and the two
         # legitimately disagree (net income is not cash, and 9% is not this
         # company's cost of capital). Presenting them under the same name made
         # them look like one number that couldn't make up its mind.
-        ("Implied growth — earnings basis, flat 9% discount",
-         _fmt(round(_ig * 100, 1) if _ig is not None else None, "%")),
-        ("  (cross-check only; the headline reverse DCF is on the Valuation sheet)", ""),
+        ("Implied growth — earnings basis, flat 9% discount", _ig, "0.0%"),
+        ("  (cross-check only; the headline reverse DCF is on the Valuation sheet)", "", None),
     ])
     section("Profitability & Returns", [
-        ("Gross Margin", _fmt(m["gross"], "%")), ("Operating Margin", _fmt(m["operating"], "%")),
-        ("Net Margin", _fmt(m["net"], "%")), ("Return on Equity", _fmt(r["roe"], "%")),
-        ("Return on Assets", _fmt(r["roa"], "%")), ("Free Cash Flow", _bn(fc.get("fcf"))),
+        ("Gross Margin", _pctv(m["gross"]), "0.0%"),
+        ("Operating Margin", _pctv(m["operating"]), "0.0%"),
+        ("Net Margin", _pctv(m["net"]), "0.0%"),
+        ("Return on Equity", _pctv(r["roe"]), "0.0%"),
+        ("Return on Assets", _pctv(r["roa"]), "0.0%"),
+        ("Free Cash Flow", fc.get("fcf"), BN),
     ])
     section("Growth", [
-        ("Revenue YoY", _fmt(g["revenue_yoy"], "%")), ("EPS YoY", _fmt(g["eps_yoy"], "%")),
-        ("Revenue CAGR", _fmt(g["revenue_cagr"], "%")), ("EPS CAGR", _fmt(g["eps_cagr"], "%")),
+        ("Revenue YoY", _pctv(g["revenue_yoy"]), "0.0%"),
+        ("EPS YoY", _pctv(g["eps_yoy"]), "0.0%"),
+        ("Revenue CAGR", _pctv(g["revenue_cagr"]), "0.0%"),
+        ("EPS CAGR", _pctv(g["eps_cagr"]), "0.0%"),
     ])
     section("Balance Sheet & Quality", [
-        ("Current Ratio", _fmt(l["current_ratio"])), ("Debt / Equity", _fmt(l["debt_to_equity"])),
-        ("Piotroski F-Score", f"{q['f_score']} / 9" if q.get("f_score") is not None else "N/A"),
-        ("Altman Z-Score", f"{q['z_score']} ({q['z_zone']})" if q.get("z_score") is not None else "N/A"),
+        ("Current Ratio", l["current_ratio"], "0.00"),
+        ("Debt / Equity", l["debt_to_equity"], "0.00"),
+        ("Piotroski F-Score",
+         f"{q['f_score']} / 9" if q.get("f_score") is not None else None, None),
+        ("Altman Z-Score",
+         f"{q['z_score']} ({q['z_zone']})" if q.get("z_score") is not None else None, None),
     ])
 
     t = f.get("trend", {})
@@ -1381,6 +1495,8 @@ def _build_fundamentals_sheet(wb, fundamentals):
                              value=(round(x / 1e9, 1) if isinstance(x, (int, float)) else "—"))
                 cc.font = Font(name="Calibri", size=10)
                 cc.border = _border()
+                if isinstance(x, (int, float)):
+                    cc.number_format = "0.0"
             ws.cell(row=row, column=1).border = _border()
             row += 1
 
@@ -1546,8 +1662,10 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
     # ── 2. Conclusion — fair value vs price (live off the bridge below) ───────
     sec(R_CONC_SEC, "Conclusion — Fair Value vs Price")
     up = dcf.get("upside")
+    # The note must not start with "=" — openpyxl stores it as a formula and
+    # Excel renders a visible #NAME? error next to the headline fair value.
     kv2(R_FV, "Base-case fair value / share", f"=B{R_EQ}/B{R_SH}", fmt=FMT_USD,
-        note="= equity value ÷ shares, both computed below")
+        note="Equity value ÷ shares, both computed below")
     kv2(R_PX, "Current price", f"=B{R_P}", fmt=FMT_USD)
     kv2(R_UP, "Upside / downside", f'=IF(B{R_PX}=0,"",B{R_FV}/B{R_PX}-1)',
         fmt=FMT_SIGNED)
@@ -1562,6 +1680,9 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
     vc.fill      = PatternFill("solid", fgColor=vcol)
     vc.alignment = Alignment(horizontal="right")
     ws.cell(row=R_VERD, column=1).border = vc.border = _border()
+    # "Fairly valued vs DCF" is wider than one 14-char column — unmerged it
+    # rendered as "irly valued vs DCF".
+    ws.merge_cells(f"B{R_VERD}:C{R_VERD}")
 
     # ── 3. Scenarios — with the market itself as the fourth row ──────────────
     sec(R_SCN_SEC, "Scenarios — and What the Market Is Assuming")
@@ -1683,7 +1804,8 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
             cv.fill = PatternFill("solid", fgColor="D6E4F0")
 
     # ── 7. Sensitivity grid — green above today's price, red below ────────────
-    sec(R_SENS_SEC, "Sensitivity — Fair Value / Share  (WACC × Terminal Growth)")
+    sec(R_SENS_SEC, "Sensitivity — Fair Value / Share  (WACC × Terminal Growth)"
+                    "  ·  snapshot computed at generation")
     sens   = dcf.get("sensitivity") or {}
     w_axis = sens.get("wacc_axis") or []
     tg_axis = sens.get("tg_axis") or []
@@ -1875,7 +1997,7 @@ def build_excel(ticker, df, period,
     _build_news_sheet(wb, news_list)
     _build_peer_sheet(wb, peer_df)
     ws_s       = _build_sector_sheet(wb, ticker, df, sector_df)
-    _build_correlation_sheet(wb, corr_matrix)
+    _build_correlation_sheet(wb, corr_matrix, ticker)
     ws_mc_data = _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary)
     _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=df)
     _build_valuation_sheet(wb, ticker, dcf, fundamentals)

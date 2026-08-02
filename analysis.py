@@ -730,21 +730,40 @@ def compute_scorecard(fundamentals=None, dcf=None, momentum_score=None,
     }
 
 
-def detect_support_resistance(df, window=20, num_levels=5):
+def detect_support_resistance(df, window=20, num_levels=5, lookback=252,
+                              max_dist=0.40):
+    """(resistance, support) levels, classified against the CURRENT price.
+
+    The old version scanned the full history and split by swing type, so on a
+    5-year chart of a stock in a deep decline every 2021-era swing printed —
+    NKE at $43 showed "support" at $165 — and a swing low far above today's
+    price is not support in any usable sense. Levels now come from the recent
+    window only, split by position vs spot (above = resistance, below =
+    support), drop anything further than `max_dist` from the price, and are
+    ordered nearest-first.
+    """
+    if lookback and len(df) > lookback:
+        df = df.tail(lookback)
     highs = df["High"].values
     lows  = df["Low"].values
+    close = float(df["Close"].iloc[-1])
     n     = len(highs)
-    resistance, support = [], []
+    levels = []
     for i in range(window, n - window):
         if highs[i] == max(highs[i - window: i + window + 1]):
-            resistance.append(round(float(highs[i]), 2))
+            levels.append(round(float(highs[i]), 2))
         if lows[i] == min(lows[i - window: i + window + 1]):
-            support.append(round(float(lows[i]), 2))
+            levels.append(round(float(lows[i]), 2))
 
-    def cluster(levels, tol=0.01):
-        levels = sorted(set(levels), reverse=True)
+    resistance = sorted(lv for lv in set(levels)
+                        if close < lv <= close * (1 + max_dist))
+    support    = sorted((lv for lv in set(levels)
+                         if close * (1 - max_dist) <= lv < close), reverse=True)
+
+    def cluster(ordered, tol=0.01):
+        # Nearest-to-price first on input, so each cluster keeps its nearest level.
         clustered = []
-        for lv in levels:
+        for lv in ordered:
             if not clustered or abs(lv - clustered[-1]) / max(clustered[-1], 1) > tol:
                 clustered.append(lv)
         return clustered[:num_levels]
@@ -1022,11 +1041,16 @@ def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, 
                     if latest["Close"] > latest["MA50"]
                     else "below its 50-day moving average — cautionary")
 
+    # Same five zones as excel_builder._technical_posture — the dashboard bullet
+    # and this paragraph once read the same RSI 51 as "positive momentum" and
+    # "neutral territory" in one workbook.
     rsi_str = ""
     if pd.notna(rsi):
-        if   rsi > 70: rsi_str = f"RSI {rsi:.0f} — overbought territory"
-        elif rsi < 30: rsi_str = f"RSI {rsi:.0f} — oversold territory"
-        else:          rsi_str = f"RSI {rsi:.0f} — neutral territory"
+        if   rsi > 70:  rsi_str = f"RSI {rsi:.0f} — overbought territory"
+        elif rsi < 30:  rsi_str = f"RSI {rsi:.0f} — oversold territory"
+        elif rsi > 55:  rsi_str = f"RSI {rsi:.0f} — positive momentum"
+        elif rsi >= 45: rsi_str = f"RSI {rsi:.0f} — neutral territory"
+        else:           rsi_str = f"RSI {rsi:.0f} — soft momentum"
 
     w52h = latest.get("52W_High", np.nan)
     w52l = latest.get("52W_Low", np.nan)

@@ -138,9 +138,18 @@ def main():
     except Exception:
         corr = None
     try:
-        support, resistance = detect_support_resistance(df)
+        # Returns (resistance, support) — this unpack was swapped, which is how
+        # the published sample showed "support" levels ABOVE the resistance ones.
+        resistance, support = detect_support_resistance(df)
     except Exception:
         support, resistance = None, None
+    try:
+        # Without this the flagship sample silently drops the Analyst Consensus
+        # section the live app includes. Degrades to None if no Finnhub key.
+        from market_data import get_analyst_data
+        analyst = get_analyst_data(tk) or None
+    except Exception:
+        analyst = None
 
     ret = df["Daily_Return"].dropna()
     ann_ret = ret.mean() * 252
@@ -160,7 +169,7 @@ def main():
         news_list=news, peer_df=peers, corr_matrix=corr,
         resistance_levels=resistance, support_levels=support,
         summary_text=summary, bar_size="day",
-        fundamentals=fundamentals, dcf=dcf,
+        fundamentals=fundamentals, dcf=dcf, analyst_data=analyst,
     )
 
     out_dir = ROOT / "static"

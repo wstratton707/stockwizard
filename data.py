@@ -191,17 +191,22 @@ def fetch_company_details(ticker, api_key, log=print):
     if not data:
         return {}
     r = data.get("results", {})
+    # Polygon's sic_description arrives ALL-CAPS ("RUBBER & PLASTICS FOOTWEAR")
+    # and reads like a data glitch in client-facing reports; locale is lowercase.
+    _sic = r.get("sic_description") or "N/A"
+    if _sic.isupper():
+        _sic = _sic.title()
     return {
         "Ticker":      ticker,
         "Name":        r.get("name", "N/A"),
-        "Sector":      r.get("sic_description", "N/A"),
-        "Industry":    r.get("sic_description", "N/A"),
+        "Sector":      _sic,
+        "Industry":    _sic,
         "Exchange":    r.get("primary_exchange", "N/A"),
         "Market Cap":  r.get("market_cap", "N/A"),
         "Employees":   r.get("total_employees", "N/A"),
         "Description": r.get("description", "N/A"),
         "Website":     r.get("homepage_url", "N/A"),
-        "Country":     r.get("locale", "N/A"),
+        "Country":     (r.get("locale") or "N/A").upper(),
     }
 
 
