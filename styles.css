@@ -1614,3 +1614,87 @@ button[kind^="primary"]:active,
   .pf-stat:nth-child(3) { padding-left: 0; }
   .page-head-title { font-size: 1.7rem; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ANALYSIS JUMP RAIL — fixed "on this page" nav
+   The Analysis page is one long scroll of ~14 sections. This is the standing
+   index for it: a hairline rule in the left gutter, small-caps labels, and an
+   accent bar marking where you are. Deliberately not a card — it indexes the
+   page, it isn't content of its own.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Anchors sit on the section headers themselves, so the only offset needed is
+   clearance for the sticky top nav. */
+.section-header[id],
+.stock-hero[id],
+.jump-anchor { scroll-margin-top: 96px; }
+
+/* Target for sections with no visible header (price chart, downloads). Zero
+   height, and the negative margin cancels the one extra vertical-block gap
+   Streamlit would otherwise add for the element. */
+.jump-anchor { display: block; height: 0; }
+[data-testid="stElementContainer"]:has(.jump-anchor) {
+  height: 0 !important;
+  min-height: 0 !important;
+  margin-bottom: -1rem !important;
+}
+
+/* Streamlit scrolls its main section, not the window, so smooth behaviour has
+   to be set there as well as on the document. */
+html, body,
+section[data-testid="stMain"], .stMain { scroll-behavior: smooth; }
+
+.jump-rail {
+  position: fixed;
+  z-index: 900;
+  top: 50%;
+  transform: translateY(-50%);
+  /* Parks in the gutter beside the 1200px content column. The max() is a floor:
+     without it, between the breakpoint and ~1560px the computed offset goes
+     negative and the labels get clipped off the left edge of the screen. */
+  left: max(12px, calc((100vw - 1200px) / 2 - 172px));
+  width: 152px;
+  max-height: 78vh;
+  overflow-y: auto;
+  font-family: var(--font-sans);
+  border-left: 1px solid var(--border);
+  scrollbar-width: none;
+}
+.jump-rail::-webkit-scrollbar { display: none; }
+
+.jump-rail-head {
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 0 0 0.6rem 0.9rem;
+}
+
+.jump-rail a {
+  display: block;
+  padding: 0.33rem 0 0.33rem 0.9rem;
+  margin-left: -1px;                    /* sit the marker on the rail's rule */
+  border-left: 2px solid transparent;
+  font-size: 0.71rem;
+  line-height: 1.35;
+  color: var(--muted);
+  text-decoration: none !important;
+  transition: color 0.13s ease, border-color 0.13s ease;
+}
+.jump-rail a:hover {
+  color: var(--text);
+  border-left-color: var(--border2);
+}
+.jump-rail a.is-active {
+  color: var(--accent);
+  font-weight: 600;
+  border-left-color: var(--accent);
+}
+
+/* Below ~1560px the gutter is narrower than the rail, so it would either clip
+   off-screen or sit on top of the content. It stands down instead of covering
+   the page — the sections are all still reachable by scrolling. */
+@media (max-width: 1559px) {
+  .jump-rail { display: none; }
+}

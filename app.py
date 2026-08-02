@@ -338,6 +338,86 @@ def _goto(pg):
     st.query_params["page"] = pg
     st.rerun()
 
+
+# ── Analysis jump rail ────────────────────────────────────────────────────────
+# The Analysis page is one long scroll of ~14 sections, and which ones exist
+# depends on the asset (crypto / ETF / stock) and the module checkboxes. So the
+# rail is built from the sections that actually rendered rather than a fixed
+# list, which would link to anchors that aren't on the page. Streamlit re-runs
+# this module top-to-bottom on every interaction, so the list resets itself.
+_NAV_SECTIONS = []          # [(anchor_id, rail_label)]
+
+
+def _sec_id(aid, label):
+    """Register a section in the jump rail; returns its id attribute.
+
+    Called inline inside the existing section-header markup so no extra DOM
+    node is introduced and the header spacing is untouched.
+    """
+    _NAV_SECTIONS.append((aid, label))
+    return f' id="{aid}"'
+
+
+def _jump_anchor(aid, label):
+    """Scroll target for a section that has no visible header of its own."""
+    _NAV_SECTIONS.append((aid, label))
+    st.markdown(f'<div class="jump-anchor" id="{aid}"></div>', unsafe_allow_html=True)
+
+
+_JUMP_SPY_JS = """
+<script>
+(function () {
+  var P = window.parent, D = P.document, tries = 0;
+  function scroller() {
+    return D.querySelector('section[data-testid="stMain"]')
+        || D.querySelector('.stMain') || D.scrollingElement;
+  }
+  function init() {
+    var rail = D.querySelector('.jump-rail');
+    if (!rail) return false;
+    var links = Array.prototype.slice.call(rail.querySelectorAll('a[data-jump]'));
+    if (!links.length) return false;
+    var sc = scroller(), host = (sc === D.scrollingElement) ? P : sc;
+    function sync() {
+      var cur = null;
+      links.forEach(function (a) {
+        var el = D.getElementById(a.getAttribute('data-jump'));
+        if (el && el.getBoundingClientRect().top <= 160) cur = a;
+      });
+      if (!cur) cur = links[0];
+      links.forEach(function (a) { a.classList.toggle('is-active', a === cur); });
+    }
+    // The scroll container survives Streamlit re-runs but this iframe does not,
+    // so drop the previous handler or they stack up one per re-run.
+    if (sc.__qwJumpSync) host.removeEventListener('scroll', sc.__qwJumpSync);
+    sc.__qwJumpSync = sync;
+    host.addEventListener('scroll', sync, { passive: true });
+    P.addEventListener('resize', sync, { passive: true });
+    sync();
+    return true;
+  }
+  var iv = setInterval(function () {
+    if (init() || ++tries > 60) clearInterval(iv);
+  }, 200);
+})();
+</script>
+"""
+
+
+def _render_jump_rail():
+    """Fixed left-hand section nav for the Analysis results."""
+    if not _NAV_SECTIONS:
+        return
+    items = "".join(f'<a href="#{aid}" data-jump="{aid}">{label}</a>'
+                    for aid, label in _NAV_SECTIONS)
+    st.markdown(f'<nav class="jump-rail" aria-label="On this page">'
+                f'<div class="jump-rail-head">On this page</div>{items}</nav>',
+                unsafe_allow_html=True)
+    # Streamlit strips <script> from st.markdown, so the scroll-spy has to run
+    # from a components iframe reaching into the parent document. It only sets
+    # the active class — if it never initialises, the links still jump.
+    st.components.v1.html(_JUMP_SPY_JS, height=0)
+
 with st.container(key="topnav"):
     # Brand (left) · flexible spacer · nav links · sign-in control (far right).
     # The trailing column is the account control; it sits outside the page-link
@@ -1853,7 +1933,7 @@ elif _page == "analysis":
             # NOTE: HTML below is intentionally flush-left. Streamlit's markdown
             # parser treats 4+ space-indented lines as code blocks, which would
             # leak literal </div> text into the page. Do not re-indent.
-            st.markdown(f"""<div class="stock-hero">
+            st.markdown(f"""<div class="stock-hero"{_sec_id("sec-snapshot", "Snapshot")}>
 <div class="stock-hero-top">
 <div class="stock-hero-id">
 <div class="stock-hero-symbol">{ticker_input}</div>
@@ -1966,7 +2046,8 @@ elif _page == "analysis":
                     _vdata = _cached_valuation(ticker_input)
                 if _vdata:
                     st.markdown(
-                        '<div class="section-header">Valuation Lens '
+                        f'<div class="section-header"'
+                        f'{_sec_id("sec-valuation", "Valuation Lens")}>Valuation Lens '
                         '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
                         'text-transform:none;font-size:0.7rem">· price vs. earnings-justified fair value</span></div>',
                         unsafe_allow_html=True)
@@ -2069,7 +2150,8 @@ elif _page == "analysis":
                 _rec, _earn = _adata.get("recommendation"), _adata.get("earnings")
                 if _rec or _earn:
                     st.markdown(
-                        '<div class="section-header">Analyst View '
+                        f'<div class="section-header"'
+                        f'{_sec_id("sec-analyst", "Analyst View")}>Analyst View '
                         '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
                         'text-transform:none;font-size:0.7rem">· Wall Street consensus via Finnhub</span></div>',
                         unsafe_allow_html=True)
@@ -2148,7 +2230,8 @@ elif _page == "analysis":
                     _n_yrs = len(_fin_raw["income_statement"]) if isinstance(_fin_raw, dict) and _fin_raw.get("income_statement") is not None else 0
                     _hist  = f"{_n_yrs}-yr history · " if _n_yrs > 1 else ""
                     st.markdown(
-                        f'<div class="section-header">Fundamentals &amp; Valuation '
+                        f'<div class="section-header"'
+                        f'{_sec_id("sec-fundamentals", "Fundamentals")}>Fundamentals &amp; Valuation '
                         f'<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
                         f'text-transform:none;font-size:0.7rem">· {_hist}FY ending {fund["as_of"]} '
                         f'· {fund.get("source", "Polygon")}</span></div>',
@@ -2375,7 +2458,8 @@ elif _page == "analysis":
                         return f"{x:,.0f}"
 
                     st.markdown(
-                        '<div class="section-header">What&rsquo;s Priced In '
+                        f'<div class="section-header"'
+                        f'{_sec_id("sec-priced-in", "What’s Priced In")}>What&rsquo;s Priced In '
                         '<span style="font-weight:500;color:var(--dim);letter-spacing:0;'
                         'text-transform:none;font-size:0.7rem">'
                         '· two-stage discounted free cash flow</span></div>',
@@ -2665,7 +2749,9 @@ color:var(--muted);background:var(--surface2)}
                 meta     = etf_details.get("meta", {})
                 holdings = etf_details.get("holdings", [])
                 if meta or holdings:
-                    st.markdown('<div class="section-header">ETF Profile</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="section-header"'
+                                f'{_sec_id("sec-etf", "ETF Profile")}>ETF Profile</div>',
+                                unsafe_allow_html=True)
                     if meta:
                         mc1, mc2, mc3, mc4 = st.columns(4)
                         for col, lbl, val in [
@@ -2727,7 +2813,9 @@ color:var(--muted);background:var(--surface2)}
 
             # ── Crypto Market Data Panel ──────────────────────────────────────
             if is_crypto and crypto_details:
-                st.markdown('<div class="section-header">Market Data</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="section-header"'
+                            f'{_sec_id("sec-market-data", "Market Data")}>Market Data</div>',
+                            unsafe_allow_html=True)
                 cc1, cc2, cc3, cc4, cc5, cc6 = st.columns(6)
                 mc_usd   = crypto_details.get("market_cap_usd", 0)
                 vol_24h  = crypto_details.get("volume_24h", 0)
@@ -2773,7 +2861,9 @@ color:var(--muted);background:var(--surface2)}
             # ── Chart customization controls ──────────────────────────────────
             # Wider columns + shorter labels so nothing wraps awkwardly. The
             # main "Price Chart" heading is removed since the controls speak
-            # for themselves.
+            # for themselves — the jump rail still needs a target, hence the
+            # zero-height anchor rather than a heading.
+            _jump_anchor("sec-chart", "Price Chart")
             _ctrl1, _ctrl2, _ctrl3, _ctrl4, _ctrl5, _ctrl6, _ctrl7 = \
                 st.columns([1.6, 0.7, 0.7, 0.8, 0.8, 0.6, 0.9])
             with _ctrl1:
@@ -2981,6 +3071,7 @@ color:var(--muted);background:var(--surface2)}
             if "BB_Upper" in df.columns: _ind_opts.append("Bollinger")
             _ind_view = "None"
             if len(_ind_opts) > 1:
+                _jump_anchor("sec-indicator", "Indicators")
                 st.markdown('<div class="field-label" style="margin-top:0.5rem">Indicator</div>',
                             unsafe_allow_html=True)
                 _ind_view = st.radio("Indicator", _ind_opts, horizontal=True,
@@ -3074,7 +3165,9 @@ color:var(--muted);background:var(--surface2)}
             if mc_summary:
                 _is_custom = forecast_method == "Custom Forecast"
                 _header    = "Custom Forecast" if _is_custom else "Monte Carlo Forecast"
-                st.markdown(f'<div class="section-header">{_header}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="section-header"'
+                            f'{_sec_id("sec-forecast", "Forecast")}>{_header}</div>',
+                            unsafe_allow_html=True)
 
                 # ── Metric cards — row 1: price scenarios ─────────────────────
                 _r1 = st.columns(5)
@@ -3219,7 +3312,9 @@ color:var(--muted);background:var(--surface2)}
                             </div>
                         </div>""", unsafe_allow_html=True)
 
-            st.markdown('<div class="section-header">Volume</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="section-header"'
+                        f'{_sec_id("sec-volume", "Volume")}>Volume</div>',
+                        unsafe_allow_html=True)
             vol_colors = [ct.color.positive if r >= 0 else ct.color.negative
                           for r in df["Daily_Return"].fillna(0)]
             fig_vol = go.Figure()
@@ -3245,7 +3340,9 @@ color:var(--muted);background:var(--surface2)}
             st.plotly_chart(fig_vol, use_container_width=True)
 
             if corr_matrix is not None:
-                st.markdown('<div class="section-header">Correlation Matrix</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="section-header"'
+                            f'{_sec_id("sec-correlation", "Correlation")}>Correlation Matrix</div>',
+                            unsafe_allow_html=True)
                 fig_corr = px.imshow(
                     corr_matrix,
                     text_auto=".2f",
@@ -3281,13 +3378,16 @@ color:var(--muted);background:var(--surface2)}
                 st.plotly_chart(fig_corr, use_container_width=True)
 
             if not is_crypto:
-                st.markdown('<div class="section-header">News &amp; Research '
+                st.markdown(f'<div class="section-header"'
+                            f'{_sec_id("sec-news", "News & Research")}>News &amp; Research '
                             '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
                             'text-transform:none;font-size:0.7rem">· multi-source, theme-tagged'
                             ', AI-briefed</span></div>', unsafe_allow_html=True)
                 _render_stock_news(ticker_input, company_details.get("Name"))
             elif news_list:
-                st.markdown('<div class="section-header">Recent News</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="section-header"'
+                            f'{_sec_id("sec-news", "Recent News")}>Recent News</div>',
+                            unsafe_allow_html=True)
                 for item in news_list[:8]:
                     st.markdown(f"""
                     <div style="padding:0.6rem 0;border-bottom:1px solid #e2e8f0">
@@ -3301,7 +3401,9 @@ color:var(--muted);background:var(--surface2)}
                     </div>""", unsafe_allow_html=True)
 
             if peer_df is not None and not peer_df.empty:
-                st.markdown('<div class="section-header">Peer Comparison</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="section-header"'
+                            f'{_sec_id("sec-peers", "Peer Comparison")}>Peer Comparison</div>',
+                            unsafe_allow_html=True)
 
                 # `_chart_layout` used to be defined here and was never applied to
                 # anything — every peer chart below re-specified its layout inline.
@@ -3470,7 +3572,12 @@ color:var(--muted);background:var(--surface2)}
             # (The plain-English summary is now surfaced as "The Bottom Line" up
             # top, right under the key metrics — no need to repeat it here.)
             st.markdown("---")
+            _jump_anchor("sec-report", "Download Report")
             _stock_exports("bottom")
+
+            # Rendered last so it lists exactly the sections this run produced;
+            # it is position:fixed, so where it sits in the DOM doesn't matter.
+            _render_jump_rail()
 
         st.markdown(render_section("Data & Methodology", _disc.DIVIDENDS), unsafe_allow_html=True)
         st.markdown(render_inline(_disc.SHORT), unsafe_allow_html=True)
