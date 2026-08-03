@@ -784,8 +784,29 @@ def build_correlation_matrix(df, benchmark_tickers=None):
 def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print, seed=42):
     log(f"Monte Carlo: {n_simulations:,} paths x {forecast_days} trading days...")
     returns    = df["Daily_Return"].dropna()
-    mu, sigma  = returns.mean(), returns.std()
+    sigma      = returns.std()
     last_price = df["Close"].iloc[-1]
+
+    # Drift is CAPM (Rf + beta x ERP), NOT the trailing mean return.
+    #
+    # The trailing mean extrapolates whatever the window happened to do, so a
+    # stock that just fell 47% was projected to keep falling: NFLX came out at a
+    # median of $43 against a $72 price and an 8% probability of gain, in the
+    # same report where the analyst section read Strong Buy. That is not a
+    # forecast, it is the last year replayed, and it made the product contradict
+    # itself. CAPM asks the defensible question instead — if this name earns its
+    # cost of equity, what spread of outcomes does its own volatility imply? —
+    # and matches the basis the portfolio engine already uses.
+    #
+    # Volatility stays empirical: that part the window does measure honestly.
+    _beta = None
+    for _bcol in ("SPY_Return", "QQQ_Return"):
+        if _bcol in df.columns:
+            _beta = market_beta(returns, df[_bcol])
+            if _beta is not None:
+                break
+    ann_mu = cost_of_equity(_beta if _beta is not None else 1.0)
+    mu     = ann_mu / 252.0
     # Seeded local generator, matching the portfolio Monte Carlo and the efficient
     # frontier. Drawing from global numpy state meant the same ticker over the same
     # window produced a different P5/P50/P95 on every run — two reports generated
@@ -812,6 +833,8 @@ def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print, seed=4
         "Best Case (P95)":         round(pcts[4], 2),
         "Prob. of Gain":           f"{(fp > last_price).mean()*100:.1f}%",
         "Ann. Volatility":         f"{sigma * np.sqrt(252) * 100:.2f}%",
+        "Expected Return (CAPM)":  f"{ann_mu * 100:.1f}%",
+        "Beta (vs benchmark)":     (round(float(_beta), 2) if _beta is not None else "1.00 (assumed)"),
     }
     log(f"   P5 ${summary['Bear Case (P5)']:,.2f}  "
         f"P50 ${summary['Median (P50)']:,.2f}  "

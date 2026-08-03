@@ -3027,6 +3027,20 @@ color:var(--muted);background:var(--surface2)}
                     borderpad=4,
                 )
 
+            # A button earns its place only if it shows LESS than the whole
+            # series; otherwise it is "All" under another name.
+            _span_days = (pd.to_datetime(df["Date"].iloc[-1])
+                          - pd.to_datetime(df["Date"].iloc[0])).days
+            _range_buttons = [
+                dict(count=_c, label=_l, step=_s, stepmode="backward")
+                for _c, _l, _s, _need in ((1, "1M", "month", 45),
+                                          (3, "3M", "month", 130),
+                                          (6, "6M", "month", 250),
+                                          (1, "1Y", "year", 400),
+                                          (3, "3Y", "year", 1150))
+                if _span_days > _need
+            ] + [dict(step="all", label="All")]
+
             ct.style(
                 fig,
                 height=480,
@@ -3040,14 +3054,12 @@ color:var(--muted);background:var(--surface2)}
                     # Range buttons: square, hairline border, transparent fill;
                     # the active one fills brand. No pill shapes.
                     rangeselector=dict(
-                        buttons=[
-                            dict(count=1,  label="1M", step="month", stepmode="backward"),
-                            dict(count=3,  label="3M", step="month", stepmode="backward"),
-                            dict(count=6,  label="6M", step="month", stepmode="backward"),
-                            dict(count=1,  label="1Y", step="year",  stepmode="backward"),
-                            dict(count=3,  label="3Y", step="year",  stepmode="backward"),
-                            dict(step="all", label="All"),
-                        ],
+                        # Only ranges the fetched window can actually fill. These
+                        # were fixed, so analysing a 1-year window still offered
+                        # 3Y — which set an axis three times wider than the data
+                        # and pushed the whole series into the right third of the
+                        # plot — while "All" silently duplicated 1Y.
+                        buttons=_range_buttons,
                         bgcolor="rgba(0,0,0,0)", bordercolor=ct.color.rule, borderwidth=1,
                         font=dict(family=ct.font.data, size=11, color=ct.color.ink_muted),
                         activecolor=ct.color.brand,
