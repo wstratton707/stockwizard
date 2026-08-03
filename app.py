@@ -339,6 +339,24 @@ def _goto(pg):
     st.rerun()
 
 
+# ── Analysis windows ──────────────────────────────────────────────────────────
+# Two different windows, because they answer different questions.
+#
+# HISTORY is what we fetch. It used to be a user-facing "Date Range" slider
+# defaulting to 1 year, which quietly degraded every statistic derived from it:
+# NFLX's beta over one year measured 0.27 (it fell while the market rose), and
+# that number fed straight into the forecast's expected return. Estimates like
+# beta, normal P/E, volatility and correlation only get better with more data,
+# and choosing a lookback is not a decision a reader should have to make.
+#
+# METRICS is what risk statistics are measured over. Sharpe across ten years
+# blends 2016 with 2025; across one year it is noise. Three is the usual
+# compromise, and the window is printed next to the numbers so each one has a
+# definition attached.
+HISTORY_YEARS = 10
+METRICS_YEARS = 3
+
+
 # ── Analysis jump rail ────────────────────────────────────────────────────────
 # The Analysis page is one long scroll of ~14 sections, and which ones exist
 # depends on the asset (crypto / ETF / stock) and the module checkboxes. So the
@@ -847,21 +865,41 @@ elif _page == "analysis":
         ).strip().upper()
 
         # ── Date range ────────────────────────────────────────────────────────────
+        # Off by default: the standard run fetches HISTORY_YEARS and reports risk
+        # over METRICS_YEARS, so nobody has to pick a lookback to get a sound
+        # answer. Turning it on tailors the whole analysis — chart, risk metrics,
+        # forecast, correlation and the report — to exactly the dates chosen.
         if mode == "Investor Mode":
-            st.markdown('<div class="field-label">Date Range</div>',
-                        unsafe_allow_html=True)
-            _SLIDER_OPTIONS = ["1M","3M","6M","1Y","2Y","5Y","10Y"]
-            _SLIDER_DAYS    = {"1M":30,"3M":90,"6M":180,"1Y":365,"2Y":730,
-                               "5Y":1825,"10Y":3650}
-            period_key = st.select_slider("", options=_SLIDER_OPTIONS, value="1Y",
-                                          label_visibility="collapsed")
-            _today      = datetime.today().date()
-            _days       = _SLIDER_DAYS[period_key]
-            date_end    = _today.strftime("%Y-%m-%d")
-            date_start  = (_today - timedelta(days=_days)).strftime("%Y-%m-%d")
-            bar_size    = "day"
-            period_label = period_key
+            _today   = datetime.today().date()
+            bar_size = "day"
+            custom_range = st.checkbox(
+                "Custom date range", value=False, key="use_custom_range",
+                help=f"Off: {HISTORY_YEARS} years of history, with risk measured "
+                     f"over the last {METRICS_YEARS}. On: everything is measured "
+                     f"between the two dates you pick.")
+            if custom_range:
+                _dc1, _dc2 = st.columns(2)
+                _cs = _dc1.date_input("From", value=_today - timedelta(days=365),
+                                      max_value=_today, key="custom_start")
+                _ce = _dc2.date_input("To", value=_today,
+                                      max_value=_today, key="custom_end")
+                if _cs >= _ce:
+                    st.error("The start date has to be before the end date.")
+                    st.stop()
+                if (_ce - _cs).days < 30:
+                    st.error("Pick a range of at least a month — anything shorter "
+                             "can't support a volatility or drawdown figure.")
+                    st.stop()
+                date_start   = _cs.strftime("%Y-%m-%d")
+                date_end     = _ce.strftime("%Y-%m-%d")
+                period_label = f"{date_start} to {date_end}"
+            else:
+                date_end     = _today.strftime("%Y-%m-%d")
+                date_start   = (_today - timedelta(days=365 * HISTORY_YEARS)
+                                ).strftime("%Y-%m-%d")
+                period_label = f"{HISTORY_YEARS}Y"
         else:
+            custom_range = False
             date_start   = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
             date_end     = datetime.today().strftime("%Y-%m-%d")
             bar_size     = "day"
@@ -1586,12 +1624,31 @@ elif _page == "analysis":
                 _win_key = (f"{df['Date'].iloc[0]}|{df['Date'].iloc[-1]}|{len(df)}"
                             if "Date" in df.columns and len(df) else "")
 
+                # Risk window. On a custom range the user has already said what
+                # period they mean, so everything is measured over it. Otherwise
+                # risk is measured over METRICS_YEARS: a Sharpe computed across
+                # the full ten-year pull blends regimes, and one computed across
+                # a single year is mostly noise.
+                if custom_range:
+                    dfm, _mwin = df, "selected range"
+                else:
+                    _mw_from = (pd.to_datetime(df["Date"].iloc[-1])
+                                - pd.DateOffset(years=METRICS_YEARS))
+                    dfm = df[pd.to_datetime(df["Date"]) >= _mw_from]
+                    # Fall back rather than quote a ratio off a handful of bars.
+                    if len(dfm) < 120:
+                        dfm, _mwin = df, "full history"
+                    else:
+                        _mwin = f"{METRICS_YEARS}Y"
+                _mw_key = (f"{dfm['Date'].iloc[0]}|{dfm['Date'].iloc[-1]}|{len(dfm)}"
+                           if len(dfm) else _win_key)
+
                 corr_matrix = None
                 if do_corr:
                     progress.progress(60, text="Building correlation matrix...")
                     corr_matrix = cached_build_correlation_matrix(
-                        ticker_input, _win_key,
-                        tuple(benchmarks) if benchmarks else (), df,
+                        ticker_input, _mw_key,
+                        tuple(benchmarks) if benchmarks else (), dfm,
                     )
 
                 resistance = support = None
@@ -1608,16 +1665,19 @@ elif _page == "analysis":
                         progress.progress(75, text="Running Custom Forecast (GARCH + ML + Monte Carlo)...")
                         mc_sim_df, custom_garch_vols, custom_ml_drift, mc_summary = \
                             cached_run_custom_forecast(
-                                ticker_input, _win_key, n_sims, n_horizon, df,
+                                ticker_input, _mw_key, n_sims, n_horizon, dfm,
                             )
                     else:
                         progress.progress(75, text="Running Monte Carlo simulation...")
+                        # Volatility and beta come from the risk window, not the
+                        # full pull — a decade of history would price today's
+                        # forecast off regimes that are long gone.
                         mc_sim_df, mc_summary = cached_run_monte_carlo(
-                            ticker_input, _win_key, n_sims, n_horizon, df,
+                            ticker_input, _mw_key, n_sims, n_horizon, dfm,
                         )
 
                 progress.progress(85, text="Generating summary...")
-                ret      = df["Daily_Return"].dropna()
+                ret      = dfm["Daily_Return"].dropna()
                 ann_ret  = ret.mean() * 252
                 ann_std  = ret.std() * np.sqrt(252)
                 # Excess-return Sharpe/Sortino: subtract the risk-free rate so
@@ -1713,14 +1773,24 @@ elif _page == "analysis":
             # Results
             latest     = df.iloc[-1]
             first      = df.iloc[0]
-            period_ret = (latest["Close"] / first["Close"] - 1) * 100
+            # Headline return is a trailing year unless a range was chosen. With
+            # a ten-year pull the old "period return" put a decade's gain in the
+            # slot the eye reads as recent performance.
+            if custom_range:
+                period_ret, _ret_label = ((latest["Close"] / first["Close"] - 1) * 100,
+                                          "Selected range")
+            else:
+                _1y_from = pd.to_datetime(df["Date"].iloc[-1]) - pd.DateOffset(years=1)
+                _df1y    = df[pd.to_datetime(df["Date"]) >= _1y_from]
+                _base    = _df1y["Close"].iloc[0] if len(_df1y) > 1 else first["Close"]
+                period_ret = (latest["Close"] / _base - 1) * 100
+                _ret_label = "1Y" if len(_df1y) > 1 else period_label
             pos_neg    = lambda v: "positive" if v > 0 else ("negative" if v < 0 else "neutral")
 
             # Reports build on demand: a click builds the file (with a spinner),
             # caches it in session for this exact ticker+period, then swaps in a
             # download button. The mirrored buttons lower on the page share the
             # same cached file, so building once serves both.
-            _report_id = f"{ticker_input}|{period_label}|{bar_size}"
 
             # One action, not three. Three coequal buttons framed the report as
             # three products, invited a single user to build all three (each one
@@ -1740,6 +1810,12 @@ elif _page == "analysis":
                 _FORMATS.append(("Word memo", "word", ".docx",
                                  "The written thesis, ready to edit."))
 
+            # A written report covers a stated period, so this one control stays —
+            # but it belongs here, next to the download, not in the inputs panel
+            # where it silently set the lookback for every statistic on the page.
+            _RPT_YEARS = {"1 year": 1, "3 years": 3, "5 years": 5,
+                          "10 years": HISTORY_YEARS}
+
             def _stock_exports(suffix):
                 _labels = [f[0] for f in _FORMATS]
                 _pick = st.radio("Format", _labels, horizontal=True,
@@ -1751,7 +1827,23 @@ elif _page == "analysis":
                     f'margin:-0.35rem 0 0.6rem">{_blurb}</div>',
                     unsafe_allow_html=True)
 
+                # On a custom range the report covers exactly what was asked for;
+                # there is no second period to choose.
+                if custom_range:
+                    _rdf, _rlabel = df, period_label
+                    st.caption(f"Covers your selected range · {period_label}")
+                else:
+                    _rp = st.selectbox("Report period", list(_RPT_YEARS), index=2,
+                                       key=f"rptp_{suffix}")
+                    _rfrom = (pd.to_datetime(df["Date"].iloc[-1])
+                              - pd.DateOffset(years=_RPT_YEARS[_rp]))
+                    _rdf = df[pd.to_datetime(df["Date"]) >= _rfrom]
+                    if len(_rdf) < 30:
+                        _rdf = df
+                    _rlabel = _rp.replace(" year", "Y").replace("s", "")
+
                 _id_key, _buf_key = f"_{_kind}_id", f"_{_kind}_buf"
+                _report_id = f"{ticker_input}|{_rlabel}|{bar_size}"
                 _ready = st.session_state.get(_id_key) == _report_id
 
                 _bc = st.columns([1.6, 2.4])
@@ -1764,7 +1856,7 @@ elif _page == "analysis":
                             try:
                                 if _kind == "excel":
                                     st.session_state[_buf_key] = build_excel(
-                                        ticker_input, df, period_label,
+                                        ticker_input, _rdf, _rlabel,
                                         company_details=company_details, sector_df=sector_df,
                                         mc_sim_df=mc_sim_df, mc_summary=mc_summary,
                                         news_list=news_list, peer_df=peer_df,
@@ -1779,7 +1871,7 @@ elif _page == "analysis":
                                     # both passed it, so the deck's valuation
                                     # slide had nothing to render.
                                     st.session_state[_buf_key] = build_stock_pptx(
-                                        ticker_input, df, period_label,
+                                        ticker_input, _rdf, _rlabel,
                                         company_details=company_details,
                                         mc_sim_df=mc_sim_df, mc_summary=mc_summary,
                                         news_list=news_list, summary_text=summary_text,
@@ -1787,7 +1879,7 @@ elif _page == "analysis":
                                     )
                                 else:
                                     st.session_state[_buf_key] = build_stock_docx(
-                                        ticker_input, df, period_label,
+                                        ticker_input, _rdf, _rlabel,
                                         company_details=company_details,
                                         mc_summary=mc_summary, news_list=news_list,
                                         summary_text=summary_text,
@@ -1810,7 +1902,8 @@ elif _page == "analysis":
                             }[_kind]
                             st.download_button(
                                 f"Download {_name} ({_ext})", data=_buf,
-                                file_name=f"{ticker_input}_{period_label}_Analysis{_ext}",
+                                file_name=f"{ticker_input}_{_rlabel.replace(' ', '')}"
+                                          f"_Analysis{_ext}",
                                 mime=_mime, use_container_width=True,
                                 key=f"dl_{_kind}_{suffix}",
                             )
@@ -1970,7 +2063,7 @@ elif _page == "analysis":
 <div class="stock-hero-stat">
 <div class="stock-hero-stat-lbl">Period Return</div>
 <div class="stock-hero-stat-val {_period_cls}">{period_ret:+.2f}%</div>
-<div class="stock-hero-stat-sub">{period_label}</div>
+<div class="stock-hero-stat-sub">{_ret_label}</div>
 </div>
 </div>
 </div>""", unsafe_allow_html=True)
@@ -2000,17 +2093,22 @@ elif _page == "analysis":
             # Sharpe all reconcile. Previously this card showed the trailing
             # 20-day vol, which silently disagreed with the Sharpe denominator.
             vol_val = ann_std
+            # The window is in the label, not just the tooltip: a Sharpe ratio
+            # with no stated period is not a number anyone can check.
+            _mw_note = (f" Measured over the {_mwin}."
+                        if _mwin in ("selected range", "full history")
+                        else f" Measured over the last {METRICS_YEARS} years.")
             _TOOLTIPS = {
-                "Sharpe Ratio":    "Risk-adjusted return (excess of the risk-free rate). Above 1.0 is good, above 2.0 is excellent. Higher = better return per unit of risk.",
-                "Sortino Ratio":   "Like Sharpe but only penalises downside volatility. Higher is better.",
-                "Ann. Volatility": "Annualized standard deviation of daily returns over the period. Higher = more price swings. S&P 500 averages ~15%.",
+                f"Sharpe Ratio ({_mwin})":    "Risk-adjusted return (excess of the risk-free rate). Above 1.0 is good, above 2.0 is excellent. Higher = better return per unit of risk." + _mw_note,
+                f"Sortino Ratio ({_mwin})":   "Like Sharpe but only penalises downside volatility. Higher is better." + _mw_note,
+                f"Ann. Volatility ({_mwin})": "Annualized standard deviation of daily returns. Higher = more price swings. S&P 500 averages ~15%." + _mw_note,
             }
             _row_items = [
-                ("Sharpe Ratio",    f"{sharpe:.2f}"  if pd.notna(sharpe)  else "N/A",
+                (f"Sharpe Ratio ({_mwin})",    f"{sharpe:.2f}"  if pd.notna(sharpe)  else "N/A",
                                     pos_neg(sharpe)  if pd.notna(sharpe)  else "neutral"),
-                ("Sortino Ratio",   f"{sortino:.2f}" if pd.notna(sortino) else "N/A",
+                (f"Sortino Ratio ({_mwin})",   f"{sortino:.2f}" if pd.notna(sortino) else "N/A",
                                     pos_neg(sortino) if pd.notna(sortino) else "neutral"),
-                ("Ann. Volatility", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A", "neutral"),
+                (f"Ann. Volatility ({_mwin})", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A", "neutral"),
                 (extra_label,       extra_value,                                            "neutral"),
             ]
             row_cols = st.columns(len(_row_items))
@@ -2692,7 +2790,8 @@ color:var(--muted);background:var(--surface2)}
                             # the same company, so quoting one without saying
                             # which is incomplete.
                             _rate_basis = (f"CAPM &middot; &beta; {_wb['beta']:.2f} "
-                                           f"({period_label} vs benchmark) &middot; "
+                                           f"({'selected range' if custom_range else period_label}"
+                                           f" vs benchmark) &middot; "
                                            f"Rf {_wpi_pct(_wb.get('risk_free'), 2)} &middot; "
                                            f"ERP {_wpi_pct(_wb.get('erp'), 1)}")
                             _rate_extra = [
