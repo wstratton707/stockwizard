@@ -55,6 +55,28 @@ def market_beta(stock_returns, market_returns):
         return None
 
 
+def blume_adjust(beta):
+    """Blume-adjusted beta: 2/3 x raw + 1/3 x 1.0.
+
+    A regression beta is a noisy estimate with a large standard error, and
+    betas mean-revert toward 1 over time — so the raw number is a poor forward
+    input even when it is a fine description of the past. Measured live: NFLX
+    over one year regressed to 0.27 (it fell while the market rose), which fed
+    straight into its CAPM expected return and made the forecast absurd.
+
+    Standard practice (Bloomberg ships this as "adjusted beta"). Applied where
+    beta is used to form a FORWARD estimate — cost of equity, WACC, CAPM
+    expected returns, forecast drift — not where the historical beta is being
+    reported as a measurement.
+    """
+    if beta is None:
+        return None
+    try:
+        return (2.0 / 3.0) * float(beta) + (1.0 / 3.0)
+    except (TypeError, ValueError):
+        return None
+
+
 def downside_deviation(returns, mar=0.0, periods=252):
     """Annualised downside deviation about `mar` — the correct Sortino denominator.
 
@@ -80,14 +102,22 @@ def downside_deviation(returns, mar=0.0, periods=252):
     return dd if dd > 0 else None
 
 
-def cost_of_equity(beta, rf=None, erp=None):
-    """CAPM cost of equity: Rf + beta x ERP."""
-    from constants import get_risk_free_rate, EQUITY_RISK_PREMIUM
+def cost_of_equity(beta, rf=None, erp=None, adjust=True):
+    """CAPM cost of equity: Rf + beta x ERP.
+
+    Uses the LONG risk-free rate (10-year) — this rate discounts multi-year
+    cash flows, so the 3-month cash rate is the wrong duration — and
+    Blume-adjusts beta by default, because this is a forward-looking estimate
+    rather than a description of the past. Pass adjust=False for the raw
+    regression beta.
+    """
+    from constants import get_long_risk_free_rate, EQUITY_RISK_PREMIUM
     if beta is None:
         return None
-    r = get_risk_free_rate() if rf is None else rf
+    b = blume_adjust(beta) if adjust else float(beta)
+    r = get_long_risk_free_rate() if rf is None else rf
     p = EQUITY_RISK_PREMIUM if erp is None else erp
-    return r + float(beta) * p
+    return r + float(b) * p
 
 
 def _credit_spread(total_debt, market_cap):
@@ -108,12 +138,14 @@ def estimate_wacc(fundamentals, beta, rf=None, erp=None, tax_rate=US_STATUTORY_T
     Returns (wacc, basis) where `basis` is a dict of every input used, so the
     caller can show its work rather than presenting a rate on faith.
     """
-    from constants import get_risk_free_rate, EQUITY_RISK_PREMIUM
+    from constants import get_long_risk_free_rate, EQUITY_RISK_PREMIUM
     re = cost_of_equity(beta, rf=rf, erp=erp)
     if re is None:
         return None, None
 
-    r = get_risk_free_rate() if rf is None else rf
+    # Long rate: a WACC discounts cash flows for years, and the cost of debt is
+    # priced off the long curve too, not off 3-month bills.
+    r = get_long_risk_free_rate() if rf is None else rf
     p = EQUITY_RISK_PREMIUM if erp is None else erp
     e = fundamentals.get("market_cap") or 0.0
     # GROSS debt is the right weight for a WACC: the cost of debt is paid on the
@@ -144,7 +176,7 @@ def estimate_wacc(fundamentals, beta, rf=None, erp=None, tax_rate=US_STATUTORY_T
     # anything above ~20% produces nonsense fair values. Clamp and say so.
     wacc_clamped = max(0.05, min(0.20, wacc))
     return round(wacc_clamped, 4), {
-        "beta": beta, "risk_free": r, "erp": p,
+        "beta": beta, "beta_adjusted": blume_adjust(beta), "risk_free": r, "erp": p,
         "cost_of_equity": re, "cost_of_debt": rd, "tax_rate": tax_rate,
         "equity_weight": e / v, "debt_weight": d / v,
         "clamped": abs(wacc_clamped - wacc) > 1e-9,
@@ -474,6 +506,15 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
     mcap = fundamentals.get("market_cap")
     if not mcap or mcap <= 0:
         return {"ok": False, "reason": "no market cap"}
+
+    # Stable growth cannot exceed the growth rate of the economy, and the
+    # risk-free rate is the standard proxy for that ceiling (Damodaran): a
+    # perpetuity growing faster than the economy eventually becomes the economy.
+    # 2.5% clears a 4% ten-year yield comfortably, but hardcoding it would go
+    # wrong in a low-rate regime — so state the constraint instead of relying on
+    # today's rates to satisfy it.
+    from constants import get_long_risk_free_rate as _long_rf
+    terminal_growth = min(terminal_growth, _long_rf())
 
     # Resolve the discount rate before anything depends on it.
     wacc_basis = None
@@ -805,6 +846,8 @@ def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print, seed=4
             _beta = market_beta(returns, df[_bcol])
             if _beta is not None:
                 break
+    # cost_of_equity Blume-adjusts the beta and prices off the 10-year rate,
+    # which is what an equity expected return should be built from.
     ann_mu = cost_of_equity(_beta if _beta is not None else 1.0)
     mu     = ann_mu / 252.0
     # Seeded local generator, matching the portfolio Monte Carlo and the efficient
@@ -835,6 +878,7 @@ def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print, seed=4
         "Ann. Volatility":         f"{sigma * np.sqrt(252) * 100:.2f}%",
         "Expected Return (CAPM)":  f"{ann_mu * 100:.1f}%",
         "Beta (vs benchmark)":     (round(float(_beta), 2) if _beta is not None else "1.00 (assumed)"),
+        "Beta (adjusted, used)":   round(float(blume_adjust(_beta if _beta is not None else 1.0)), 2),
     }
     log(f"   P5 ${summary['Bear Case (P5)']:,.2f}  "
         f"P50 ${summary['Median (P50)']:,.2f}  "

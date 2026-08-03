@@ -107,12 +107,24 @@ def compute_betas(returns_df, market_returns):
     return betas
 
 
-def capm_expected_returns(betas, rf=None, erp=None):
-    """CAPM expected ANNUAL return per ticker (decimal): Rf + beta * ERP."""
-    from constants import EQUITY_RISK_PREMIUM
-    rf  = get_risk_free_rate() if rf is None else rf
+def capm_expected_returns(betas, rf=None, erp=None, adjust=True):
+    """CAPM expected ANNUAL return per ticker (decimal): Rf + beta * ERP.
+
+    Two deliberate choices, both about matching the horizon:
+      • the LONG risk-free rate (10-year), because these are multi-year equity
+        expected returns, not overnight cash;
+      • Blume-adjusted betas (2/3 raw + 1/3), because a regression beta is a
+        noisy estimate that mean-reverts toward 1, and here it is being used as
+        a forecast rather than as a description of the past. It also pulls the
+        cross-section of mu together, which is exactly the direction a
+        mean-variance optimiser needs (see FACTOR_ALPHA_MAX below).
+    """
+    from constants import EQUITY_RISK_PREMIUM, get_long_risk_free_rate
+    from analysis import blume_adjust
+    rf  = get_long_risk_free_rate() if rf is None else rf
     erp = EQUITY_RISK_PREMIUM if erp is None else erp
-    return {t: rf + b * erp for t, b in betas.items()}
+    return {t: rf + (blume_adjust(b) if adjust else b) * erp
+            for t, b in betas.items()}
 
 
 # Maximum annual return, in decimal, that the factor tilt may add or subtract on

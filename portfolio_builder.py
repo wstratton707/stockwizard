@@ -1037,10 +1037,31 @@ def _render_step_3():
                 backtest_metrics = compute_backtest_metrics(backtest_df, start_cap)
                 heatmap_df       = compute_monthly_heatmap(backtest_df)
 
+                # Equal-weight (1/N) benchmark over the SAME names, capital and
+                # contribution schedule — only the weights differ, so the
+                # comparison isolates what the optimiser actually contributed.
+                #
+                # This is here because of the most-replicated result in the
+                # portfolio literature: DeMiguel, Garlappi & Uppal (2009) tested
+                # 14 optimisation models on seven datasets and none beat naive
+                # 1/N consistently out of sample. A tool that never shows that
+                # comparison is making a claim it has declined to test. It will
+                # sometimes lose. That is the honest outcome, not a bug.
+                equal_metrics = None
+                try:
+                    if weights:
+                        _eq_w = {t: 1.0 / len(weights) for t in weights}
+                        equal_metrics = compute_backtest_metrics(
+                            backtest_portfolio(close_df, _eq_w, start_cap, monthly),
+                            start_cap)
+                except Exception:
+                    equal_metrics = None      # never block the real backtest
+
                 st.session_state[_K_BACKTEST] = {
                     "df":      backtest_df,
                     "metrics": backtest_metrics,
                     "heatmap": heatmap_df,
+                    "equal":   equal_metrics,
                 }
             except Exception as e:
                 st.error(f"Backtest failed: {e}")
@@ -1081,6 +1102,38 @@ def _render_step_3():
     ]:
         with col:
             st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
+
+    # ── Did the optimiser earn its keep? ──────────────────────────────────────
+    _eqm = bt.get("equal")
+    if _eqm:
+        _o_r, _e_r = bt_met.get("Total Return", 0) or 0, _eqm.get("Total Return", 0) or 0
+        _o_s, _e_s = bt_met.get("Sharpe Ratio", 0) or 0, _eqm.get("Sharpe Ratio", 0) or 0
+        _d_r, _d_s = _o_r - _e_r, _o_s - _e_s
+        _won = _d_s >= 0
+        _verdict = ("The optimiser beat equal weight on risk-adjusted return over "
+                    "this window." if _won else
+                    "Equal weight beat the optimiser on risk-adjusted return over "
+                    "this window — which happens often enough that we show it.")
+        _c = "#059669" if _won else "#b45309"
+        st.markdown(
+            f"""<div style="border-top:1px solid #e2e8f0;margin-top:1rem;padding-top:0.9rem;
+                        font-family:var(--font-sans)">
+  <div style="font-size:0.62rem;font-weight:700;letter-spacing:0.9px;text-transform:uppercase;
+              color:#64748b;margin-bottom:0.55rem">Sanity check · vs equal weight (1/N)</div>
+  <div style="display:flex;gap:2.2rem;flex-wrap:wrap;font-size:0.82rem;color:#334155">
+    <span>Total return &nbsp;<b>{_o_r:,.1f}%</b> optimised
+          &nbsp;vs&nbsp; <b>{_e_r:,.1f}%</b> equal
+          &nbsp;<span style="color:{_c}">({_d_r:+.1f} pts)</span></span>
+    <span>Sharpe &nbsp;<b>{_o_s:.2f}</b> optimised
+          &nbsp;vs&nbsp; <b>{_e_s:.2f}</b> equal
+          &nbsp;<span style="color:{_c}">({_d_s:+.2f})</span></span>
+  </div>
+  <div style="font-size:0.75rem;color:#64748b;margin-top:0.5rem;max-width:70ch">
+    {_verdict} Same holdings, same capital, same contributions — only the weights
+    differ. Published tests find naive 1/N hard to beat out of sample, so this is
+    the comparison worth checking.
+  </div>
+</div>""", unsafe_allow_html=True)
 
     st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
     cols2 = st.columns(4)

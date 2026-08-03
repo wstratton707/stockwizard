@@ -1802,6 +1802,16 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
         cv = kv2(row, lbl, formula, fmt=FMT_BN, bold=(row == R_EQ))
         if row == R_EQ:
             cv.fill = PatternFill("solid", fgColor="D6E4F0")
+        if row == R_PVTV:
+            # How much of the value is the terminal assumption. The standard
+            # red flag is >85%: past that the answer is essentially one guess
+            # about the far future, and the explicit forecast is decoration.
+            # Live, so it moves when the reader changes WACC or growth.
+            _tv = ws.cell(row=row, column=3,
+                          value=f'=TEXT(B{R_PVTV}/B{R_EV},"0%")&" of enterprise value'
+                                f' — above 85% the terminal assumption is doing'
+                                f' nearly all the work"')
+            _tv.font = Font(name="Calibri", size=9, italic=True, color="888888")
 
     # ── 7. Sensitivity grid — green above today's price, red below ────────────
     sec(R_SENS_SEC, "Sensitivity — Fair Value / Share  (WACC × Terminal Growth)"
