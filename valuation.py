@@ -275,6 +275,47 @@ def window_data(data, years_back=None):
     return out
 
 
+def _hold_flat(xs, ys, x0, x1):
+    """Extend a fiscal-year series flat out to the price window's edges.
+
+    Annual figures are anchored at fiscal-year midpoints, but price runs from
+    January of the first kept year to today. Over a long window that mismatch is
+    invisible; over three years the corridor started six months late and stopped
+    fourteen months early, leaving price hanging outside the band at both ends.
+    Holding the end values flat says the honest thing — the last published
+    fiscal year's fair value is the most recent one that exists — and it is what
+    lets a 1-year window (a single anchor) draw a band at all.
+    """
+    if not xs:
+        return list(xs), list(ys)
+    out_x, out_y = list(xs), list(ys)
+    if x0 is not None and x0 < out_x[0]:
+        out_x.insert(0, x0)
+        out_y.insert(0, out_y[0])
+    if x1 is not None and x1 > out_x[-1]:
+        out_x.append(x1)
+        out_y.append(out_y[-1])
+    return out_x, out_y
+
+
+def _flat_stubs(xs, ys, x0, x1):
+    """Just the extension segments, as one trace with a None separator.
+
+    Drawn separately from the anchored line so the fiscal-year markers, hover
+    text and legend entry stay on real data points.
+    """
+    sx, sy = [], []
+    if not xs:
+        return sx, sy
+    if x0 is not None and x0 < xs[0] and ys[0] is not None:
+        sx += [x0, xs[0], None]
+        sy += [ys[0], ys[0], None]
+    if x1 is not None and x1 > xs[-1] and ys[-1] is not None:
+        sx += [xs[-1], x1, None]
+        sy += [ys[-1], ys[-1], None]
+    return sx, sy
+
+
 def build_valuation_figure(data, years_back=None):
     """Price vs. earnings-justified fair value, with the range table above and
     the fundamentals grid below. Returns None if data is missing."""
@@ -343,25 +384,38 @@ def build_valuation_figure(data, years_back=None):
     ct.add_fy_hairlines(fig, [pd.Timestamp(f"{y}-01-01") for y in yrs],
                         row=2, col=1)
 
+    # The bands (and the lines on them) run the full width of the price series,
+    # holding the first/last fiscal year's value flat past the anchors.
+    _px0 = data["price_dates"][0] if data.get("price_dates") else None
+    _px1 = data["price_dates"][-1] if data.get("price_dates") else None
+    x_band, fair_band = _hold_flat(xyr, fair, _px0, _px1)
+    _,      over_band = _hold_flat(xyr, over, _px0, _px1)
+
     # Base band: zero to the normal-multiple line.
     fig.add_trace(go.Scatter(
-        x=xyr, y=fair, mode="lines", line=dict(width=0, shape="linear"),
+        x=x_band, y=fair_band, mode="lines", line=dict(width=0, shape="linear"),
         fill="tozeroy", fillcolor=color.corridor_base_fill,
         hoverinfo="skip", showlegend=False), row=2, col=1)
     # Upper band: normal multiple to the premium ceiling, lighter, no stroke.
     fig.add_trace(go.Scatter(
-        x=xyr, y=over, mode="lines", line=dict(width=0, shape="linear"),
+        x=x_band, y=over_band, mode="lines", line=dict(width=0, shape="linear"),
         fill="tonexty", fillcolor=color.corridor_high_fill,
         hoverinfo="skip", showlegend=False), row=2, col=1)
     # The edge between them — this is what separates two bands from one blob.
     # Dashed rather than a hard rule: the boundary is an estimate, and drawing
     # it as a solid rail overstates how precise the multiple is.
     fig.add_trace(go.Scatter(
-        x=xyr, y=fair, mode="lines",
+        x=x_band, y=fair_band, mode="lines",
         line=dict(color=color.corridor_edge, width=1, shape="linear", dash="2px,3px"),
         hoverinfo="skip", showlegend=False), row=2, col=1)
 
     if any(v is not None for v in divln):
+        _dsx, _dsy = _flat_stubs(xyr, divln, _px0, _px1)
+        if _dsx:
+            fig.add_trace(go.Scatter(
+                x=_dsx, y=_dsy, mode="lines",
+                line=dict(color=color.income_line, width=stroke.income, shape="linear"),
+                hoverinfo="skip", showlegend=False), row=2, col=1)
         fig.add_trace(go.Scatter(
             x=xyr, y=divln, mode="lines+markers", name="Dividend value",
             line=dict(color=color.income_line, width=stroke.income, shape="linear"),
@@ -369,6 +423,12 @@ def build_valuation_figure(data, years_back=None):
             hovertemplate="%{x|%Y}<br>$%{y:,.0f}<extra>Dividend value</extra>"),
             row=2, col=1)
 
+    _fsx, _fsy = _flat_stubs(xyr, fair, _px0, _px1)
+    if _fsx:
+        fig.add_trace(go.Scatter(
+            x=_fsx, y=_fsy, mode="lines",
+            line=dict(color=color.value_line, width=stroke.value, shape="linear"),
+            hoverinfo="skip", showlegend=False), row=2, col=1)
     fig.add_trace(go.Scatter(
         x=xyr, y=fair, mode="lines+markers",
         name=f"Fair value (EPS &times; {npe:g})",

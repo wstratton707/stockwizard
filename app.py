@@ -2111,7 +2111,7 @@ elif _page == "analysis":
                         # every time the user changed the range.
                         _n_yrs   = len(_vdata["years"])
                         _ranges  = [("MAX", None), ("15Y", 15), ("10Y", 10),
-                                    ("5Y", 5), ("3Y", 3)]
+                                    ("5Y", 5), ("3Y", 3), ("1Y", 1)]
                         _ranges  = [r for r in _ranges if r[1] is None or r[1] < _n_yrs]
                         _labels  = [r[0] for r in _ranges]
                         try:
