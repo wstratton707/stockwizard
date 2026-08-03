@@ -36,9 +36,17 @@ class color:
     grid = "#EFF1F3"          # horizontal gridlines
     grid_fy = "#F5F6F8"       # fiscal-year vertical hairlines
 
-    corridor_base = "#4F7A5B"  # primary valuation band (deep sage)
-    corridor_high = "#B7DFAE"  # upper valuation band (light green)
-    corridor_edge = "#3D6249"  # hard top edge of the base band
+    # Valuation corridor. Was a sage/mint green pair, which read as a copy of a
+    # well-known valuation chart and shared nothing with the rest of the app.
+    # Blue ties it to --accent, and the luminance is matched to the old green so
+    # the black price line still reads where it crosses the base band.
+    corridor_base = "#3F6C9C"  # primary valuation band (steel blue)
+    corridor_high = "#C3DDF5"  # upper valuation band (light blue)
+    corridor_edge = "#2C5580"  # top edge of the base band
+    # Band fills carry alpha so the gridlines read through instead of the bands
+    # sitting on the page as two flat blocks of colour.
+    corridor_base_fill = "rgba(63,108,156,0.88)"
+    corridor_high_fill = "rgba(195,221,245,0.68)"
 
     value_line = "#D98324"    # fair value / normal-multiple line (amber)
     income_line = "#E0B341"   # dividend / income line (gold)

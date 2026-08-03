@@ -343,20 +343,22 @@ def build_valuation_figure(data, years_back=None):
     ct.add_fy_hairlines(fig, [pd.Timestamp(f"{y}-01-01") for y in yrs],
                         row=2, col=1)
 
-    # Base band: zero to the normal-multiple line, solid, hard top edge.
+    # Base band: zero to the normal-multiple line.
     fig.add_trace(go.Scatter(
         x=xyr, y=fair, mode="lines", line=dict(width=0, shape="linear"),
-        fill="tozeroy", fillcolor=color.corridor_base,
+        fill="tozeroy", fillcolor=color.corridor_base_fill,
         hoverinfo="skip", showlegend=False), row=2, col=1)
     # Upper band: normal multiple to the premium ceiling, lighter, no stroke.
     fig.add_trace(go.Scatter(
         x=xyr, y=over, mode="lines", line=dict(width=0, shape="linear"),
-        fill="tonexty", fillcolor=color.corridor_high,
+        fill="tonexty", fillcolor=color.corridor_high_fill,
         hoverinfo="skip", showlegend=False), row=2, col=1)
-    # The hard edge between them — this is what separates two bands from one blob.
+    # The edge between them — this is what separates two bands from one blob.
+    # Dashed rather than a hard rule: the boundary is an estimate, and drawing
+    # it as a solid rail overstates how precise the multiple is.
     fig.add_trace(go.Scatter(
         x=xyr, y=fair, mode="lines",
-        line=dict(color=color.corridor_edge, width=1, shape="linear"),
+        line=dict(color=color.corridor_edge, width=1, shape="linear", dash="2px,3px"),
         hoverinfo="skip", showlegend=False), row=2, col=1)
 
     if any(v is not None for v in divln):
@@ -371,7 +373,7 @@ def build_valuation_figure(data, years_back=None):
         x=xyr, y=fair, mode="lines+markers",
         name=f"Fair value (EPS &times; {npe:g})",
         line=dict(color=color.value_line, width=stroke.value, shape="linear"),
-        marker=dict(symbol="triangle-up", size=marker.size, color=marker.fill,
+        marker=dict(symbol="diamond", size=marker.size, color=marker.fill,
                     line=dict(color=color.value_line, width=marker.stroke_width)),
         customdata=core,
         hovertemplate="%{x|%Y}<br>Fair value $%{y:,.0f}"
