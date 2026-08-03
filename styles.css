@@ -1705,8 +1705,62 @@ section[data-testid="stMain"], .stMain { scroll-behavior: smooth; }
   .jump-rail-head { padding-left: 0.7rem; }
 }
 
-/* Under ~1400px the container padding is all that's left and the rail would
-   have to sit on the content, so it stands down. */
+/* Under ~1400px there is no room for labels beside a 1200px column — at 1280
+   (a 1920 screen at 150% Windows scaling) only ~75px is free. Rather than hide
+   it or narrow the page, the rail collapses to a column of ticks in the margin
+   and expands over the content on hover. Nothing reflows either way. */
 @media (max-width: 1399px) {
+  .jump-rail {
+    display: block;
+    width: 26px;
+    left: 8px;
+    padding: 0.4rem 0;
+    border-left: none;
+    background: transparent;
+    transition: width 0.14s ease, background 0.14s ease;
+  }
+  .jump-rail .jump-rail-head { display: none; }
+  .jump-rail a {
+    width: 15px;
+    height: 0;
+    margin: 0.62rem 0;
+    padding: 0;
+    font-size: 0;                    /* label hidden until expanded */
+    border-left: none;
+    border-top: 2px solid var(--dim2);
+    transition: width 0.14s ease, border-color 0.14s ease;
+  }
+  .jump-rail a:hover { border-top-color: var(--text3); }
+  .jump-rail a.is-active { width: 22px; border-top-color: var(--accent); }
+
+  /* Expanded — overlays the page, so the layout underneath never moves. */
+  .jump-rail:hover,
+  .jump-rail:focus-within {
+    width: 170px;
+    padding: 0.75rem 0.5rem 0.85rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    box-shadow: var(--shadow-lg);
+    z-index: 950;
+  }
+  .jump-rail:hover .jump-rail-head,
+  .jump-rail:focus-within .jump-rail-head { display: block; }
+  .jump-rail:hover a,
+  .jump-rail:focus-within a {
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0.3rem 0 0.3rem 0.8rem;
+    font-size: 0.68rem;
+    border-top: none;
+    border-left: 2px solid transparent;
+  }
+  .jump-rail:hover a.is-active,
+  .jump-rail:focus-within a.is-active { border-left-color: var(--accent); }
+}
+
+/* Below ~1000px even the tick column would sit on the content. */
+@media (max-width: 999px) {
   .jump-rail { display: none; }
 }
