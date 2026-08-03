@@ -685,3 +685,218 @@ visual pass, after UI/chart changes).
 - **Brand:** rename to QuantWizard is complete in code. Remaining: the GitHub
   repo is still `stockwizard`, and 4 asset URLs in `app.py` point at it. Rename
   repo + update URLs + redeploy together, never separately.
+
+---
+
+# METHODOLOGY REVIEW — DCF, MONTE CARLO, PORTFOLIO BUILDER (researched 2026-08-03)
+
+Outside-source review of the three quantitative engines against published
+academic and practitioner standards. Sources listed at the end. The point of
+this section is not "we are wrong" — most of the engine is defensible — but to
+separate **what is genuinely sound**, **what is a real defect**, and **what is
+a marketing gap rather than a correctness gap**.
+
+Read `THE ONE-DAY PLAN` first. Nothing here outranks the launch blockers; this
+is what to do with engineering time *once the product can be sold at all*.
+
+## 0. The one finding that matters most
+
+The literature is close to unanimous on a point that cuts against the instinct
+to make the optimiser cleverer:
+
+> **Out of sample, estimation error usually destroys the gains from optimisation.**
+> DeMiguel, Garlappi & Uppal (2009) tested 14 optimisation models across seven
+> datasets. **None** beat naive 1/N equal weighting consistently on Sharpe,
+> certainty-equivalent return, or turnover. They estimate the sample window
+> needed for mean-variance to reliably beat 1/N at **~3,000 months for 25
+> assets** (~250 years). We optimise ~18 assets on ~5 years of data.
+
+This does **not** mean delete the optimiser. It means the honest framing of what
+we sell is *discipline, transparency and constraint* — not "we found the
+efficient portfolio". Every recommendation below follows from that.
+
+## 1. PORTFOLIO BUILDER
+
+### What we do well — keep, and say so out loud
+
+1. **Expected returns are not historical means.** We use CAPM (Rf + beta x ERP)
+   with a small factor tilt (+/-2%). This is the single most important thing we
+   get right. Feeding trailing mean returns into an optimiser is the classic
+   error-maximiser failure mode, and we avoid it by construction.
+2. **Ledoit-Wolf covariance shrinkage** — directly the literature's recommended
+   fix for the noisy sample covariance matrix.
+3. **Long-only + position caps + sector caps.** Jagannathan & Ma (2003) proved
+   this is not merely a preference: a no-short constraint is *mathematically
+   equivalent* to shrinking the covariance matrix, and constrained portfolios
+   built on plain sample covariance performed as well as ones using factor
+   models or shrinkage estimators. Our constraints are doing real statistical
+   work, not just expressing taste.
+4. **The factor tilt is deliberately capped at +/-2%.** The reasoning recorded in
+   `portfolio_analysis.py` — that mu dispersion drives weight extremity — is
+   correct and matches the literature. Resist every future suggestion to widen
+   it without adding a regulariser.
+5. **A walk-forward harness exists** (`scripts/evaluate_portfolio_model.py`).
+   Most retail tools have nothing of the kind.
+
+### Real gaps, ranked by evidence strength x effort
+
+1. **No turnover penalty / transaction costs — the highest-value fix.**
+   The research is blunt: turnover penalisation is *more effective than commonly
+   employed shrinkage methods*, and several studies find no predictive model
+   produces a positive Sharpe net of costs when turnover is ignored. Our own
+   harness already measures ~28-40% turnover per rebalance and we do nothing
+   with it. Add an L1/L2 penalty on |w - w_prev| to the objective. Clearest
+   evidence-backed win available.
+2. **We show one "optimal" portfolio with no uncertainty.** Michaud's resampled
+   efficient frontier — bootstrap returns, re-optimise many times, average the
+   weights — is the standard answer, and it is a *natural fit because we already
+   own a Monte Carlo engine*. It improves out-of-sample behaviour AND produces
+   the "here is the weight range" display flagged in `project_portfolio_rebuild`
+   as the biggest payable gap. One mechanism, two wins.
+3. **No 1/N benchmark shown.** Given finding #0, a tool that cannot show it beats
+   equal weight is making an unfalsifiable claim. Plotting "optimised vs equal
+   weight" together is honest, cheap, and exactly the transparency we claim to
+   sell. Risk: it will sometimes lose. That is the point.
+4. **Covariance has no factor structure.** Shrinkage helps, but a factor-model
+   covariance (market + size/value/momentum) is the institutional standard for N
+   assets over short windows. Bigger project; do after 1-3.
+5. **Black-Litterman remains the principled destination** for blending our factor
+   view with a market-cap equilibrium prior, replacing the ad-hoc +/-2% tilt with
+   a confidence-weighted posterior. Correctly deferred — it needs a market-cap
+   prior we do not yet assemble.
+6. **Hierarchical Risk Parity is NOT the obvious upgrade it is marketed as.**
+   Recorded because it will be suggested: Lopez de Prado's own tests show HRP
+   beating min-variance, but independent work finds HRP *less* robust to
+   covariance misspecification than non-hierarchical methods, and at least one
+   study finds plain 1/N beat HRP across all setups. Do not adopt on reputation.
+
+## 2. DCF
+
+### What we do well
+
+- Two-stage FCFF with growth fading linearly to terminal — structurally correct.
+- **Reverse DCF as the headline.** Solving for the growth the price implies,
+  rather than leading with a fair value, is better practice than most retail
+  tools and dodges false precision.
+- WACC from company-specific CAPM rather than a flat rate, with `wacc_basis`
+  recording every input behind it.
+- Sensitivity grid over WACC x terminal growth.
+- Base FCF normalised over 3 years — correctly avoids one noisy capex year.
+- **Terminal-value share is computed and shown** (`app.py` ~2773). The standard
+  red flag is TV > 85% of total value; we surface the number.
+
+### Real gaps
+
+1. **Risk-free rate is the 3-month T-bill (FRED `DGS3MO`).** Damodaran's rule is
+   to match risk-free duration to cash-flow duration — for a 10-year DCF that is
+   the **10-year Treasury (`DGS10`)**. One extra FRED series. It currently biases
+   every WACC, every CAPM expected return, and the Monte Carlo drift.
+   *Highest value-per-line-of-code fix in the codebase.* Keep the 3-month rate
+   for Sharpe ratios, where a short rate is correct — this is a case for **two**
+   rates, not one.
+2. **Stage-1 growth comes from historical FCF CAGR.** Damodaran explicitly warns
+   against historical growth ("sensitive to computation method, may not predict
+   future growth") and prescribes **growth = reinvestment rate x return on
+   capital**. We have the EDGAR data to compute both. Most substantive
+   methodology gap in the DCF.
+3. **Terminal value has no reinvestment consistency.** Damodaran: in stable
+   growth ROC should equal the cost of capital absent a durable moat, and growth
+   must be funded by reinvestment. We grow FCF forever at 2.5% without asking
+   what reinvestment that requires, which quietly overstates terminal value.
+4. **Terminal growth is hardcoded 2.5%, not capped by the risk-free rate.** The
+   rule is that stable growth cannot exceed the growth rate of the economy and is
+   capped at the risk-free rate. 2.5% satisfies this today; make the constraint
+   explicit (`min(2.5%, rf)`) so it survives a rate-regime change.
+5. **Regression beta, not bottom-up beta.** Regression betas carry large standard
+   errors and are highly setup-dependent; Damodaran prefers sector bottom-up
+   betas. We saw this live — NFLX's 1-year beta measured **0.27**. Cheapest
+   partial fix is the **Blume adjustment** (2/3 x beta + 1/3 x 1), one line and
+   standard practice. Moving beta estimation to the 10-year window already
+   helped.
+6. Terminal-value share is on screen but **not in the Excel Valuation sheet** —
+   small, and the workbook is the paid artifact.
+
+## 3. MONTE CARLO
+
+### What we do well
+
+- **Drift is CAPM, not the trailing mean** (fixed 2026-08-03). This was a real
+  defect: NFLX projected an 8% probability of gain while the same report showed
+  a Strong Buy consensus, because a -39% year was extrapolated forward.
+- Seeded RNG — two runs of the same ticker agree. More tools get this wrong than
+  you would expect.
+- Percentiles presented as percentiles, with explicit "probabilities, not
+  guarantees" language.
+
+### Real gaps
+
+1. **Normal iid draws — no fat tails, no volatility clustering.** Empirically
+   returns are fat-tailed and skewed with clustered volatility; GBM has none of
+   this. Fixes in ascending effort: Student-t innovations (~3 lines), **block
+   bootstrap** from actual historical returns (preserves fat tails *and*
+   clustering with no distributional assumption), or GARCH — we already have a
+   GARCH path in the Custom Forecast and could promote it.
+2. **The iid assumption is subtler than "MC understates risk".** Kitces found the
+   opposite for long horizons: because MC treats each year as independent, it
+   strings together consecutive bear markets history never produced — **6.5% of
+   MC scenarios were worse than the worst 30-year historical period**. Real
+   markets show negative serial correlation (mean reversion). For a 1-year
+   equity horizon this matters less, but the *portfolio* Monte Carlo —
+   multi-year, contribution-based — is exactly where it bites. Block bootstrap
+   fixes both problems at once.
+3. **Volatility is a single trailing estimate.** Now measured over the 3-year
+   metrics window (better than the old 1-year), but still one number for a
+   1-year horizon. GARCH or a vol-of-vol draw would be more honest.
+
+## 4. RECOMMENDED ORDER (best value per unit of work)
+
+1. **10-year Treasury for the valuation-context risk-free rate** (keep 3-month
+   for Sharpe). Corrects WACC, CAPM expected returns and MC drift at once.
+2. **Blume-adjust beta.** One line; directly addresses the NFLX beta=0.27 problem.
+3. **Turnover penalty in the optimiser.** Strongest evidence base of anything
+   here, and the harness already measures the metric it improves.
+4. **Show the 1/N benchmark** beside the optimised portfolio. Cheap, honest,
+   on-brand, and it is the comparison the literature says matters.
+5. **Block bootstrap** as an alternative Monte Carlo engine (fat tails +
+   clustering + mean reversion in one change).
+6. **Resampled frontier** — improves weights *and* ships the weight-uncertainty
+   display already identified as the biggest payable gap.
+7. **DCF growth from reinvestment x ROC**, with terminal reinvestment
+   consistency. Most substantive item, and the largest.
+
+Items 1, 2 and 4 are plausibly a single afternoon and would measurably improve
+correctness *and* the story we tell.
+
+## 5. Sources
+
+**Portfolio** — DeMiguel, Garlappi & Uppal, *Optimal Versus Naive
+Diversification*, RFS 2009: academic.oup.com/rfs/article-abstract/22/5/1915/1592901 ·
+Jagannathan & Ma, *Risk Reduction in Large Portfolios: Why Imposing the Wrong
+Constraints Helps*, NBER w8922 / J. Finance 2003: nber.org/papers/w8922 ·
+Ledoit-Wolf shrinkage overview, MOSEK Portfolio Optimization Cookbook s4:
+docs.mosek.com/portfolio-cookbook/estimationerror.html · Alpha Architect,
+*Reducing Estimation Error in Mean-Variance Optimization*:
+alphaarchitect.com/reducing-estimation-error-in-mean-variance-optimization/ ·
+Lopez de Prado, *Building Diversified Portfolios that Outperform Out-of-Sample*,
+JPM 2016: papers.ssrn.com/sol3/papers.cfm?abstract_id=2708678 · HRP critique:
+sciencedirect.com/science/article/abs/pii/S0167739X25000391 · Michaud & Michaud,
+*Estimation Error and Portfolio Optimization: A Resampling Solution*:
+papers.ssrn.com/sol3/papers.cfm?abstract_id=2658657 · transaction costs and
+turnover: MOSEK Cookbook s6 (docs.mosek.com/portfolio-cookbook/transaction.html)
+and *Large-scale portfolio allocation under transaction costs and model
+uncertainty*: arxiv.org/pdf/1709.06296 · Black-Litterman: Idzorek, *A
+Step-by-Step Guide to the Black-Litterman Model*:
+people.duke.edu/~charvey/Teaching/BA453_2006/Idzorek_onBL.pdf
+
+**DCF** — Damodaran valuation notes summary:
+reasonabledeviations.com/notes/aswath_valuation/ · Damodaran, *Ten Myths About
+DCF Valuation*: pages.stern.nyu.edu/~adamodar/pdfiles/country/DCFmythsTemasek.pdf ·
+Wall Street Prep, *Common Errors in DCF Models* (85% terminal-value red flag):
+wallstreetprep.com/knowledge/common-errors-in-dcf-models/
+
+**Monte Carlo** — Kitces, *Fat Tails In Monte Carlo Analysis vs Safe Withdrawal
+Rates*: kitces.com/blog/monte-carlo-analysis-risk-fat-tails-vs-safe-withdrawal-rates-rolling-historical-returns/ ·
+GBM limitations and bootstrap alternatives:
+medium.com/analytics-vidhya/building-a-monte-carlo-method-stock-price-simulator-with-geometric-brownian-motion-and-bootstrap-e346ff464894 ·
+Student-t GBM estimation:
+ww2.amstat.org/meetings/proceedings/2016/data/assets/pdf/389551.pdf
