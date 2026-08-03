@@ -68,6 +68,77 @@ def _cum_split_factor(splits, when):
     return f or 1.0
 
 
+def _sec_quarterly_eps(facts, tags, unit="USD/shares"):
+    """{period_end -> EPS} for single quarters, as filed.
+
+    Selected by period DURATION rather than by `fp`, because a Q3 10-Q reports
+    both the three-month and the nine-month figure and labels both "Q3" — going
+    by the label silently mixes quarters with year-to-date and inflates TTM.
+
+    Q4 is almost never filed on its own (it lands inside the 10-K), so it is
+    derived per fiscal year as FY minus the three quarters that fall inside it.
+    Later filings win on a restatement, since EDGAR lists entries oldest-first.
+    """
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    quarters, annuals = {}, {}
+    for tag in tags:                                  # priority order
+        node = gaap.get(tag)
+        if not node:
+            continue
+        q_tag, a_tag = {}, {}
+        for e in node.get("units", {}).get(unit) or []:
+            start, end, val = e.get("start"), e.get("end"), e.get("val")
+            if not start or not end or val is None:
+                continue
+            try:
+                s, d = pd.Timestamp(start), pd.Timestamp(end)
+            except Exception:
+                continue
+            days = (d - s).days
+            # Entries are oldest-first, so a later one is a restatement and wins.
+            if 80 <= days <= 100:
+                q_tag[d] = float(val)
+            elif 350 <= days <= 380:
+                a_tag[d] = float(val)
+        for d, v in q_tag.items():
+            quarters.setdefault(d, v)                 # higher-priority tag wins
+        for d, v in a_tag.items():
+            annuals.setdefault(d, v)
+
+    # Derive the missing Q4 from the annual total where three quarters are known.
+    for fy_end, fy_val in annuals.items():
+        inside = [q for q in quarters if fy_end - pd.Timedelta(days=360) < q < fy_end]
+        if len(inside) == 3 and fy_end not in quarters:
+            quarters[fy_end] = fy_val - sum(quarters[q] for q in inside)
+    return quarters
+
+
+def _ttm_series(quarters, splits):
+    """(dates, TTM EPS) on today's split basis, one point per quarter.
+
+    TTM is the sum of four consecutive quarters, which is what lets the
+    fair-value line move within a fiscal year instead of stepping once a year.
+    A gap in the filings breaks the window rather than summing across it.
+    """
+    if not quarters:
+        return [], []
+    ends = sorted(quarters)
+    dates, vals = [], []
+    for i in range(3, len(ends)):
+        window = ends[i - 3:i + 1]
+        # Four consecutive quarter-END dates span ~three quarters (~270 days),
+        # not a year — the first quarter's start sits 90 days before its end.
+        # Anything outside this band means a missing filing, so skip rather than
+        # sum across the gap and under-report a year of earnings.
+        if not (240 <= (window[-1] - window[0]).days <= 310):
+            continue
+        total = sum(quarters[q] for q in window)
+        f = _cum_split_factor(splits, window[-1])
+        dates.append(window[-1])
+        vals.append(total / f)
+    return dates, vals
+
+
 def _naive_index(idx):
     """Drop timezone so EDGAR fiscal years and yfinance bars compare cleanly."""
     try:
@@ -181,11 +252,26 @@ def get_valuation_data(ticker, min_years=6):
         eps_chg.append((cur_e / prev - 1) * 100
                        if (prev and prev > 0 and cur_e is not None) else None)
 
+    # Quarterly trailing-twelve-month EPS. Optional: every consumer falls back
+    # to the annual anchors when a filer doesn't give us clean quarters.
+    try:
+        ttm_dates, ttm_eps = _ttm_series(
+            _sec_quarterly_eps(facts, _SEC_TAGS_EPS), splits)
+    except Exception:
+        ttm_dates, ttm_eps = [], []
+    if ttm_dates:
+        _lo, _hi = years[0], years[-1] + 1
+        _keep = [(d, v) for d, v in zip(ttm_dates, ttm_eps) if _lo <= d.year <= _hi]
+        ttm_dates = [d for d, _ in _keep]
+        ttm_eps = [v for _, v in _keep]
+
     cur = price_vals[-1]
     cur_eps = next((eps[y] for y in reversed(years) if eps[y] and eps[y] > 0), None)
     return {
         "ticker": tk,
         "years": years,
+        "ttm_dates": ttm_dates,
+        "ttm_eps": ttm_eps,
         "eps": eps_list,
         "eps_core": eps_core,
         "eps_chg": eps_chg,
@@ -272,6 +358,15 @@ def window_data(data, years_back=None):
             pv_.append(v)
     if pd_:
         out["price_dates"], out["price_vals"] = pd_, pv_
+    # The TTM series is trimmed to the same window, but one quarter earlier so
+    # the fair-value line is already drawn where price starts rather than
+    # beginning a quarter late.
+    if data.get("ttm_dates"):
+        _edge = pd_[0] if pd_ else pd.Timestamp(f"{first}-01-01")
+        _edge = _edge - pd.Timedelta(days=95)
+        _k = [(d, v) for d, v in zip(data["ttm_dates"], data["ttm_eps"]) if d >= _edge]
+        out["ttm_dates"] = [d for d, _ in _k]
+        out["ttm_eps"] = [v for _, v in _k]
     return out
 
 
@@ -296,6 +391,45 @@ def _hold_flat(xs, ys, x0, x1):
         out_x.append(x1)
         out_y.append(out_y[-1])
     return out_x, out_y
+
+
+def _fit_to_window(xs, ys, x0, x1):
+    """Trim and extend a series so it spans exactly [x0, x1].
+
+    Used for the quarterly corridor. A point outside the window is replaced by
+    the interpolated value at the boundary, so the band starts and ends with
+    price rather than a quarter early or late; where the series stops short of
+    the window, the last value is held flat.
+    """
+    if not xs:
+        return list(xs), list(ys)
+    xs, ys = list(xs), list(ys)
+
+    def _at(xa, ya, xb, yb, xt):
+        if ya is None or yb is None or xb == xa:
+            return ya if ya is not None else yb
+        return ya + (yb - ya) * ((xt - xa) / (xb - xa))
+
+    if x0 is not None and xs[0] > x0:
+        xs.insert(0, x0)
+        ys.insert(0, ys[0])
+    elif x0 is not None and xs[0] < x0:
+        i = 0
+        while i + 1 < len(xs) and xs[i + 1] <= x0:
+            i += 1
+        y0 = _at(xs[i], ys[i], xs[i + 1], ys[i + 1], x0) if i + 1 < len(xs) else ys[-1]
+        xs, ys = [x0] + xs[i + 1:], [y0] + ys[i + 1:]
+
+    if x1 is not None and xs[-1] < x1:
+        xs.append(x1)
+        ys.append(ys[-1])
+    elif x1 is not None and xs[-1] > x1:
+        j = len(xs) - 1
+        while j > 0 and xs[j - 1] >= x1:
+            j -= 1
+        y1 = _at(xs[j - 1], ys[j - 1], xs[j], ys[j], x1) if j > 0 else ys[0]
+        xs, ys = xs[:j] + [x1], ys[:j] + [y1]
+    return xs, ys
 
 
 def _flat_stubs(xs, ys, x0, x1):
@@ -329,7 +463,18 @@ def build_valuation_figure(data, years_back=None):
     core = data.get("eps_core") or data["eps"]
     npe = data["normal_pe"]
     xyr = _fy_anchors(yrs)
-    fair = [(e * npe) if (e and e > 0) else None for e in core]
+
+    # The corridor rides trailing-twelve-month EPS where the filer gives us
+    # clean quarters, so it moves through the year instead of stepping once a
+    # year — which is what made short windows read as a flat bar. Annual core
+    # EPS stays the fallback, and still drives the fundamentals grid below.
+    _ttm_d = list(data.get("ttm_dates") or [])
+    _ttm_e = list(data.get("ttm_eps") or [])
+    use_ttm = len(_ttm_d) >= 2
+    x_fv = _ttm_d if use_ttm else xyr
+    eps_fv = _ttm_e if use_ttm else core
+
+    fair = [(e * npe) if (e and e > 0) else None for e in eps_fv]
     over = [(f * PREMIUM_MULTIPLE) if f else None for f in fair]
     divln = [(d / DIVIDEND_YIELD_BASIS) if d else None for d in data["div"]]
 
@@ -388,8 +533,9 @@ def build_valuation_figure(data, years_back=None):
     # holding the first/last fiscal year's value flat past the anchors.
     _px0 = data["price_dates"][0] if data.get("price_dates") else None
     _px1 = data["price_dates"][-1] if data.get("price_dates") else None
-    x_band, fair_band = _hold_flat(xyr, fair, _px0, _px1)
-    _,      over_band = _hold_flat(xyr, over, _px0, _px1)
+    _fit = _fit_to_window if use_ttm else _hold_flat
+    x_band, fair_band = _fit(x_fv, fair, _px0, _px1)
+    _,      over_band = _fit(x_fv, over, _px0, _px1)
 
     # Base band: zero to the normal-multiple line.
     fig.add_trace(go.Scatter(
@@ -423,22 +569,34 @@ def build_valuation_figure(data, years_back=None):
             hovertemplate="%{x|%Y}<br>$%{y:,.0f}<extra>Dividend value</extra>"),
             row=2, col=1)
 
-    _fsx, _fsy = _flat_stubs(xyr, fair, _px0, _px1)
-    if _fsx:
+    if use_ttm:
+        # Quarterly points are dense enough that a marker on each one turns the
+        # line into a bead chain, so the TTM line runs bare and follows the band.
         fig.add_trace(go.Scatter(
-            x=_fsx, y=_fsy, mode="lines",
+            x=x_band, y=fair_band, mode="lines",
+            name=f"Fair value (TTM EPS &times; {npe:g})",
             line=dict(color=color.value_line, width=stroke.value, shape="linear"),
-            hoverinfo="skip", showlegend=False), row=2, col=1)
-    fig.add_trace(go.Scatter(
-        x=xyr, y=fair, mode="lines+markers",
-        name=f"Fair value (EPS &times; {npe:g})",
-        line=dict(color=color.value_line, width=stroke.value, shape="linear"),
-        marker=dict(symbol="diamond", size=marker.size, color=marker.fill,
-                    line=dict(color=color.value_line, width=marker.stroke_width)),
-        customdata=core,
-        hovertemplate="%{x|%Y}<br>Fair value $%{y:,.0f}"
-                      "<br>Core EPS $%{customdata:.2f}<extra></extra>"),
-        row=2, col=1)
+            customdata=[(f / npe if f else None) for f in fair_band],
+            hovertemplate="%{x|%b %Y}<br>Fair value $%{y:,.0f}"
+                          "<br>TTM EPS $%{customdata:.2f}<extra></extra>"),
+            row=2, col=1)
+    else:
+        _fsx, _fsy = _flat_stubs(x_fv, fair, _px0, _px1)
+        if _fsx:
+            fig.add_trace(go.Scatter(
+                x=_fsx, y=_fsy, mode="lines",
+                line=dict(color=color.value_line, width=stroke.value, shape="linear"),
+                hoverinfo="skip", showlegend=False), row=2, col=1)
+        fig.add_trace(go.Scatter(
+            x=x_fv, y=fair, mode="lines+markers",
+            name=f"Fair value (EPS &times; {npe:g})",
+            line=dict(color=color.value_line, width=stroke.value, shape="linear"),
+            marker=dict(symbol="diamond", size=marker.size, color=marker.fill,
+                        line=dict(color=color.value_line, width=marker.stroke_width)),
+            customdata=eps_fv,
+            hovertemplate="%{x|%Y}<br>Fair value $%{y:,.0f}"
+                          "<br>Core EPS $%{customdata:.2f}<extra></extra>"),
+            row=2, col=1)
 
     # Price last, on top, unsmoothed and marker-free. The jaggedness is the
     # point — smoothing a price series is the clearest tell of a chart built by

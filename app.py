@@ -2052,8 +2052,15 @@ elif _page == "analysis":
                         'text-transform:none;font-size:0.7rem">· price vs. earnings-justified fair value</span></div>',
                         unsafe_allow_html=True)
                     # ── facts ──
+                    # Prefer the latest trailing-twelve-month EPS so this figure
+                    # matches where the chart's fair-value line actually ends.
+                    # Reading annual core EPS here while the line rode TTM put a
+                    # headline fair value on screen the chart disagreed with.
                     _core      = _vdata.get("eps_core") or _vdata.get("eps") or [None]
-                    _core_last = _core[-1] if _core else None
+                    _ttm_e     = _vdata.get("ttm_eps") or []
+                    _core_last = (_ttm_e[-1] if _ttm_e else
+                                  (_core[-1] if _core else None))
+                    _eps_basis = "TTM EPS" if _ttm_e else "core (3-yr median) EPS"
                     _fair_last = _core_last * _vdata["normal_pe"] if _core_last else None
                     _cur       = _vdata.get("current_price")
                     _bpe       = _vdata.get("blended_pe")
@@ -2139,9 +2146,11 @@ elif _page == "analysis":
                             else:
                                 st.caption("This company doesn't pay a dividend.")
                     st.caption(
-                        "Fair value = core (3-yr median) EPS × the stock's own historical "
-                        "normal P/E, from SEC-filed earnings. A valuation lens, not a price "
-                        "target — always do your own research.")
+                        f"Fair value = {_eps_basis} × the stock's own historical normal "
+                        f"P/E, from SEC-filed earnings"
+                        + (", updated each quarter." if _ttm_e else ".")
+                        + " A valuation lens, not a price target — always do your "
+                          "own research.")
                     st.markdown("---")
 
             # ── Analyst View (Finnhub: consensus + earnings surprises) ────────
