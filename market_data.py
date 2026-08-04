@@ -398,15 +398,31 @@ def get_financials_supplement(ticker: str) -> dict | None:
 
 
 def _yf_profile(ticker: str) -> dict:
-    """One ticker's company profile from yfinance .info, normalised and None-safe."""
+    """One ticker's company profile from yfinance .info, normalised and None-safe.
+
+    `ok` records whether the lookup actually succeeded. Without it a rate-limited
+    fetch is indistinguishable from a company with no sector, and the caller
+    cheerfully caches the emptiness — which is how a whole report came out with
+    "Unknown" against all 18 holdings.
+    """
     out = {"name": ticker, "sector": None, "industry": None, "pe": None,
            "div_yield": None, "beta": None, "rev_growth": None,
-           "eps_growth": None, "market_cap": None, "quote_type": None}
-    try:
-        import yfinance as yf
-        info = yf.Ticker(to_yahoo_symbol(ticker)).get_info() or {}
-    except Exception:
+           "eps_growth": None, "market_cap": None, "quote_type": None,
+           "ok": False}
+    info = None
+    for attempt in range(3):
+        try:
+            import yfinance as yf
+            info = yf.Ticker(to_yahoo_symbol(ticker)).get_info() or {}
+            if info:
+                break
+        except Exception:
+            info = None
+        # Yahoo throttles bursts; a short escalating pause clears most 429s.
+        time.sleep(0.6 * (attempt + 1))
+    if not info:
         return out
+    out["ok"] = True
 
     def num(*keys):
         for k in keys:
@@ -443,14 +459,32 @@ def _yf_profile(ticker: str) -> dict:
 
 
 def get_ticker_profiles(tickers: list) -> dict:
-    """{ticker: profile dict} for the portfolio Excel report — threaded batch.
+    """{ticker: profile dict} for the portfolio reports — threaded batch.
 
     Every field may be None (funds, data gaps, yfinance failures); callers must
-    render "N/A" rather than assume coverage.
+    render "N/A" rather than assume coverage, and should check
+    `profiles_are_usable()` before caching the result.
+
+    Concurrency is deliberately modest: eight simultaneous .info calls is enough
+    to trip Yahoo's rate limiter on a portfolio of ~20 names, and every throttled
+    call comes back as a profile with no sector.
     """
     from concurrent.futures import ThreadPoolExecutor
     tickers = list(dict.fromkeys(t.upper() for t in tickers if t))
     if not tickers:
         return {}
-    with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as ex:
+    with ThreadPoolExecutor(max_workers=min(4, len(tickers))) as ex:
         return dict(zip(tickers, ex.map(_yf_profile, tickers)))
+
+
+def profiles_are_usable(profiles: dict, min_share: float = 0.5) -> bool:
+    """True when enough of the batch actually resolved to be worth caching.
+
+    A throttled fetch returns structurally valid dicts full of None, so callers
+    cannot tell success from failure by looking at the values. Caching that for
+    a day means every report until tomorrow says "Unknown".
+    """
+    if not profiles:
+        return False
+    ok = sum(1 for p in profiles.values() if p and p.get("ok"))
+    return ok >= max(1, int(len(profiles) * min_share))

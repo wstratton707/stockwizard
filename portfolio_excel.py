@@ -522,6 +522,15 @@ def _tp_title(ws, title, sub_lines, ncols=6):
     return 2 + len(sub_lines) + 1   # first free row
 
 
+def _finite(v):
+    """Numbers only — NaN and inf become None so callers render a dash."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f and abs(f) != float("inf") else None
+
+
 def _derive_portfolio_stats(tracked, profiles):
     """One shared analytics pass every sheet reads from.
 
@@ -589,8 +598,19 @@ def _derive_portfolio_stats(tracked, profiles):
         "rev_growth": rev_g, "rev_cov": rev_cov,
         "sectors": sectors, "industries": industries,
         "hhi": hhi, "eff_n": (1.0 / hhi if hhi > 0 else None),
-        "vol": tracked["metrics"].get("Ann. Volatility"),
+        # NaN, not None, is what a volatility computed from two observations
+        # comes back as — and it printed straight through to the report as
+        # "nan%". Anything non-finite is treated as absent.
+        "vol": _finite(tracked["metrics"].get("Ann. Volatility")),
         "n_days": len(tracked["curve"]),
+        # Below this, ratios and drawdowns describe one market episode rather
+        # than the portfolio. Reports use it to suppress statistics that would
+        # otherwise read as fact ("deepest decline 0.0%", "100% positive months").
+        "thin_history": len(tracked["curve"]) < 21,
+        # Did company metadata actually resolve? Without this the reports cannot
+        # tell "no sector" from "the sector lookup failed".
+        "profiles_ok": sum(
+            1 for r in rows if r.get("sector") not in (None, "Unknown")),
     }
 
 

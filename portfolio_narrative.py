@@ -212,6 +212,7 @@ def _assessment(stats, m):
 
 def _strengths(stats, m):
     out = []
+    thin = stats.get("thin_history")
     hhi, n, eff = stats["hhi"], stats["n"], stats.get("eff_n")
     if hhi < 0.12 and n >= 10:
         out.append(f"Genuine diversification — {n} positions with an effective count "
@@ -222,17 +223,22 @@ def _strengths(stats, m):
     if len(named) >= 5:
         out.append(f"Exposure spans {len(named)} sectors, so the portfolio is not a "
                    f"single macro bet wearing the clothes of a diversified book.")
+    # Everything below is a claim about the RECORD, so none of it may be stated
+    # from a handful of sessions. A two-day-old portfolio was being praised for
+    # a "0.0% deepest decline most investors can hold through" — technically
+    # true, entirely meaningless, and exactly the kind of line that makes a
+    # report look automated.
     alpha = m.get("vs S&P 500")
-    if isinstance(alpha, (int, float)) and alpha > 0:
+    if not thin and isinstance(alpha, (int, float)) and alpha > 0:
         out.append(f"It is beating the S&P 500 by {alpha:.1f} points on the same "
                    f"contribution schedule — a like-for-like comparison, not a "
                    f"lump-sum one.")
     sharpe = m.get("Sharpe Ratio")
-    if isinstance(sharpe, (int, float)) and sharpe > 1:
+    if not thin and isinstance(sharpe, (int, float)) and sharpe > 1:
         out.append(f"A Sharpe ratio of {sharpe:.2f} indicates the returns earned so "
                    f"far have been adequately paid for in risk terms.")
     dd = m.get("Max Drawdown")
-    if isinstance(dd, (int, float)) and dd > -15:
+    if not thin and isinstance(dd, (int, float)) and -15 < dd < -0.5:
         out.append(f"The deepest peak-to-trough decline has been {dd:.1f}%, a "
                    f"drawdown most investors can hold through without selling.")
     dy = stats.get("div_yield") or 0
@@ -284,6 +290,11 @@ def _concerns(stats, m):
         out.append(f"Only {stats['n_days']} trading days of history exist so far. "
                    f"Risk statistics computed over a window this short describe one "
                    f"market episode rather than a durable characteristic.")
+    if not stats.get("profiles_ok"):
+        out.append("Sector, valuation and beta data could not be retrieved for these "
+                   "holdings, so the exposure and style sections of this report are "
+                   "incomplete. This is a data-availability problem, not a finding "
+                   "about the portfolio — rebuilding the report usually resolves it.")
     return out or ["No material structural concerns stand out from the current metrics."]
 
 
@@ -313,8 +324,14 @@ def _sector_commentary(stats):
     sw = _sector_weights(stats)
     named = [(s, w) for s, w in sw if s not in ("Unknown", "Fund / ETF")]
     if not named:
-        return ("Sector data is unavailable for these holdings, so exposure cannot "
-                "be assessed.")
+        if not stats.get("profiles_ok"):
+            return ("Sector data could not be retrieved for these holdings when this "
+                    "report was generated, so exposure could not be assessed. That is "
+                    "a temporary data-provider limitation rather than a property of "
+                    "the portfolio — building the report again usually fills it in.")
+        return ("These holdings are funds rather than individual companies, so they "
+                "carry no single sector of their own; look through to each fund's "
+                "own holdings to assess exposure.")
     top, tw = named[0]
     txt = f"The largest sector exposure is {top} at {_f(tw)} of assets"
     if len(named) > 1:
@@ -434,8 +451,15 @@ def _themes(stats):
                    f"sector continuing to perform.")
     lg = stats.get("largest")
     if lg and lg["w"] > 0.15:
-        out.append(f"A concentrated position in {lg['name']} at {_f(lg['w'])}, which "
-                   f"functions as a single-company thesis inside the portfolio.")
+        # A fund is not a company. Calling a 17% QQQ position "a single-company
+        # thesis" is wrong on its face and undermines everything around it.
+        if (lg.get("sector") == "Fund / ETF"):
+            out.append(f"A core holding in {lg['name']} at {_f(lg['w'])}, which gives "
+                       f"the portfolio broad market exposure in a single position.")
+        else:
+            out.append(f"A concentrated position in {lg['name']} at {_f(lg['w'])}, "
+                       f"which functions as a single-company thesis inside the "
+                       f"portfolio.")
     g = stats.get("rev_growth")
     if g is not None and g > 0.15:
         out.append(f"Above-average revenue growth ({_f(g)} weighted), so the book is "

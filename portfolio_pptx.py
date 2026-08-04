@@ -364,12 +364,18 @@ def build_portfolio_review_pptx(portfolio_name, tracked, profiles):
              max_items=4)
 
     # ── 6. Risk ───────────────────────────────────────────────────────────────
-    s = _slide("Risk Analysis", f"Measured over {stats['n_days']} trading days")
+    _thin = stats.get("thin_history")
+    s = _slide("Risk Analysis",
+               (f"Only {stats['n_days']} trading days so far — risk figures withheld"
+                if _thin else f"Measured over {stats['n_days']} trading days"))
+    # See the Word report: from a couple of sessions these formulas return 0,
+    # and a 0 presented as a measurement is worse than an honest blank.
+    _hold = "—"
     risk_tiles = [
         ("Beta", "—" if stats["beta"] is None else f"{stats['beta']:.2f}"),
-        ("Volatility", _pc(stats.get("vol"))),
-        ("Max drawdown", _pc(m.get("Max Drawdown"))),
-        ("Sharpe", str(m.get("Sharpe Ratio", "—"))),
+        ("Volatility", _hold if _thin else _pc(stats.get("vol"))),
+        ("Max drawdown", _hold if _thin else _pc(m.get("Max Drawdown"))),
+        ("Sharpe", _hold if _thin else str(m.get("Sharpe Ratio", "—"))),
     ]
     for i, (lbl, val) in enumerate(risk_tiles):
         _stat_tile(s, 0.45 + i * 3.18, 1.5, 3.0, 1.0, lbl, val)

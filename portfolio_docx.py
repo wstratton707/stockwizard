@@ -386,15 +386,26 @@ def build_portfolio_docx(portfolio_name, tracked, profiles):
 
     # ── 4. Risk ───────────────────────────────────────────────────────────────
     _h1(doc, "Risk Analysis")
+    # With only a few sessions, a drawdown of 0.0% and a Sharpe of 0 are what
+    # the formulas return, not what the portfolio did. Printing them as figures
+    # gives false comfort, so they are withheld until there is enough history.
+    _thin = stats.get("thin_history")
+    _hold = "Needs ~1 month of history"
     _kv_table(doc, [
         ("Portfolio beta", "—" if stats["beta"] is None else f"{stats['beta']:.2f}"),
-        ("Annualised volatility", _pc(stats.get("vol"))),
-        ("Maximum drawdown", _pc(m.get("Max Drawdown"))),
-        ("Sharpe ratio", m.get("Sharpe Ratio", "—")),
-        ("Sortino ratio", m.get("Sortino Ratio", "—")),
+        ("Annualised volatility", _hold if _thin else _pc(stats.get("vol"))),
+        ("Maximum drawdown", _hold if _thin else _pc(m.get("Max Drawdown"))),
+        ("Sharpe ratio", _hold if _thin else m.get("Sharpe Ratio", "—")),
+        ("Sortino ratio", _hold if _thin else m.get("Sortino Ratio", "—")),
         ("Concentration (HHI)", f"{stats['hhi']:.3f} — {narr['diversification_band']}"),
         ("Diversification score", f"{narr['diversification_score']} / 10"),
     ])
+    if _thin:
+        _para(doc, f"Risk statistics are withheld above because only "
+                   f"{stats['n_days']} trading days have elapsed since inception. "
+                   f"A volatility or drawdown figure computed from that window "
+                   f"describes a couple of sessions, not the portfolio.",
+              size=9.5, color=MUTED, italic=True)
     _h2(doc, "What the risk profile means")
     _para(doc, narr["posture_text"])
     _para(doc, narr["diversification_text"])
@@ -415,9 +426,11 @@ def build_portfolio_docx(portfolio_name, tracked, profiles):
           else "—")),
         ("Annualised return", _pc(m.get("Ann. Return"), sign=True)
          if m.get("Ann. Return") is not None else "Needs 3 months of history"),
-        ("Best month", _pc(m.get("Best Month"), sign=True)),
-        ("Worst month", _pc(m.get("Worst Month"), sign=True)),
-        ("Positive months", _pc(m.get("% Months Positive"))),
+        # A portfolio two days old has one "month", so best = worst and
+        # "100% positive months" is arithmetic, not a track record.
+        ("Best month", _hold if _thin else _pc(m.get("Best Month"), sign=True)),
+        ("Worst month", _hold if _thin else _pc(m.get("Worst Month"), sign=True)),
+        ("Positive months", _hold if _thin else _pc(m.get("% Months Positive"))),
     ])
     for line in narr["performance_lines"]:
         _para(doc, line)

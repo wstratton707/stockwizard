@@ -23,7 +23,7 @@ import auth
 import chart_theme as ct
 
 from tracker import track_portfolio, dollars_to_lots, amount_to_shares
-from market_data import get_ticker_profiles
+from market_data import get_ticker_profiles, profiles_are_usable
 from portfolio_excel import build_tracked_portfolio_excel
 from portfolio_docx import build_portfolio_docx
 
@@ -69,10 +69,26 @@ def _stat_ribbon(items):
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def _cached_profiles(tickers_key):
-    # Company metadata (sector/industry/P/E/beta) moves slowly — a day's TTL
-    # keeps repeat exports instant without re-hitting Yahoo per ticker.
+def _cached_profiles_ok(tickers_key):
+    """Cached only when the fetch actually worked — see _profiles()."""
     return get_ticker_profiles(list(tickers_key))
+
+
+def _profiles(tickers_key):
+    """Company metadata, cached for a day only if it came back usable.
+
+    Yahoo throttles bursts, and a throttled lookup returns a well-formed dict
+    with every field empty. Caching that unconditionally meant one unlucky
+    fetch produced a full day of reports with "Unknown" against every holding
+    and no sector, style or beta analysis. Now a bad batch is retried on the
+    next attempt instead of being remembered.
+    """
+    profiles = _cached_profiles_ok(tickers_key)
+    if profiles_are_usable(profiles):
+        return profiles
+    _cached_profiles_ok.clear()             # don't let the failure stick
+    profiles = get_ticker_profiles(list(tickers_key))
+    return profiles
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -265,7 +281,7 @@ def _render_exports(pid, name, res):
         with st.spinner(f"Building your {_label.lower()}…"):
             try:
                 tickers = tuple(sorted(h["ticker"] for h in res["holdings"]))
-                profiles = _cached_profiles(tickers)
+                profiles = _profiles(tickers)
                 if _kind == "excel":
                     buf = build_tracked_portfolio_excel(name, res, profiles)
                 elif _kind == "word":
