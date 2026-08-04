@@ -25,6 +25,13 @@ import chart_theme as ct
 from tracker import track_portfolio, dollars_to_lots, amount_to_shares
 from market_data import get_ticker_profiles
 from portfolio_excel import build_tracked_portfolio_excel
+from portfolio_docx import build_portfolio_docx
+
+try:
+    from portfolio_pptx import build_portfolio_review_pptx
+    _PPTX_OK = True
+except Exception:                       # python-pptx missing on this instance
+    _PPTX_OK = False
 from database import (
     save_tracked_portfolio, load_tracked_portfolios,
     update_tracked_portfolio, delete_tracked_portfolio,
@@ -225,6 +232,62 @@ def _render_edit(pid, holdings, api_key):
                     st.rerun()
 
 
+# ── Exports ─────────────────────────────────────────────────────────────────────
+# Three formats off one analysis. Each builds on demand (they render matplotlib
+# charts, which is the memory spike on a small instance), caches the bytes in
+# session, then swaps the button for a download so a second click doesn't
+# rebuild. Keyed per portfolio so two portfolios can't serve each other's file.
+_EXPORTS = [
+    ("excel", "Excel workbook", "xlsx",
+     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+     "Five sheets — summary, holdings, allocation, risk and intelligence."),
+    ("word", "Word report", "docx",
+     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     "A written review: allocation, risk, attribution, strengths and considerations."),
+    ("pptx", "PowerPoint deck", "pptx",
+     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+     "Ten client-ready slides for presenting the portfolio."),
+]
+
+
+def _render_exports(pid, name, res):
+    _formats = [f for f in _EXPORTS if f[0] != "pptx" or _PPTX_OK]
+    _labels = [f[1] for f in _formats]
+    _pick = st.radio("Report format", _labels, horizontal=True,
+                     key=f"fmt_{pid}", label_visibility="collapsed")
+    _kind, _label, _ext, _mime, _blurb = next(
+        f for f in _formats if f[1] == (_pick or _labels[0]))
+    st.caption(_blurb)
+
+    _key = f"rep_{_kind}_{pid}"
+    c1, c2, _sp = st.columns([1.35, 1.15, 2.5])
+    if c1.button(f"Build {_label.lower()}", key=f"gen_{_kind}_{pid}"):
+        with st.spinner(f"Building your {_label.lower()}…"):
+            try:
+                tickers = tuple(sorted(h["ticker"] for h in res["holdings"]))
+                profiles = _cached_profiles(tickers)
+                if _kind == "excel":
+                    buf = build_tracked_portfolio_excel(name, res, profiles)
+                elif _kind == "word":
+                    buf = build_portfolio_docx(name, res, profiles)
+                else:
+                    buf = build_portfolio_review_pptx(name, res, profiles)
+                if buf is None:
+                    st.error("That format isn't available on this instance.")
+                else:
+                    st.session_state[_key] = buf.getvalue()
+            except Exception as e:
+                st.error(f"Couldn't build the report: {e}")
+                import traceback as _tb; print(_tb.format_exc())   # server log, not UI
+    if _key in st.session_state:
+        _safe = "".join(c if c.isalnum() or c in " -_" else "" for c in name).strip() \
+                or "Portfolio"
+        c2.download_button(
+            f"Download .{_ext}", data=st.session_state[_key],
+            file_name=f"QuantWizard {_safe} {date.today().isoformat()}.{_ext}",
+            mime=_mime, key=f"dl_{_kind}_{pid}")
+
+
 # ── Per-portfolio card ──────────────────────────────────────────────────────────
 def _render_card(p, api_key):
     name     = p.get("name", "Untitled")
@@ -325,24 +388,7 @@ def _render_card(p, api_key):
 
     _render_edit(pid, holdings, api_key)
 
-    b1, b2, _sp = st.columns([1.2, 1, 2.8])
-    _xk = f"xlsx_{pid}"
-    if b1.button("Export Excel report", key=f"exp_{pid}"):
-        with st.spinner("Building report…"):
-            try:
-                tickers = tuple(sorted(h["ticker"] for h in res["holdings"]))
-                buf = build_tracked_portfolio_excel(name, res, _cached_profiles(tickers))
-                st.session_state[_xk] = buf.getvalue()
-            except Exception as e:
-                st.error(f"Couldn't build the report: {e}")
-                import traceback as _tb; print(_tb.format_exc())   # server log, not UI
-    if _xk in st.session_state:
-        _safe = "".join(c if c.isalnum() or c in " -_" else "" for c in name).strip() or "Portfolio"
-        b2.download_button(
-            "Download .xlsx", data=st.session_state[_xk],
-            file_name=f"QuantWizard {_safe} {date.today().isoformat()}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"dl_{pid}")
+    _render_exports(pid, name, res)
 
     if st.button("Delete portfolio", key=f"del_{pid}"):
         delete_tracked_portfolio(pid)
