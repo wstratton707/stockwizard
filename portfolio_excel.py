@@ -7,6 +7,9 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.chart import LineChart, BarChart, PieChart, Reference
 from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.axis import ChartLines
+from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.drawing.line import LineProperties
 from openpyxl.formatting.rule import ColorScaleRule, CellIsRule, DataBarRule
 from datetime import datetime
 
@@ -20,9 +23,63 @@ GREY_ROW  = "F2F2F2"
 LIGHT_BG  = "EBF5FB"
 
 
+GRID_GREY = "D9D9D9"
+
+
 def _border():
     t = Side(style="thin")
     return Border(left=t, right=t, top=t, bottom=t)
+
+
+def _soft_line(el):
+    """Hairline grey — for gridlines and axis rules."""
+    el.spPr = GraphicalProperties(ln=LineProperties(solidFill=GRID_GREY, w=9525))
+    return el
+
+
+def _chart_chrome(ch, bar_colour=None, num_fmt=None, gridlines=True):
+    """Make an openpyxl chart legible.
+
+    Two Excel defaults ruin these on sight and neither is visible from the code:
+
+    `delete` is unset on both axes, and Excel reads that as "hide" — so the
+    sector and position charts shipped with no category names and no value
+    scale. Bars with nothing to identify them are decoration, not a chart.
+
+    `varyColors` defaults on for single-series bar charts, so every bar took a
+    different colour. Colour that encodes nothing invites the reader to look for
+    a meaning that isn't there; one series should be one colour.
+
+    Rounded corners, a black frame and near-black gridlines are the rest of the
+    untouched-default look.
+    """
+    ch.roundedCorners = False
+    ch.varyColors = False
+    # Titles default to overlaying the plot, which on the tall Position Weights
+    # chart printed the title across its own top bar.
+    try:
+        if ch.title is not None:
+            ch.title.overlay = False
+    except Exception:
+        pass
+    ch.graphical_properties = GraphicalProperties()
+    ch.graphical_properties.line.noFill = True
+    ch.x_axis.delete = False
+    ch.y_axis.delete = False
+    _soft_line(ch.x_axis)
+    _soft_line(ch.y_axis)
+    if gridlines:
+        ch.y_axis.majorGridlines = _soft_line(ChartLines())
+    if num_fmt:
+        ch.y_axis.numFmt = num_fmt
+    if ch.legend is not None:
+        ch.legend.position = "b"
+        ch.legend.overlay = False
+    if bar_colour:
+        for ser in ch.series:
+            ser.graphicalProperties.solidFill = bar_colour
+            ser.graphicalProperties.line.noFill = True
+    return ch
 
 
 def _hdr(cell, bg=DARK_BLUE, fg=WHITE, size=10):
@@ -299,6 +356,7 @@ def _build_backtest_sheet(wb, backtest_df, backtest_metrics):
         chart.add_data(Reference(ws, min_col=ci, min_row=data_start, max_row=max_r),
                        titles_from_data=True)
     chart.set_categories(Reference(ws, min_col=1, min_row=data_start+1, max_row=max_r))
+    _chart_chrome(chart, num_fmt='$#,##0')
     ws.add_chart(chart, "F2")
 
     _auto_width(ws)
@@ -412,6 +470,7 @@ def _build_mc_sheet(wb, mc_sim_df, mc_summary, milestones):
                           titles_from_data=True)
     chart_mc.set_categories(Reference(ws_mc, min_col=pct_col,
                                        min_row=pct_start+1, max_row=pct_start+n_rows))
+    _chart_chrome(chart_mc, num_fmt='$#,##0')
     ws_mc.add_chart(chart_mc, "A" + str(pct_start + 2))
     ws_mc.freeze_panes = f"A{ms_hdr_row+1}"
     _auto_width(ws_mc)
@@ -805,6 +864,12 @@ def _build_tp_summary(wb, name, tracked, s):
     pie.set_categories(Reference(ws, min_col=4, min_row=th_hdr + 2, max_row=r - 1))
     pie.dataLabels = DataLabelList()
     pie.dataLabels.showPercent = True
+    pie.roundedCorners = False
+    pie.graphical_properties = GraphicalProperties()
+    pie.graphical_properties.line.noFill = True
+    if pie.legend is not None:
+        pie.legend.position = "r"
+        pie.legend.overlay = False
     ws.add_chart(pie, f"D{r + 2}")
     ws.freeze_panes = "A4"
 
@@ -860,10 +925,17 @@ def _build_tp_allocation(wb, s):
         ws.column_dimensions[col].width = 15
 
     total = s["total_value"] or 1.0
+    # Each row carries a long label for the TABLE and a short one for the CHART.
+    # The charts previously took their categories from column A, so every bar was
+    # labelled "SPY — State Street SPDR S&P   ◂ largest" — the sort marker and
+    # the company name both leaked onto the axis and squeezed the plot.
     blocks = [
-        ("By Security", [(f"{h['ticker']} — {h['name'][:22]}", h["value"]) for h in s["rows"]]),
-        ("By Sector",   s["sectors"]),
-        ("By Industry", s["industries"]),
+        ("By Security", [(f"{h['ticker']} — {h['name'][:22]}", h["value"], h["ticker"])
+                         for h in s["rows"]]),
+        ("By Sector",   [(k, v, k) for k, v in s["sectors"]]),
+        ("By Industry", [(k, v, k[:22]) for k, v in s["industries"]]),
+        # (third element is unused now that charts read column A, but kept so the
+        # unpacking below stays a single shape across all three blocks)
     ]
     anchors = {}
     for title, items in blocks:
@@ -871,9 +943,9 @@ def _build_tp_allocation(wb, s):
         for ci, h in enumerate(["Name", "Value", "Weight"], 1):
             _hdr(ws.cell(row=row, column=ci, value=h), bg=MID_BLUE)
         hdr = row; row += 1
-        for i, (label, val) in enumerate(items):
+        for i, (label, val, short) in enumerate(items):
             top = (i == 0)   # lists arrive sorted desc — the largest gets flagged
-            c = ws.cell(row=row, column=1, value=label + ("   ◂ largest" if top else ""))
+            c = ws.cell(row=row, column=1, value=label)
             c.font = Font(name="Arial", size=10, bold=top)
             c.border = _border()
             _num(ws, row, 2, val, '_($* #,##0_)', bold=top)
@@ -895,6 +967,8 @@ def _build_tp_allocation(wb, s):
     ch.add_data(Reference(ws, min_col=2, min_row=sec_hdr, max_row=sec_last),
                 titles_from_data=True)
     ch.set_categories(Reference(ws, min_col=1, min_row=sec_hdr + 1, max_row=sec_last))
+    # Column 2 is the dollar value, so the scale is money, not a percentage.
+    _chart_chrome(ch, bar_colour="3F6C9C", num_fmt='$#,##0')
     ws.add_chart(ch, "E4")
 
     pos_hdr, pos_last = anchors["By Security"]
@@ -904,6 +978,9 @@ def _build_tp_allocation(wb, s):
     ch2.add_data(Reference(ws, min_col=3, min_row=pos_hdr, max_row=pos_last),
                  titles_from_data=True)
     ch2.set_categories(Reference(ws, min_col=1, min_row=pos_hdr + 1, max_row=pos_last))
+    # Column 3 is the weight. Gridlines off: a horizontal bar chart already has
+    # the category rules, and a second set behind them just adds noise.
+    _chart_chrome(ch2, bar_colour="3F6C9C", num_fmt='0.0%', gridlines=False)
     ws.add_chart(ch2, "E22")
     ws.freeze_panes = "A4"
 
