@@ -126,20 +126,23 @@ def _section_header(text):
 # ── Step 0 — Preferences ──────────────────────────────────────────────────────
 
 def _render_step_0():
-    _section_header("Risk Profile")
+    st.markdown(render_inline(_disc.BUILDER_SCOPE), unsafe_allow_html=True)
+
+    _section_header("Model Inputs")
     preset_choice = st.selectbox(
-        "Quick start preset",
+        "Starting preset",
         ["Balanced", "Conservative", "Growth", "Aggressive"],
         index=0,
-        help="Pick a starting point to make the first build feel more guided."
+        help="A starting point for the model. Change any input below."
     )
     preset_map = {"Conservative": 3, "Balanced": 5, "Growth": 7, "Aggressive": 8}
     risk = st.slider(
-        "Risk Tolerance",
+        "Risk Level",
         min_value=1, max_value=10, value=preset_map[preset_choice],
-        help="1 = Very conservative (capital preservation) · 10 = Very aggressive (maximum growth)"
+        help="A modelling input, not a suitability assessment. It sets the target "
+             "portfolio beta the optimiser solves for: 1 ≈ 0.3, 10 ≈ 1.9."
     )
-    st.caption(f"Suggested starter: {preset_choice.lower()} · adjust the slider if you want a different posture.")
+    st.caption(f"Preset: {preset_choice.lower()} · move the slider to model a different beta target.")
     risk_labels = {
         (1,3): ("Conservative","Capital preservation. Heavy bonds and defensive ETFs."),
         (4,6): ("Moderate",    "Balanced growth. Mix of growth stocks and stability."),
@@ -550,8 +553,8 @@ def _render_step_2(api_key):
                 st.warning(
                     f"Your target return of **{portfolios['target_requested']}%/yr** "
                     f"could not be achieved with the selected tickers. "
-                    f"The best achievable is **{portfolios['target_achieved']}%/yr**. "
-                    f"The recommended portfolio has been optimised for the best "
+                    f"The highest achievable is **{portfolios['target_achieved']}%/yr**. "
+                    f"The risk-matched model has been optimised for the highest "
                     f"risk-adjusted return instead."
                 )
 
@@ -626,17 +629,18 @@ def _render_step_2(api_key):
             st.warning(f"Could not load data for: {', '.join(_auto_failed)} — excluded from analysis")
 
     # Portfolio selector
-    _section_header("Choose Your Portfolio")
-    port_choice = st.radio("Optimisation strategy:", [
-        "Recommended (risk-adjusted for your profile)",
-        "Maximum Sharpe Ratio (best risk/return)",
-        "Minimum Volatility (lowest risk)",
-    ], index=0, key="port_choice")
+    _section_header("Choose a Model")
+    _RISK_MATCHED = "Risk-Matched Model (targets the risk level you set)"
+    _MAX_SHARPE   = "Maximum Sharpe Ratio (highest modelled risk/return)"
+    _MIN_VOL      = "Minimum Volatility (lowest modelled risk)"
+    port_choice = st.radio("Optimisation objective:",
+                           [_RISK_MATCHED, _MAX_SHARPE, _MIN_VOL],
+                           index=0, key="port_choice")
 
     choice_map = {
-        "Recommended (risk-adjusted for your profile)": "recommended",
-        "Maximum Sharpe Ratio (best risk/return)":      "max_sharpe",
-        "Minimum Volatility (lowest risk)":             "min_vol",
+        _RISK_MATCHED: "recommended",
+        _MAX_SHARPE:   "max_sharpe",
+        _MIN_VOL:      "min_vol",
     }
     selected_key     = choice_map[port_choice]
     selected_weights = portfolios[selected_key]
@@ -687,7 +691,7 @@ def _render_step_2(api_key):
     # Showing it is the difference between "here is a portfolio" and "here is why
     # this portfolio" — and it's the part a user is actually paying for, since
     # the maths itself is invisible to them.
-    _section_header("Why These Holdings")
+    _section_header("How These Holdings Were Screened")
     _fs   = opt.get("factor_scores", {}) or {}
     _meta = opt.get("rankings_meta", {}) or {}
     _rows = []
@@ -779,7 +783,7 @@ concentration penalty for any single position above 25%.
     # ── Side-by-Side Portfolio Strategy Comparison ───────────────────────
     _section_header("Compare Portfolio Strategies")
     _cmp_rows = []
-    for _ck, _clabel in [("recommended","Recommended"),("max_sharpe","Max Sharpe"),("min_vol","Min Volatility")]:
+    for _ck, _clabel in [("recommended","Risk-Matched"),("max_sharpe","Max Sharpe"),("min_vol","Min Volatility")]:
         _cw = portfolios.get(_ck, {})
         if not _cw:
             continue
@@ -842,7 +846,7 @@ concentration penalty for any single position above 25%.
                    f"historical, over the {_PRICE_HISTORY_YEARS}-year price window.")
 
     # Holdings table
-    _section_header("Suggested Holdings")
+    _section_header("Model Holdings")
     holdings_data = []
     for ticker, weight in sorted(selected_weights.items(), key=lambda x: x[1], reverse=True):
         m    = stock_metrics.get(ticker, {})
@@ -861,7 +865,7 @@ concentration penalty for any single position above 25%.
     st.dataframe(pd.DataFrame(holdings_data), use_container_width=True, hide_index=True)
 
     # ── Explainability Panel ──────────────────────────────────────────────
-    _section_header("Why These Holdings Were Selected")
+    _section_header("How These Holdings Were Screened")
     _sec_lookup = _SECTOR_LOOKUP
 
     for _et, _ew in sorted(selected_weights.items(), key=lambda x: x[1], reverse=True):
@@ -1445,7 +1449,7 @@ def _render_step_3():
     # rebalancing, and by today the winners have grown past their target weight.
     # That is the position a user who acted on this portfolio and left it alone
     # would actually hold.
-    _section_header("Rebalancing Recommendations")
+    _section_header("Drift From Target Weights")
     weights = st.session_state.get(_K_WEIGHTS, {})
     opt     = st.session_state.get(_K_OPTIMISED, {})
     close_df_rb = opt.get("close_df")
@@ -1463,25 +1467,29 @@ def _render_step_3():
         recs = get_rebalancing_recommendations(current_holdings, weights, latest_prices)
         _rb_from = pd.Timestamp(close_df_rb.index[0]).strftime("%b %Y")
         st.caption(
-            f"Assumes you bought these target weights in {_rb_from} and never "
-            f"rebalanced. Drift below is what price moves since then have done to "
-            f"the allocation — trade these amounts to return to target.")
+            f"An illustration of allocation drift, not a trade list. It assumes the "
+            f"model's target weights were held from {_rb_from} with no rebalancing; "
+            f"the gaps below are what price moves alone have done to the allocation "
+            f"since. Nothing here accounts for your tax position, cost basis, or "
+            f"anything else about your circumstances.")
         if recs:
             for r in recs:
-                action_color = GREEN if r["Action"] == "BUY" else RED
+                _below  = r["Action"] == "BUY"
+                _label  = "Below target" if _below else "Above target"
+                action_color = GREEN if _below else RED
                 st.markdown(f"""
                 <div style="display:flex;justify-content:space-between;align-items:center;
                             padding:0.6rem 1rem;border-radius:8px;margin-bottom:0.4rem;
                             background:#f8fafc;border:1px solid #e2e8f0">
                     <span style="font-weight:600;color:#0f172a;font-size:0.9rem">{r['Ticker']}</span>
-                    <span style="color:{action_color};font-weight:700;font-size:0.85rem">{r['Action']}</span>
+                    <span style="color:{action_color};font-weight:700;font-size:0.85rem">{_label}</span>
                     <span style="color:#64748b;font-size:0.82rem">{r['Off Target']} off target</span>
                     <span style="font-family:'JetBrains Mono',monospace;font-size:0.82rem;color:#0f172a">
                         ${r['Difference']:,.0f}
                     </span>
                 </div>""", unsafe_allow_html=True)
         else:
-            st.success("Portfolio is balanced — no rebalancing needed.")
+            st.success("The model's weights are still on target — no drift to show.")
 
     # ── Fee drag (compact callout) ─────────────────────────────────────────
     _ETF_FEES = {

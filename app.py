@@ -2134,9 +2134,10 @@ elif _page == "analysis":
                         <div class="metric-value {cls}">{value}</div>
                     </div>""", unsafe_allow_html=True)
 
-            # ── The Bottom Line (verdict up top) ──────────────────────────────
-            # Surface the plain-English takeaway here instead of only at the very
-            # bottom, so the app delivers on "tells you what to do" immediately.
+            # ── What The Data Shows (summary up top) ──────────────────────────
+            # Surface the plain-English readout here instead of only at the very
+            # bottom. It describes what the numbers did — deliberately not what to
+            # do about them; this platform states findings, it does not advise.
             if summary_text:
                 st.markdown(
                     f'<div style="background:linear-gradient(135deg,var(--brand-1) 0%,var(--brand-2) 100%);'
@@ -2145,7 +2146,7 @@ elif _page == "analysis":
                     f'<div style="font-size:0.66rem;font-weight:700;letter-spacing:1.2px;'
                     f'text-transform:uppercase;color:#60a5fa;margin-bottom:0.5rem;'
                     f'display:flex;align-items:center;gap:0.4rem">'
-                    f'<span class="material-symbols-outlined" style="font-size:1rem">lightbulb</span> The Bottom Line</div>'
+                    f'<span class="material-symbols-outlined" style="font-size:1rem">lightbulb</span> What The Data Shows</div>'
                     f'<div style="color:#cbd5e1;font-size:0.9rem;line-height:1.75;'
                     f'font-family:var(--font-sans)">{summary_text}</div></div>',
                     unsafe_allow_html=True)
@@ -2187,11 +2188,11 @@ elif _page == "analysis":
                     if _disc_pct is None:
                         _verd, _vcls = "—", "fair"
                     elif _disc_pct > 15:
-                        _verd, _vcls = "Overvalued", "over"
+                        _verd, _vcls = "Above its own history", "over"
                     elif _disc_pct < -15:
-                        _verd, _vcls = "Undervalued", "under"
+                        _verd, _vcls = "Below its own history", "under"
                     else:
-                        _verd, _vcls = "Near fair value", "fair"
+                        _verd, _vcls = "In line with history", "fair"
                     _mcap   = company_details.get("Market Cap")
                     _mcap_s = (f"${_mcap/1e12:.2f}T" if _mcap and _mcap >= 1e12 else
                                f"${_mcap/1e9:.1f}B"  if _mcap and _mcap >= 1e9  else

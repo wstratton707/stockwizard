@@ -76,6 +76,21 @@ DIVIDENDS = (
     "but does not model the timing or tax treatment of actual dividend payments."
 )
 
+# ── Portfolio Builder scope (shown before any input is collected) ────────────
+# Sits at the top of the builder so the framing is read before the risk slider,
+# not after the holdings. The tool produces model portfolios from an objective
+# function; it does not assess whether any of them suit the person running it.
+BUILDER_SCOPE = (
+    "<strong>This tool builds model portfolios, not personal recommendations.</strong> "
+    "It runs a published optimisation (mean-variance, Markowitz 1952) over historical "
+    "price data and shows you the result. The risk level you pick is a modelling input "
+    "— it sets the target beta the optimiser solves for — not a suitability assessment. "
+    "QuantWizard is not a registered investment adviser and does not know your finances, "
+    "tax position, time horizon, or obligations. No holding, weight, or dollar figure "
+    "shown here is a suggestion that you buy or sell anything. Talk to a licensed "
+    "adviser before acting on any of it."
+)
+
 # ── Full legal footer (landing page, bottom of reports) ──────────────────────
 FULL_FOOTER = (
     "QuantWizard is a financial data and analytics platform. It is not a registered "
