@@ -1764,3 +1764,19 @@ section[data-testid="stMain"], .stMain { scroll-behavior: smooth; }
 @media (max-width: 999px) {
   .jump-rail { display: none; }
 }
+
+/* Portfolio statistics panel — tone on the VALUE only.
+   Colour here is a reading aid, not decoration: it marks whether a figure sits
+   in a comfortable, watchful or elevated range. The label stays neutral so a
+   column of coloured text doesn't read as an alert. */
+.vf-row b.good { color: var(--green); }
+.vf-row b.warn { color: #b45309; }
+.vf-row b.bad  { color: var(--red); }
+
+/* .vf-row span is nowrap so labels and values never stack. A tooltip nested
+   inside that label inherits it, and with tooltip-text's fixed 210px width the
+   copy would run out of the box as a single clipped line. Wrap it back. */
+.vf-row .tooltip-text { white-space: normal; }
+/* The row is 28px and the panel is dense, so a tooltip anchored to the last
+   row of a group needs to sit above its trigger and clear the neighbours. */
+.vf-row .tooltip-wrap { position: relative; }

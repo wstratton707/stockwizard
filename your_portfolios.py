@@ -248,6 +248,170 @@ def _render_edit(pid, holdings, api_key):
                     st.rerun()
 
 
+# ── Portfolio statistics panel ──────────────────────────────────────────────────
+# A ruled panel beside the chart, not a grid of KPI cards. It answers five
+# questions and stops: what can I expect, how risky is it, how concentrated am I,
+# what do I actually own, and how does it compare to the market.
+#
+# Deliberately NOT shown: VaR (says nothing volatility and drawdown haven't),
+# CAGR (the same number as annualised return), Sortino (Sharpe already carries
+# the glance; Sortino is in the reports), cash weight (we don't track cash) and
+# expense ratio (needs a per-ETF fetch this page doesn't make). Every extra row
+# costs the reader attention that the rows that matter then don't get.
+_TIP = {
+    "exp": "What this portfolio should earn in an average year, from CAPM: the "
+           "10-year Treasury plus the portfolio's beta times a 5% equity risk "
+           "premium. An expectation, not a forecast.",
+    "ann": "Actual return so far, scaled to a yearly rate. Needs about three "
+           "months of history before it means anything.",
+    "dy":  "Trailing dividends as a share of market value. Non-payers count as "
+           "zero, because they are part of what you own.",
+    "inc": "Roughly what the current holdings would pay out over a year if "
+           "dividends stayed as they are.",
+    "beta": "How much the portfolio moves for a 1% market move. Above 1 amplifies "
+            "the market in both directions; below 1 damps it.",
+    "vol": "How much the portfolio's value swings year to year. The S&P 500 runs "
+           "about 15% over the long run.",
+    "sharpe": "Return earned per unit of risk taken, above cash. Above 1 is good.",
+    "dd":  "The deepest peak-to-trough fall so far — the loss you would have had "
+           "to sit through.",
+    "vs":  "Against an S&P 500 position funded on exactly your dates and amounts, "
+           "so contributions can't flatter the comparison.",
+    "big": "Your largest single holding. The bigger it is, the more one company "
+           "decides your result.",
+    "top5": "Share of the portfolio in its five largest positions.",
+    "sec": "Share in your largest sector. Above 30% is usually treated as a "
+           "concentration rather than a tilt.",
+    "eff": "How many equally-sized holdings would carry the same concentration. "
+           "Lower than your holding count means weight is uneven.",
+    "n":   "Number of positions. Most company-specific risk is diversified away "
+           "somewhere around 20-30 names.",
+    "cap": "Where the money sits by company size, weighted by position.",
+    "pe":  "Earnings-weighted P/E across holdings that earn money, so one "
+           "expensive position can't dominate it.",
+}
+
+
+def _tip(text):
+    return (f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">'
+            f'{_html.escape(text)}</span></span>')
+
+
+def _row(label, value, tip_key=None, tone=""):
+    t = _tip(_TIP[tip_key]) if tip_key else ""
+    cls = f' class="{tone}"' if tone else ""
+    return (f'<div class="vf-row"><span>{label}{t}</span>'
+            f'<b{cls}>{value}</b></div>')
+
+
+def _cap_profile(stats):
+    """Weighted average market cap, as a size label."""
+    rows = [r for r in stats["rows"] if r.get("market_cap")]
+    tot = sum(r["value"] for r in rows)
+    if not tot:
+        return None
+    wavg = sum(r["market_cap"] * r["value"] for r in rows) / tot
+    if wavg >= 2e11:
+        return "Mega cap"
+    if wavg >= 1e10:
+        return "Large cap"
+    if wavg >= 2e9:
+        return "Mid cap"
+    return "Small cap"
+
+
+def _stat_panel(res, profiles):
+    """The ruled statistics panel. Returns HTML."""
+    from portfolio_excel import _derive_portfolio_stats
+    from constants import EQUITY_RISK_PREMIUM, get_long_risk_free_rate
+
+    s = _derive_portfolio_stats(res, profiles)
+    m = res.get("metrics", {}) or {}
+    thin = s.get("thin_history")
+    dash = "—"
+
+    def pct(v, dp=1, sign=False):
+        if v is None:
+            return dash
+        return f"{v:+.{dp}f}%" if sign else f"{v:.{dp}f}%"
+
+    def w(v):
+        return dash if v is None else f"{v:.1%}"
+
+    # Return
+    beta = s.get("beta")
+    exp = (get_long_risk_free_rate() + beta * EQUITY_RISK_PREMIUM) if beta is not None else None
+    dy = s.get("div_yield")
+    income = (dy * s["total_value"]) if (dy and s.get("total_value")) else None
+    ann = m.get("Ann. Return")
+    vs = m.get("vs S&P 500")
+
+    html = ['<div class="val-facts">']
+    html.append('<div class="vf-group">Return outlook</div>')
+    html.append(_row("Expected return (CAPM)", w(exp), "exp"))
+    html.append(_row("Annualised so far",
+                     "Needs 3 months" if ann is None else pct(ann, sign=True), "ann",
+                     "" if ann is None else ("good" if ann >= 0 else "bad")))
+    html.append(_row("vs S&P 500",
+                     dash if not isinstance(vs, (int, float)) else f"{vs:+.1f} pts", "vs",
+                     "" if not isinstance(vs, (int, float)) else
+                     ("good" if vs >= 0 else "bad")))
+    html.append(_row("Dividend yield", w(dy), "dy"))
+    html.append(_row("Est. annual income",
+                     dash if income is None else f"${income:,.0f}", "inc"))
+
+    # Risk
+    html.append('<div class="vf-group">Risk</div>')
+    html.append(_row("Portfolio beta", dash if beta is None else f"{beta:.2f}", "beta",
+                     "" if beta is None else
+                     ("warn" if beta > 1.15 else "good" if beta < 0.85 else "")))
+    _vol = s.get("vol")
+    html.append(_row("Volatility (annual)",
+                     "Needs 1 month" if thin else pct(_vol), "vol",
+                     "" if (thin or _vol is None) else
+                     ("bad" if _vol > 25 else "good" if _vol < 15 else "warn")))
+    _sh = m.get("Sharpe Ratio")
+    html.append(_row("Sharpe ratio", "Needs 1 month" if thin else (_sh if _sh is not None else dash),
+                     "sharpe",
+                     "" if (thin or not isinstance(_sh, (int, float))) else
+                     ("good" if _sh > 1 else "warn" if _sh > 0 else "bad")))
+    _dd = m.get("Max Drawdown")
+    html.append(_row("Max drawdown", "Needs 1 month" if thin else pct(_dd), "dd",
+                     "" if (thin or _dd is None) else
+                     ("bad" if _dd < -20 else "warn" if _dd < -10 else "good")))
+
+    # Concentration
+    html.append('<div class="vf-group">Concentration</div>')
+    lg = s.get("largest")
+    html.append(_row("Largest position",
+                     dash if not lg else f"{lg['ticker']} · {w(lg['w'])}", "big",
+                     "" if not lg else ("bad" if lg["w"] > 0.25 else
+                                        "warn" if lg["w"] > 0.15 else "good")))
+    html.append(_row("Top 5 holdings", w(s["top5"]), "top5",
+                     "bad" if s["top5"] > 0.70 else "warn" if s["top5"] > 0.50 else "good"))
+    _named = [(k, v) for k, v in s["sectors"] if k not in ("Unknown", "Fund / ETF")]
+    _tot = s["total_value"] or 1
+    _secw = (_named[0][1] / _tot) if _named else None
+    html.append(_row("Largest sector",
+                     dash if not _named else f"{_named[0][0]} · {w(_secw)}", "sec",
+                     "" if _secw is None else
+                     ("bad" if _secw > 0.40 else "warn" if _secw > 0.30 else "good")))
+    html.append(_row("Effective holdings",
+                     dash if not s.get("eff_n") else f"{s['eff_n']:.1f} of {s['n']}", "eff"))
+
+    # What you own
+    html.append('<div class="vf-group">What you own</div>')
+    html.append(_row("Holdings", str(s["n"]), "n",
+                     "good" if s["n"] >= 15 else "warn" if s["n"] >= 8 else "bad"))
+    html.append(_row("Size profile", _cap_profile(s) or dash, "cap"))
+    html.append(_row("Weighted P/E",
+                     dash if s.get("wpe") is None else f"{s['wpe']:.1f}x", "pe"))
+    _fund = sum(v for k, v in s["sectors"] if k == "Fund / ETF") / _tot
+    html.append(_row("Funds / ETFs", w(_fund) if _fund else "None"))
+    html.append("</div>")
+    return "".join(html), s
+
+
 # ── Exports ─────────────────────────────────────────────────────────────────────
 # Three formats off one analysis. Each builds on demand (they render matplotlib
 # charts, which is the memory spike on a small instance), caches the bytes in
@@ -364,6 +528,21 @@ def _render_card(p, api_key):
     st.caption(f"Tracked since {res['inception_date']}  ·  {_ann_return_str(m)}"
                f"  ·  Sharpe {m.get('Sharpe Ratio', 'N/A')}")
 
+    # Statistics beside the chart. Profiles are fetched here rather than only at
+    # export time so the numbers are on screen without a second click; the
+    # day-long cache means this costs one fetch per portfolio per day.
+    _panel_html = None
+    try:
+        with st.spinner("Loading portfolio statistics…"):
+            _tk = tuple(sorted(h["ticker"] for h in res["holdings"]))
+            _panel_html, _ = _stat_panel(res, _profiles(_tk))
+    except Exception:
+        import traceback as _tb; print(_tb.format_exc())   # server log, not UI
+
+    _pcol, _ccol = st.columns([1, 2]) if _panel_html else (None, st.container())
+    if _panel_html:
+        _pcol.markdown(_panel_html, unsafe_allow_html=True)
+
     # Value vs benchmark vs contributed
     curve = res["curve"]
     fig = go.Figure()
@@ -381,14 +560,16 @@ def _render_card(p, api_key):
                                        dash="dash")))
     ct.style(
         fig,
-        height=340,
+        # Matched to the statistics panel beside it so the two align top and
+        # bottom instead of one floating against the other.
+        height=560 if _panel_html else 340,
         # A portfolio can be days old, so yearly ticks would label one point.
         x=ct.time_axis(fy_ticks=False),
         # Not a filled area, and forcing the base to zero would flatten a curve
         # whose whole story is the move above the invested line.
         y=ct.value_axis(zero=False),
     )
-    st.plotly_chart(fig, use_container_width=True, key=f"curve_{pid}")
+    _ccol.plotly_chart(fig, use_container_width=True, key=f"curve_{pid}")
 
     # Holdings table
     if res["holdings"]:

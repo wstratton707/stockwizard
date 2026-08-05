@@ -553,7 +553,10 @@ def _derive_portfolio_stats(tracked, profiles):
                      "div_yield":  p.get("div_yield"),
                      "beta":       p.get("beta"),
                      "rev_growth": p.get("rev_growth"),
-                     "eps_growth": p.get("eps_growth")})
+                     "eps_growth": p.get("eps_growth"),
+                     # Carried so callers can weight by company size (the
+                     # large/mid/small profile) without re-reading `profiles`.
+                     "market_cap": p.get("market_cap")})
     rows.sort(key=lambda r: -r["w"])
 
     total_value = sum(r["value"] for r in rows)
