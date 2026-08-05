@@ -1002,6 +1002,122 @@ def _build_tp_intel(wb, s):
 
 
 # ── Master builder ────────────────────────────────────────────────────────────
+def _build_tp_live(wb, portfolio_name, s):
+    """A self-refreshing valuation sheet — prices come from Excel, not from us.
+
+    Every other sheet is a snapshot taken when the file was generated. This one
+    re-prices the same holdings each time it recalculates, using Excel's own
+    STOCKHISTORY function, so the workbook stays useful the day after it was
+    downloaded instead of going stale immediately.
+
+    Why this and not a web query: a Power Query connection lives in a binary
+    DataMashup part that openpyxl cannot write, and a WEBSERVICE() call is
+    blocked in Excel for the web and in most corporate builds — and would put
+    an API key inside a file the user then emails around. STOCKHISTORY needs no
+    backend, no key, and no service of ours to stay up. It is a Microsoft 365
+    function, so the sheet degrades to a clear message elsewhere rather than a
+    wall of #NAME? errors.
+
+    The shares are hardcoded because they are facts about the position; only the
+    price, and everything derived from it, is live.
+    """
+    ws = wb.create_sheet("Live_Prices")
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 12
+    for col, wdt in zip("BCDEFG", (13, 15, 15, 15, 15, 12)):
+        ws.column_dimensions[col].width = wdt
+
+    ws["A1"] = f"{portfolio_name} — Live Valuation"
+    ws["A1"].font = Font(name="Arial", size=14, bold=True, color=DARK_BLUE)
+    ws["A2"] = ("Prices refresh from Excel itself. Press F9, or Data ▸ Refresh All, "
+                "to re-price the portfolio — no need to download the report again.")
+    ws["A2"].font = Font(name="Arial", size=9, italic=True, color="808080")
+    ws["A3"] = ("Requires Microsoft 365 (STOCKHISTORY). In older Excel the price "
+                "column will read “Needs Microsoft 365”; every other sheet still works.")
+    ws["A3"].font = Font(name="Arial", size=9, italic=True, color="808080")
+
+    ws["A5"] = "Last recalculated"
+    ws["A5"].font = Font(name="Arial", size=9, color="808080")
+    ws["B5"] = "=TEXT(NOW(),\"yyyy-mm-dd hh:mm\")"
+    ws["B5"].font = Font(name="Arial", size=9, bold=True)
+
+    hdr_row = 7
+    headers = ["Ticker", "Shares", "Cost basis", "Live price", "Live value",
+               "Gain / loss", "Return"]
+    for ci, h in enumerate(headers, 1):
+        _hdr(ws.cell(row=hdr_row, column=ci, value=h))
+
+    first = hdr_row + 1
+    rows = s["rows"]
+    for i, h in enumerate(rows):
+        r = first + i
+        ws.cell(row=r, column=1, value=h["ticker"]).font = Font(name="Arial", size=10, bold=True)
+        _num(ws, r, 2, h["shares"], "#,##0.000")
+        _num(ws, r, 3, h.get("cost_basis"), '_($* #,##0_)')
+        # LET keeps STOCKHISTORY to a single call; INDEX takes the last row of
+        # the returned array, which is the most recent close it has.
+        ws.cell(row=r, column=4, value=(
+            f'=IFERROR(LET(h,STOCKHISTORY(A{r},TODAY()-10,TODAY(),0,0,1),'
+            f'INDEX(h,ROWS(h),1)),"Needs Microsoft 365")'))
+        ws.cell(row=r, column=4).number_format = '_($* #,##0.00_)'
+        ws.cell(row=r, column=5, value=f"=IFERROR(B{r}*D{r},\"\")")
+        ws.cell(row=r, column=5).number_format = '_($* #,##0_)'
+        ws.cell(row=r, column=6, value=f"=IFERROR(E{r}-C{r},\"\")")
+        ws.cell(row=r, column=6).number_format = '_($* #,##0_)'
+        ws.cell(row=r, column=7, value=f"=IFERROR(E{r}/C{r}-1,\"\")")
+        ws.cell(row=r, column=7).number_format = '+0.0%;-0.0%'
+        for ci in range(1, 8):
+            c = ws.cell(row=r, column=ci)
+            c.border = _border()
+            if ci >= 4:
+                c.font = Font(name="Arial", size=10)
+                c.alignment = Alignment(horizontal="right")
+            if i % 2 == 1:
+                c.fill = PatternFill("solid", fgColor=GREY_ROW)
+
+    last = first + len(rows) - 1
+    tot = last + 1
+    ws.cell(row=tot, column=1, value="TOTAL").font = Font(name="Arial", size=10, bold=True)
+    # Guarded on COUNT: where STOCKHISTORY is unavailable the per-row values are
+    # empty text, so a plain SUM totalled to $0 against a real cost basis and the
+    # return read -100.0% — a portfolio that looks wiped out rather than a
+    # feature that isn't available.
+    _live = f"COUNT(E{first}:E{last})=0"
+    for ci, formula in ((3, f"=SUM(C{first}:C{last})"),
+                        (5, f'=IF({_live},"",SUM(E{first}:E{last}))'),
+                        (6, f'=IF({_live},"",SUM(F{first}:F{last}))')):
+        c = ws.cell(row=tot, column=ci, value=formula)
+        c.number_format = '_($* #,##0_)'
+        c.font = Font(name="Arial", size=10, bold=True)
+        c.alignment = Alignment(horizontal="right")
+    c = ws.cell(row=tot, column=7,
+                value=f'=IF({_live},"",IFERROR(E{tot}/C{tot}-1,""))')
+    c.number_format = '+0.0%;-0.0%'
+    c.font = Font(name="Arial", size=10, bold=True)
+    c.alignment = Alignment(horizontal="right")
+    for ci in range(1, 8):
+        cc = ws.cell(row=tot, column=ci)
+        cc.border = _border()
+        cc.fill = PatternFill("solid", fgColor="D6E4F0")
+
+    note = tot + 2
+    ws.cell(row=note, column=1, value=(
+        "Cost basis is what was paid for the shares still held, so gain / loss "
+        "here is unrealised. Prices are end-of-day from Microsoft's market data "
+        "provider and may lag intraday."))
+    ws.cell(row=note, column=1).font = Font(name="Arial", size=9, italic=True,
+                                            color="808080")
+    # The path that works for everyone, M365 or not.
+    lc = ws.cell(row=note + 2, column=1,
+                 value="↗  Open this portfolio on QuantWizard for a fully "
+                       "refreshed report")
+    lc.font = Font(name="Arial", size=10, bold=True, color=MID_BLUE,
+                   underline="single")
+    lc.hyperlink = "https://quantwizard.co/?page=portfolios"
+    ws.freeze_panes = f"A{first}"
+    return ws
+
+
 def build_tracked_portfolio_excel(portfolio_name, tracked, profiles):
     """The Your Portfolios export: tracker.track_portfolio result + profiles → xlsx buffer."""
     s = _derive_portfolio_stats(tracked, profiles)
@@ -1009,6 +1125,7 @@ def build_tracked_portfolio_excel(portfolio_name, tracked, profiles):
     wb.remove(wb.active)
     _build_tp_summary(wb, portfolio_name, tracked, s)
     _build_tp_holdings(wb, s)
+    _build_tp_live(wb, portfolio_name, s)
     _build_tp_allocation(wb, s)
     _build_tp_risk(wb, tracked, s)
     _build_tp_intel(wb, s)
