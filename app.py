@@ -829,6 +829,32 @@ if _page == "home":
             f'<span class="sample-dl-sub">Excel · {_sm["period"]} · {_sm["_size"]} · '
             f'generated {_sm["_date"]}</span></span></a>', unsafe_allow_html=True)
 
+    # ── Built by ──────────────────────────────────────────────────────────────
+    # Lives at the bottom of the front page, above the footer. It used to sit on
+    # the Analysis page's empty state, which meant it only appeared to someone
+    # who had navigated to Analysis and then not typed a ticker — the one visitor
+    # least likely to care who built it.
+    st.markdown('<div class="section-header">Built By</div>', unsafe_allow_html=True)
+    _fc, _ = st.columns([3, 2])
+    _fc.markdown("""
+    <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
+        <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0434.jpeg"
+             alt="Wyatt Stratton"
+             style="width:64px;height:64px;border-radius:50%;object-fit:cover;
+                    flex-shrink:0;border:2px solid #1d4ed8">
+        <div>
+            <div class="founder-name">Wyatt Stratton</div>
+            <div class="founder-role">Founder</div>
+            <div class="founder-school">Indiana University Bloomington</div>
+            <div class="founder-quote" style="margin-top:0.6rem">
+                &ldquo;I built QuantWizard because I was tired of spending hours pulling
+                financial data manually. Any investor deserves a professional report
+                in seconds.&rdquo;
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.markdown('<div class="home-footer">QuantWizard · For informational purposes only · '
                 'Not investment advice</div>', unsafe_allow_html=True)
 
@@ -1295,29 +1321,8 @@ elif _page == "analysis":
         if SHOW_PRICING:
             render_pricing_section()
 
-        # ── Team ──────────────────────────────────────────────────────────────
-        st.markdown("""
-        <div class="section-header">Built By</div>
-        """, unsafe_allow_html=True)
-
-        _fc, _ = st.columns([3, 2])
-        with _fc:
-            st.markdown("""
-            <div class="founder-card" style="display:flex;align-items:flex-start;gap:1.25rem">
-                <img src="https://raw.githubusercontent.com/wstratton707/stockwizard/main/assets/IMG_0434.jpeg"
-                     style="width:64px;height:64px;border-radius:50%;object-fit:cover;
-                            flex-shrink:0;border:2px solid #1d4ed8">
-                <div>
-                    <div style="font-weight:700;color:#0f172a;font-size:0.92rem">Wyatt Stratton</div>
-                    <div style="color:#1d4ed8;font-size:0.78rem;margin-bottom:0.5rem">
-                        Founder · Indiana University Bloomington</div>
-                    <div style="color:#64748b;font-size:0.82rem;line-height:1.6;font-style:italic">
-                        "I built QuantWizard because I was tired of spending hours pulling financial
-                        data manually. Any investor deserves a professional report in seconds."
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+        # (The founder card moved to the bottom of the Home page — it was only
+        # ever visible here to someone who opened Analysis and typed nothing.)
 
         # ── Footer ────────────────────────────────────────────────────────────
         st.markdown(render_footer(), unsafe_allow_html=True)
