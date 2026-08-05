@@ -11,8 +11,15 @@ from openpyxl.chart import LineChart, BarChart, Reference
 from openpyxl.chart.marker import Marker
 from openpyxl.chart.axis import ChartLines
 from openpyxl.chart.text import RichText
+from openpyxl.chart.series import SeriesLabel
+from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.drawing.line import LineProperties
 from openpyxl.drawing.text import (RichTextProperties, Paragraph,
                                    ParagraphProperties, CharacterProperties)
+
+# Hairline grey for gridlines and axis rules. Excel's default is near-black,
+# which competes with the data it is supposed to sit behind.
+GRID_GREY = "D9D9D9"
 from openpyxl.formatting.rule import ColorScaleRule, CellIsRule
 from openpyxl.drawing.image import Image as XLImage
 from datetime import datetime
@@ -1297,12 +1304,36 @@ def _px_ref(ws, col, r0, r1):
     return Reference(ws, min_col=col, min_row=r0 - 1, max_row=r1)
 
 
+def _soft(el):
+    """Hairline grey outline — for gridlines and axis rules."""
+    el.spPr = GraphicalProperties(ln=LineProperties(solidFill=GRID_GREY, w=9525))
+    return el
+
+
+def _chart_frame(ch):
+    """Shared chrome: no rounded corners, no outer box, legend below the plot.
+
+    Excel defaults put the legend INSIDE the plot area, where it printed on top
+    of the data — the MA200 label sat across the MA200 line. Rounded corners and
+    a black outer border are the other two tells of an untouched default chart.
+    """
+    ch.roundedCorners = False
+    ch.graphical_properties = GraphicalProperties()
+    ch.graphical_properties.line.noFill = True
+    if ch.legend is not None:
+        ch.legend.position = "b"
+        ch.legend.overlay = False
+    _soft(ch.x_axis)
+    _soft(ch.y_axis)
+    return ch
+
+
 def _line_chart(title, y_title=None, height=8.0, width=22.0):
     ch = LineChart()
     ch.title = title
     ch.style = 2
     ch.height, ch.width = height, width
-    ch.y_axis.majorGridlines = ChartLines()
+    ch.y_axis.majorGridlines = _soft(ChartLines())
     ch.x_axis.majorTickMark = "out"
     ch.y_axis.majorTickMark = "out"
     # Excel hides the category axis on some line charts unless told otherwise.
@@ -1342,7 +1373,9 @@ def _thin_axis(ch, n_points, dates=True):
         p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=800)))])
 
 
-def _style_series(ser, hex_colour, width_pt=1.25, dashed=False):
+def _style_series(ser, hex_colour, width_pt=1.25, dashed=False, name=None):
+    if name:
+        ser.tx = SeriesLabel(v=name)
     ser.graphicalProperties.line.solidFill = hex_colour
     ser.graphicalProperties.line.width = int(width_pt * 12700)
     if dashed:
@@ -1385,6 +1418,7 @@ def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=N
         nonlocal anchor_row
         ch.set_categories(cats)
         _thin_axis(ch, r1 - r0 + 1)
+        _chart_frame(ch)
         ws_ch.add_chart(ch, f"A{anchor_row}")
         anchor_row += 17
 
@@ -1392,12 +1426,13 @@ def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=N
     if "Close" in hdr:
         ch = _line_chart(f"{ticker} — Price & Moving Averages", "Price ($)")
         ch.add_data(_px_ref(ws_p, hdr["Close"], r0, r1), titles_from_data=True)
-        _style_series(ch.series[-1], "1F4E79", 1.6)
+        _style_series(ch.series[-1], "1F4E79", 1.6, name=ticker)
         for name, colour, dash in (("MA50", "70AD47", True),
                                    ("MA200", "C00000", True)):
             if name in hdr:
                 ch.add_data(_px_ref(ws_p, hdr[name], r0, r1), titles_from_data=True)
-                _style_series(ch.series[-1], colour, 1.1, dashed=dash)
+                _style_series(ch.series[-1], colour, 1.1, dashed=dash,
+                              name=f"{name[:2]} {name[2:]}")
         _place(ch)
 
     # 2 ── Cumulative return vs benchmarks
@@ -1406,12 +1441,12 @@ def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=N
                          "Index (100 = start)")
         ch.add_data(_px_ref(ws_p, hdr["Cumulative_Index"], r0, r1),
                     titles_from_data=True)
-        _style_series(ch.series[-1], "1F4E79", 1.6)
-        for name, colour in (("SPY_Cumulative", "C00000"),
-                             ("QQQ_Cumulative", "00B0F0")):
+        _style_series(ch.series[-1], "1F4E79", 1.6, name=ticker)
+        for name, colour, label in (("SPY_Cumulative", "C00000", "S&P 500"),
+                                    ("QQQ_Cumulative", "00B0F0", "NASDAQ 100")):
             if name in hdr:
                 ch.add_data(_px_ref(ws_p, hdr[name], r0, r1), titles_from_data=True)
-                _style_series(ch.series[-1], colour, 1.1, dashed=True)
+                _style_series(ch.series[-1], colour, 1.1, dashed=True, name=label)
         _place(ch)
 
     # 3 ── Volume
@@ -1433,6 +1468,7 @@ def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=N
         ch.series[-1].graphicalProperties.line.noFill = True
         ch.varyColors = False
         ch.legend = None
+        ch.y_axis.majorGridlines = _soft(ChartLines())
         _place(ch)
 
     # 4 ── RSI, with the 70/30 bands drawn as constant series
@@ -1449,10 +1485,18 @@ def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=N
         ws_mc, mc_hdr_row, _ = ws_mc_data
         mc_r0, mc_r1 = mc_hdr_row + 1, ws_mc.max_row
         if mc_r1 > mc_r0:
-            ch = _line_chart(f"{ticker} — Monte Carlo Forecast", "Price ($)")
+            # Horizon goes in the title, not an axis label: openpyxl gives no
+            # control over axis-title placement and Excel printed it straight
+            # across the tick numbers.
+            _days = mc_r1 - mc_r0
+            ch = _line_chart(f"{ticker} — Monte Carlo Forecast "
+                             f"({_days} trading days)")
+            # P75 and P95 were two greens a reader could not tell apart in a
+            # dashed line. Inner band light, outer band dark, red-to-green
+            # keeping the bear-to-bull reading.
             for col, colour, wpt in ((2, "C00000", 1.0), (3, "E8A838", 1.0),
-                                     (4, "1F4E79", 1.8), (5, "70AD47", 1.0),
-                                     (6, "27AE60", 1.0)):
+                                     (4, "1F4E79", 1.8), (5, "92D050", 1.0),
+                                     (6, "375623", 1.0)):
                 ch.add_data(Reference(ws_mc, min_col=col, min_row=mc_hdr_row,
                                       max_row=mc_r1), titles_from_data=True)
                 _style_series(ch.series[-1], colour, wpt,
@@ -1460,7 +1504,7 @@ def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=N
             ch.set_categories(Reference(ws_mc, min_col=1, min_row=mc_r0,
                                         max_row=mc_r1))
             _thin_axis(ch, mc_r1 - mc_r0 + 1, dates=False)
-            ch.x_axis.title = "Trading days forward"
+            _chart_frame(ch)
             ws_ch.add_chart(ch, f"A{anchor_row}")
             anchor_row += 17
 
@@ -1960,6 +2004,25 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
         ch.legend = None
         ch.y_axis.numFmt = '$#,##0'
         ch.height, ch.width = 7.0, 15.0
+        # Same chrome as the Charts sheet — this one predates it and would
+        # otherwise be the only chart in the workbook with rounded corners, a
+        # black frame and near-black gridlines.
+        ch.varyColors = False
+        ch.y_axis.majorGridlines = _soft(ChartLines())
+        # Without these Excel drops both scales, leaving bars with no scenario
+        # names and no dollar axis — a picture of four rectangles.
+        ch.x_axis.delete = False
+        ch.y_axis.delete = False
+        _chart_frame(ch)
+        # Start the chart on a fresh printed page. The model above it is long
+        # enough that the chart otherwise straddled a page break, putting three
+        # scenario bars on one sheet of paper and the fourth, with the axis, on
+        # the next.
+        try:
+            from openpyxl.worksheet.pagebreak import Break
+            ws.row_breaks.append(Break(id=row_after))
+        except Exception:
+            pass
         ws.add_chart(ch, f"A{row_after + 1}")
     except Exception:
         pass
