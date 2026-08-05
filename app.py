@@ -856,6 +856,13 @@ elif _page == "analysis":
         # rendered underneath a full-height, still-open form and users couldn't tell
         # anything had happened without scrolling. Clearing the field re-opens the
         # panel, which matches the landing-page state we fall back to.
+        # ?ticker=MSFT prefills and runs the analysis, so a link can point at a
+        # specific name. This is what makes the ticker links inside the exported
+        # workbooks land on that company's page instead of a blank form.
+        _qt = (st.query_params.get("ticker") or "").strip().upper()
+        if _qt and not st.session_state.get("analysis_ticker"):
+            st.session_state["analysis_ticker"] = _qt
+            st.session_state["analysis_ran"] = True
         ticker_input = st.text_input(
             "", placeholder="e.g. AAPL, SPY, BTC, ETH",
             key="analysis_ticker",

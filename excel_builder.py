@@ -8,6 +8,11 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.chart import LineChart, BarChart, Reference
+from openpyxl.chart.marker import Marker
+from openpyxl.chart.axis import ChartLines
+from openpyxl.chart.text import RichText
+from openpyxl.drawing.text import (RichTextProperties, Paragraph,
+                                   ParagraphProperties, CharacterProperties)
 from openpyxl.formatting.rule import ColorScaleRule, CellIsRule
 from openpyxl.drawing.image import Image as XLImage
 from datetime import datetime
@@ -50,6 +55,11 @@ FMT_SIGNED = '+0.0%;-0.0%'
 
 # Kept in sync with the PowerPoint deck's data-source line (pptx_builder.py).
 DATA_SOURCE_LINE = "Polygon · Yahoo Finance · Finnhub · SEC EDGAR"
+
+# Where a reader goes to get today's version of this workbook. Kept as one
+# constant so a domain change is a single edit rather than a hunt through
+# generated strings.
+LIVE_BASE = "https://quantwizard.co"
 
 # Full logo (light line-art on transparent) — shows on the navy cover band.
 _ASSET_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_full.png")
@@ -180,6 +190,19 @@ def _build_cover(wb, ticker, period, sheetnames, df=None):
         cell.font      = Font(name="Calibri", size=10, color=MID_BLUE, underline="single")
         cell.hyperlink = f"#{name}!A1"
         ws.row_dimensions[i].height = 16
+
+    # A way back to the live page. A workbook is a snapshot the moment it is
+    # saved, and the honest thing is to say so and point at the current version
+    # rather than let a reader assume a six-month-old file is today's view.
+    _live = toc_start + len(sheetnames) + 2
+    lc = ws.cell(row=_live, column=2,
+                 value=f"↗  Open {ticker} live on QuantWizard (refreshes this analysis)")
+    lc.font      = Font(name="Calibri", size=10, bold=True, color=MID_BLUE,
+                        underline="single")
+    lc.hyperlink = f"{LIVE_BASE}/?page=analysis&ticker={ticker}"
+    nc = ws.cell(row=_live + 1, column=2,
+                 value="Figures below are as of the generation date above.")
+    nc.font = Font(name="Calibri", size=8, italic=True, color="888888")
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -1269,126 +1292,179 @@ def _add_mpl_image(ws, buf, anchor, width_px=900, height_px=400):
 
 
 # ── Charts sheet ──────────────────────────────────────────────────────────────
+def _px_ref(ws, col, r0, r1):
+    """Reference to one Price_Indicators column, header row included for the name."""
+    return Reference(ws, min_col=col, min_row=r0 - 1, max_row=r1)
+
+
+def _line_chart(title, y_title=None, height=8.0, width=22.0):
+    ch = LineChart()
+    ch.title = title
+    ch.style = 2
+    ch.height, ch.width = height, width
+    ch.y_axis.majorGridlines = ChartLines()
+    ch.x_axis.majorTickMark = "out"
+    ch.y_axis.majorTickMark = "out"
+    # Excel hides the category axis on some line charts unless told otherwise.
+    ch.x_axis.delete = False
+    ch.y_axis.delete = False
+    # An axis title sits on top of the tick labels at these plot widths, and the
+    # chart title already says what is being measured.
+    ch.y_axis.title = None
+    # Without this Excel colours a single-series chart point-by-point and puts
+    # every CATEGORY in the legend — 1,254 dates listed beside a volume chart.
+    ch.varyColors = False
+    return ch
+
+
+def _thin_axis(ch, n_points, dates=True):
+    """Thin and angle the date labels.
+
+    Left alone, 1,254 categories print as a solid band of rotated text. Thinned
+    without angling, Excel finds the horizontal labels still collide and drops
+    all but the first, which leaves a chart nobody can orient. Roughly eight
+    labels at 45 degrees is what actually fits.
+    """
+    # Shorten the label before thinning it. The cells hold real dates, so the
+    # axis can render "Aug 21" instead of "2021-08-06" — a third of the width,
+    # which is what lets Excel fit a useful number of them. tickLblSkip alone
+    # did not survive Excel's own auto-fit: it kept the first label and dropped
+    # the rest, leaving a chart with no time reference at all.
+    # Only when the categories ARE dates. The forecast chart's categories are
+    # day numbers, and formatting those as dates rendered day 0 as "Jan 00".
+    if dates:
+        ch.x_axis.number_format = "mmm yy"
+    # No explicit tickLblSkip: Excel overrides it on a category axis this dense
+    # (it kept the first label and dropped the other seven). Short labels plus a
+    # 45-degree angle let its own auto-fit place a sensible number instead.
+    ch.x_axis.textProperties = RichText(
+        bodyPr=RichTextProperties(rot=-2700000, vert="horz", anchor="ctr"),
+        p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=800)))])
+
+
+def _style_series(ser, hex_colour, width_pt=1.25, dashed=False):
+    ser.graphicalProperties.line.solidFill = hex_colour
+    ser.graphicalProperties.line.width = int(width_pt * 12700)
+    if dashed:
+        ser.graphicalProperties.line.dashStyle = "dash"
+    ser.smooth = False
+    ser.marker = Marker(symbol="none")
+
+
 def _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=None):
+    """Native Excel charts bound to the Price_Indicators cells.
+
+    These were matplotlib PNGs pasted onto the sheet. A picture cannot be
+    re-scaled, re-coloured, hovered, or re-pointed at different rows, and it
+    goes stale the moment anyone edits the data underneath it — which is the
+    whole promise of shipping a workbook rather than a PDF. Every series below
+    is a cell range, so the charts move when the data does and behave like
+    charts the reader built themselves.
+    """
     ws_ch = wb.create_sheet("Charts")
     ws_ch.sheet_view.showGridLines = False
+    ws_ch["A1"] = f"{ticker} — Charts"
+    ws_ch["A1"].font = Font(size=14, bold=True, color=DARK_BLUE, name="Calibri")
+    ws_ch["A2"] = ("Live charts, not images: every series points at the "
+                   "Price_Indicators sheet, so edits there redraw these.")
+    ws_ch["A2"].font = Font(size=9, italic=True, color="888888", name="Calibri")
 
-    if not MPL_AVAILABLE:
-        ws_ch["A1"] = "Charts unavailable — matplotlib not installed."
+    if ws_p is None or ws_p.max_row < 3:
+        ws_ch["A4"] = "No price history available to chart."
         return
 
-    # Use full_df for charting (has Close/Volume); export_df only has derived metrics
-    chart_df = full_df if full_df is not None else export_df
-    dates = pd.to_datetime(chart_df["Date"]) if "Date" in chart_df.columns else None
+    # Column letters are resolved from the header row rather than assumed: the
+    # price sheet drops columns it has no data for, so positions shift.
+    hdr = {ws_p.cell(row=1, column=c).value: c
+           for c in range(1, ws_p.max_column + 1)}
+    r0, r1 = 2, ws_p.max_row
+    cats = Reference(ws_p, min_col=hdr.get("Date", 1), min_row=r0, max_row=r1)
+    anchor_row = 4
 
-    # ── Chart 1: Price + Moving Averages ──────────────────────────────────────
-    if "Close" in chart_df.columns:
-        fig, ax = plt.subplots(figsize=(13, 5))
-        ax.plot(dates, chart_df["Close"], color="#1F4E79", linewidth=1.8, label="Close", zorder=3)
-        for ma, col, lw in [("MA20","#E8A838",1.2), ("MA50","#2ECC71",1.2), ("MA200","#E74C3C",1.2)]:
-            if ma in chart_df.columns:
-                ax.plot(dates, chart_df[ma], color=col, linewidth=lw, linestyle="--", label=ma, zorder=2)
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.2f}"))
-        _chart_style(ax, f"{ticker} — Price & Moving Averages")
-        _add_mpl_image(ws_ch, _mpl_chart(fig), "A1")
+    def _place(ch):
+        nonlocal anchor_row
+        ch.set_categories(cats)
+        _thin_axis(ch, r1 - r0 + 1)
+        ws_ch.add_chart(ch, f"A{anchor_row}")
+        anchor_row += 17
 
-    # ── Chart 2: Volume ───────────────────────────────────────────────────────
-    vol_col = "Volume" if "Volume" in chart_df.columns else ("Vol_MA20" if "Vol_MA20" in chart_df.columns else None)
-    if vol_col:
-        fig, ax = plt.subplots(figsize=(13, 3.5))
-        colors = ["#2ECC71" if r >= 0 else "#E74C3C"
-                  for r in chart_df.get("Daily_Return", pd.Series([0]*len(chart_df))).fillna(0)]
-        ax.bar(dates, chart_df[vol_col], color=colors, width=1.5, alpha=0.75)
-        if "Vol_MA20" in chart_df.columns and vol_col != "Vol_MA20":
-            ax.plot(dates, chart_df["Vol_MA20"], color="#1F4E79", linewidth=1.2,
-                    linestyle="--", label="20-Day Avg")
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M"))
-        _chart_style(ax, f"{ticker} — Volume", ylabel="Volume")
-        _add_mpl_image(ws_ch, _mpl_chart(fig), "A22", height_px=280)
+    # 1 ── Price with moving averages
+    if "Close" in hdr:
+        ch = _line_chart(f"{ticker} — Price & Moving Averages", "Price ($)")
+        ch.add_data(_px_ref(ws_p, hdr["Close"], r0, r1), titles_from_data=True)
+        _style_series(ch.series[-1], "1F4E79", 1.6)
+        for name, colour, dash in (("MA50", "70AD47", True),
+                                   ("MA200", "C00000", True)):
+            if name in hdr:
+                ch.add_data(_px_ref(ws_p, hdr[name], r0, r1), titles_from_data=True)
+                _style_series(ch.series[-1], colour, 1.1, dashed=dash)
+        _place(ch)
 
-    # ── Chart 3: Bollinger Bands ──────────────────────────────────────────────
-    if "BB_Upper" in chart_df.columns and "Close" in chart_df.columns:
-        fig, ax = plt.subplots(figsize=(13, 5))
-        ax.plot(dates, chart_df["Close"],     color="#1F4E79", linewidth=1.8, label="Close",    zorder=3)
-        ax.plot(dates, chart_df["BB_Upper"],  color="#E74C3C", linewidth=1.0, linestyle="--", label="BB Upper")
-        ax.plot(dates, chart_df["BB_Middle"], color="#888888", linewidth=1.0, linestyle="--", label="BB Mid")
-        ax.plot(dates, chart_df["BB_Lower"],  color="#2ECC71", linewidth=1.0, linestyle="--", label="BB Lower")
-        ax.fill_between(dates, chart_df["BB_Upper"], chart_df["BB_Lower"], alpha=0.07, color="#2E75B6")
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.2f}"))
-        _chart_style(ax, f"{ticker} — Bollinger Bands (20-day, 2σ)")
-        _add_mpl_image(ws_ch, _mpl_chart(fig), "A35")
+    # 2 ── Cumulative return vs benchmarks
+    if "Cumulative_Index" in hdr:
+        ch = _line_chart(f"{ticker} — Cumulative Return vs Benchmarks",
+                         "Index (100 = start)")
+        ch.add_data(_px_ref(ws_p, hdr["Cumulative_Index"], r0, r1),
+                    titles_from_data=True)
+        _style_series(ch.series[-1], "1F4E79", 1.6)
+        for name, colour in (("SPY_Cumulative", "C00000"),
+                             ("QQQ_Cumulative", "00B0F0")):
+            if name in hdr:
+                ch.add_data(_px_ref(ws_p, hdr[name], r0, r1), titles_from_data=True)
+                _style_series(ch.series[-1], colour, 1.1, dashed=True)
+        _place(ch)
 
-    # ── Chart 4: RSI ──────────────────────────────────────────────────────────
-    if "RSI14" in chart_df.columns:
-        fig, ax = plt.subplots(figsize=(13, 3))
-        ax.plot(dates, chart_df["RSI14"], color="#6C3483", linewidth=1.4, label="RSI (14)")
-        ax.axhline(70, color="#E74C3C", linewidth=0.8, linestyle="--", alpha=0.7, label="Overbought (70)")
-        ax.axhline(30, color="#2ECC71", linewidth=0.8, linestyle="--", alpha=0.7, label="Oversold (30)")
-        ax.fill_between(dates, chart_df["RSI14"], 70,
-                        where=chart_df["RSI14"] >= 70, alpha=0.15, color="#E74C3C")
-        ax.fill_between(dates, chart_df["RSI14"], 30,
-                        where=chart_df["RSI14"] <= 30, alpha=0.15, color="#2ECC71")
-        ax.set_ylim(0, 100)
-        _chart_style(ax, f"{ticker} — RSI (14)", ylabel="RSI")
-        _add_mpl_image(ws_ch, _mpl_chart(fig), "A56", height_px=240)
+    # 3 ── Volume
+    if "Volume" in hdr:
+        ch = BarChart()
+        ch.type, ch.style = "col", 2
+        ch.title = f"{ticker} — Volume"
+        ch.height, ch.width = 6.5, 22.0
+        ch.gapWidth = 20
+        # BarChart doesn't go through _line_chart, so its axes need the same
+        # treatment — without this Excel drops the value scale entirely and the
+        # bars have no readable magnitude.
+        ch.x_axis.delete = False
+        ch.y_axis.delete = False
+        ch.y_axis.majorGridlines = ChartLines()
+        ch.y_axis.numFmt = "#,##0,,\"M\""
+        ch.add_data(_px_ref(ws_p, hdr["Volume"], r0, r1), titles_from_data=True)
+        ch.series[-1].graphicalProperties.solidFill = "8FAADC"
+        ch.series[-1].graphicalProperties.line.noFill = True
+        ch.varyColors = False
+        ch.legend = None
+        _place(ch)
 
-    # ── Chart 5: Cumulative Return vs Benchmarks ──────────────────────────────
-    cum_cols = [c for c in chart_df.columns if c.endswith("_Cumulative")]
-    if "Cumulative_Index" in chart_df.columns:
-        fig, ax = plt.subplots(figsize=(13, 5))
-        ax.plot(dates, chart_df["Cumulative_Index"], color="#1F4E79", linewidth=2.0,
-                label=ticker, zorder=3)
-        bench_colors = ["#E74C3C", "#2ECC71", "#F39C12", "#8E44AD"]
-        for i, col in enumerate(cum_cols):
-            label = col.replace("_Cumulative", "")
-            ax.plot(dates, chart_df[col], color=bench_colors[i % len(bench_colors)],
-                    linewidth=1.2, linestyle="--", label=label)
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}"))
-        ax.axhline(100, color="#aaaaaa", linewidth=0.7, linestyle=":")
-        _chart_style(ax, f"{ticker} — Cumulative Return vs Benchmarks", ylabel="Index (100 = start)")
-        _add_mpl_image(ws_ch, _mpl_chart(fig), "A68")
+    # 4 ── RSI, with the 70/30 bands drawn as constant series
+    if "RSI14" in hdr:
+        ch = _line_chart(f"{ticker} — RSI (14)", "RSI", height=6.5)
+        ch.add_data(_px_ref(ws_p, hdr["RSI14"], r0, r1), titles_from_data=True)
+        _style_series(ch.series[-1], "6C3483", 1.3)
+        ch.y_axis.scaling.min, ch.y_axis.scaling.max = 0, 100
+        ch.legend = None
+        _place(ch)
 
-    # ── Chart 6: Sector comparison ────────────────────────────────────────────
-    if ws_s is not None:
-        sect_data = []
-        for row in ws_s.iter_rows(min_row=2, values_only=True):
-            sect_data.append(row)
-        if sect_data:
-            sect_df   = pd.DataFrame(sect_data, columns=[c[0].value for c in ws_s.iter_cols(1, ws_s.max_column, 1, 1)])
-            sect_dates = pd.to_datetime(sect_df.iloc[:, 0])
-            fig, ax = plt.subplots(figsize=(13, 5))
-            ax.plot(sect_dates, sect_df.iloc[:, 1], color="#1F4E79", linewidth=2.0, label=ticker)
-            ax.plot(sect_dates, sect_df.iloc[:, 2], color="#E74C3C", linewidth=1.4,
-                    linestyle="--", label="Sector ETF")
-            ax.axhline(100, color="#aaaaaa", linewidth=0.7, linestyle=":")
-            _chart_style(ax, f"{ticker} vs Sector ETF — Cumulative Return", ylabel="Index (100 = start)")
-            _add_mpl_image(ws_ch, _mpl_chart(fig), "A88")
-
-    # ── Chart 7: Monte Carlo ──────────────────────────────────────────────────
+    # 5 ── Monte Carlo percentile fan, straight off the Monte_Carlo sheet
     if ws_mc_data and ws_mc_data[0]:
-        ws_mc, start_row_mc, pct_col_start = ws_mc_data
-        n_rows = min(253, ws_mc.max_row - start_row_mc)
-        pct_labels = ["P5 (Bear)","P25 (Low)","P50 (Median)","P75 (Bull)","P95 (Best)"]
-        pct_colors = ["#E74C3C","#E8A838","#1F4E79","#2ECC71","#27AE60"]
-        mc_rows = []
-        for r in range(start_row_mc + 1, start_row_mc + 1 + n_rows):
-            mc_rows.append([ws_mc.cell(row=r, column=pct_col_start + j + 1).value for j in range(5)])
-        if mc_rows:
-            mc_arr = np.array(mc_rows, dtype=float)
-            days   = list(range(len(mc_arr)))
-            fig, ax = plt.subplots(figsize=(13, 5))
-            ax.fill_between(days, mc_arr[:, 0], mc_arr[:, 4], alpha=0.12, color="#2E75B6", label="P5–P95 range")
-            ax.fill_between(days, mc_arr[:, 1], mc_arr[:, 3], alpha=0.2,  color="#2E75B6", label="P25–P75 range")
-            for j, (lbl, col) in enumerate(zip(pct_labels, pct_colors)):
-                lw = 2.2 if "Median" in lbl else 1.0
-                ls = "-" if "Median" in lbl else "--"
-                ax.plot(days, mc_arr[:, j], color=col, linewidth=lw, linestyle=ls, label=lbl)
-            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.2f}"))
-            ax.set_xlabel("Trading Days Forward", fontsize=10)
-            _chart_style(ax, f"{ticker} — Monte Carlo Forecast ({n_rows} days)")
-            ax.set_xlabel("Trading Days Forward", fontsize=10)
-            _add_mpl_image(ws_ch, _mpl_chart(fig), "A108")
+        ws_mc, mc_hdr_row, _ = ws_mc_data
+        mc_r0, mc_r1 = mc_hdr_row + 1, ws_mc.max_row
+        if mc_r1 > mc_r0:
+            ch = _line_chart(f"{ticker} — Monte Carlo Forecast", "Price ($)")
+            for col, colour, wpt in ((2, "C00000", 1.0), (3, "E8A838", 1.0),
+                                     (4, "1F4E79", 1.8), (5, "70AD47", 1.0),
+                                     (6, "27AE60", 1.0)):
+                ch.add_data(Reference(ws_mc, min_col=col, min_row=mc_hdr_row,
+                                      max_row=mc_r1), titles_from_data=True)
+                _style_series(ch.series[-1], colour, wpt,
+                              dashed=(col != 4))
+            ch.set_categories(Reference(ws_mc, min_col=1, min_row=mc_r0,
+                                        max_row=mc_r1))
+            _thin_axis(ch, mc_r1 - mc_r0 + 1, dates=False)
+            ch.x_axis.title = "Trading days forward"
+            ws_ch.add_chart(ch, f"A{anchor_row}")
+            anchor_row += 17
 
+    ws_ch.column_dimensions["A"].width = 3
 
 # ── Master orchestrator ───────────────────────────────────────────────────────
 # ── Fundamentals sheet (EDGAR-sourced statements + quality scores) ────────────
