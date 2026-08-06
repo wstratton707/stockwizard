@@ -900,3 +900,184 @@ GBM limitations and bootstrap alternatives:
 medium.com/analytics-vidhya/building-a-monte-carlo-method-stock-price-simulator-with-geometric-brownian-motion-and-bootstrap-e346ff464894 ·
 Student-t GBM estimation:
 ww2.amstat.org/meetings/proceedings/2016/data/assets/pdf/389551.pdf
+
+---
+
+# PORTFOLIO CONSTRUCTION — WHERE THE LITERATURE ACTUALLY AGREES (researched 2026-08-05)
+
+Second, deeper pass than the 2026-08-03 review. That one asked "are our methods
+defensible?" This one asks "what does the field agree is best?" — and the answer
+is more consistent than the volume of published methods suggests.
+
+## The one finding everything else follows from
+
+Estimation error in EXPECTED RETURNS dominates everything. Errors in mu are far
+more damaging than errors in the covariance matrix, and mu is the harder of the
+two to estimate. Michaud (1989) called mean-variance optimisation an "error
+maximiser" and the name stuck because it is accurate: the optimiser treats a
+noisy high estimate as an opportunity and levers into it.
+
+Every method that survives out-of-sample testing is, structurally, a way of
+depending less on mu:
+
+- GMV — needs no mu at all
+- Risk parity / ERC — needs no mu at all
+- HRP — needs no mu, and no matrix inversion either
+- 1/N — needs nothing
+- Jorion (1986) — shrinks mu toward the grand mean
+- Black-Litterman — anchors mu to equilibrium rather than to a forecast
+
+That is the consensus. Not "which optimiser" — "how little can you lean on mu."
+
+## The benchmark nobody clears comfortably
+
+DeMiguel, Garlappi & Uppal (2009), Review of Financial Studies: 14 models across
+7 datasets, and NONE was consistently better than 1/N on Sharpe, certainty
+equivalent, or turnover. The Bayesian models (Jorion; Pastor; Pastor & Stambaugh),
+Kan & Zhou's three-fund model, and Garlappi-Uppal-Wang robust optimisation all
+failed to beat naive diversification.
+
+The number that should govern our expectations: the estimation window required
+for sample-based MVO to beat 1/N is roughly 3,000 months for 25 assets and 6,000
+months for 50. That is 250 to 500 years of data. We have five.
+
+This is not an argument for shipping 1/N. It is an argument that any optimiser
+we ship must be justified on something other than expected return, because the
+expected-return channel cannot clear the bar with the data available.
+
+Nuance worth keeping: 1/N frequently posts the highest RAW return and the worst
+volatility and drawdown. Risk-based methods (GMV, HRP) do beat it on
+risk-adjusted terms in several studies. So the honest framing is that 1/N is
+hard to beat on return and quite easy to beat on risk.
+
+## Constraints are an estimator, not a compromise
+
+Jagannathan & Ma (2003), "Why Imposing the Wrong Constraints Helps": a
+no-short-sale constraint is mathematically EQUIVALENT to shrinking the large
+elements of the sample covariance matrix and then optimising unconstrained. The
+constraint is not a limitation bolted on for realism — it is doing statistical
+work.
+
+The consequence for us is direct: once non-negativity is imposed, minimum
+variance portfolios built from the plain sample covariance perform about as well
+as ones built from factor models, shrinkage estimators, or daily data. Our
+long-only bounds plus the 30% position cap plus the 40% sector cap are already
+capturing most of the available robustness. DeMiguel et al. later generalised
+this as norm-constrained optimisation.
+
+Practical read: we should stop thinking of our caps as a UX nicety. They are
+load-bearing.
+
+## Covariance estimation
+
+Ledoit-Wolf linear shrinkage is the workhorse and is what we use. Nonlinear
+shrinkage (Ledoit & Wolf 2017, RFS) is the current state of the art,
+asymptotically optimal when dimensionality is comparable to sample size, with a
+closed-form solution.
+
+Factor-model covariance (Barra style) is criticised for subjectivity — imposing a
+pre-specified structure without knowing the true one is unreliable. Common
+practice is to combine: apply shrinkage to the factor covariance matrix. In
+tests, LW shrinkage matched factor models carrying many factors.
+
+Given Jagannathan-Ma, the marginal gain from upgrading linear LW to nonlinear LW
+in a long-only constrained problem with ~15-20 assets is small. Low priority.
+
+## Transaction costs belong INSIDE the objective
+
+Strong and fairly recent finding: several predictive models produce no positive
+Sharpe at all once costs are counted, and turn positive when costs are optimised
+ex ante rather than subtracted afterwards. The standard mechanism is an L1
+turnover penalty on the distance from current weights.
+
+We currently model 0.10% per rebalance in the backtest as a deduction. That is
+measurement, not optimisation. The optimiser itself has no idea turnover costs
+anything.
+
+## Resampling (Michaud) — contested, not consensus
+
+Produces more diversified and more stable portfolios; whether that improves
+out-of-sample risk-adjusted performance is genuinely disputed. Delcourt &
+Petitjean found resampling does not systematically improve risk-adjusted
+performance or reduce turnover. Scherer (2002) asked why averaging resampled
+weight vectors should be optimal at all. Markowitz & Usman (2003) cited "serious
+statistical and decision theoretic limitations."
+
+Downgrade from the 2026-08-03 note, which listed resampled frontier as a
+priority. It is a nice-to-have.
+
+## What institutions actually do
+
+Wider theory-practice gap than expected. Most institutional investors use some
+variant of MVO over Capital Market Assumptions, driven by an Investment Policy
+Statement. But many rely on simple maximum-concentration limits INSTEAD of
+quantitative optimisation, and most have not adopted current academic best
+practice. Method diversity is constrained by staffing — running and comparing
+several construction methods is considered too time-consuming.
+
+Worth knowing for positioning: a well-built risk-based optimiser with an honest
+1/N benchmark is not behind the institutional median. It is ahead of it.
+
+## Treat the machine-learning results with suspicion
+
+Recent papers claim deep RL Sharpe consistently above 2, and DNN Sharpe of
+2.95-3.00. These figures do not survive contact with transaction costs, are
+typically fitted on windows adjacent to their test period, and are not
+reproducible as a class. This is not consensus and should not influence what we
+build.
+
+## The synthesis — recommended architecture
+
+The unifying error in our current design is that we ask the OPTIMISER to express
+return views, using a CAPM vector that carries almost no cross-sectional
+information. Separate the two jobs:
+
+- SCREEN decides WHAT is eligible — this is where alpha belongs
+- OPTIMISER decides HOW MUCH of each — this is risk allocation only
+
+That single split resolves the beta-degeneracy without any new mathematics.
+
+Tier 1 — high consensus, high impact:
+
+- Default to a risk-based portfolio that does not require mu (GMV or ERC)
+- Keep long-only, position caps, sector caps (Jagannathan-Ma shrinkage)
+- Keep Ledoit-Wolf covariance
+- Add an L1 turnover penalty to the objective
+- Keep the 1/N benchmark visible and honest, including when it wins
+
+Tier 2 — if we want mu in the model at all:
+
+- Black-Litterman: reverse-optimise equilibrium returns pi = lambda * Sigma * w_mkt,
+  then enter the factor composite as a VIEW with explicit confidence
+- Or Jorion shrinkage of mu toward the grand mean
+- Not raw CAPM plus a capped alpha bolt-on, which is what we have
+
+Tier 3 — optional:
+
+- Nonlinear LW shrinkage
+- Michaud resampling (contested)
+
+## The thing to build before choosing
+
+Consensus in the literature is conditional on universe and period. Nobody can
+tell us which method wins on OUR 330-name screened universe. We already own a
+backtest engine and a 1/N benchmark, so the correct move is a walk-forward horse
+race: current optimiser vs GMV vs ERC vs HRP vs 1/N, same universe, same
+rebalance schedule, net of the 0.10% cost, reporting Sharpe, vol, max drawdown
+and turnover.
+
+Pick the default from that table rather than from this document.
+
+### Sources
+
+- DeMiguel, Garlappi & Uppal (2009) RFS 22(5) 1915 — optimal vs naive diversification
+- Jagannathan & Ma (2003) NBER w8922 — why imposing the wrong constraints helps
+- Michaud (1989); Michaud & Michaud — estimation error and resampling
+- Delcourt & Petitjean — to what extent is resampling useful
+- Scherer (2002) — portfolio resampling review and critique
+- Ledoit & Wolf (2017) RFS — nonlinear shrinkage, "Markowitz meets Goldilocks"
+- Jorion (1986) — Bayes-Stein estimation for portfolio analysis
+- Maillard, Roncalli & Teiletche (2010) JPM — equally-weighted risk contributions
+- Lopez de Prado — hierarchical risk parity
+- Idzorek — step-by-step guide to the Black-Litterman model
+- Practitioner surveys — portfolio construction theory versus practice
