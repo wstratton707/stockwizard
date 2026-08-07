@@ -1081,3 +1081,100 @@ Pick the default from that table rather than from this document.
 - Lopez de Prado — hierarchical risk parity
 - Idzorek — step-by-step guide to the Black-Litterman model
 - Practitioner surveys — portfolio construction theory versus practice
+
+---
+
+# HORSE RACE RESULTS — WHICH ALLOCATOR ACTUALLY WINS ON OUR UNIVERSE (2026-08-07)
+
+Built `allocators.py` (GMV, ERC, HRP, 1/N) and `horserace.py` (walk-forward
+harness) to settle the question the literature cannot answer for us. 18 names
+from the live factor screen, 10 years of prices, net of 10bp/side.
+
+## Results — 756d train / 63d hold (the default)
+
+    Method        Total    CAGR     Vol   Sharpe   MaxDD   Turn/rb
+    1/N          319.88   22.82   20.61     0.92  -41.55      7.89
+    ERC          238.80   19.10   19.05     0.80  -40.30      7.83
+    HRP          194.86   16.75   18.03     0.71  -38.60     12.89
+    Max Sharpe   184.08   16.13   17.35     0.71  -38.69      9.88
+    Current      180.60   15.93   17.32     0.69  -38.69      9.87
+    GMV          153.63   14.26   17.39     0.60  -38.68     10.49
+
+Ranking held under 504d/21d and 1008d/126d as well. 1/N first and ERC second in
+all three; Current and GMV last in all three.
+
+## The finding that matters
+
+Current, Max Sharpe and GMV are THE SAME PORTFOLIO. Volatility 17.32 / 17.35 /
+17.39. Max drawdown -38.69 / -38.69 / -38.68. Three decimal places apart on two
+independent risk measures is not a coincidence — it is one portfolio wearing
+three labels.
+
+This is the CAPM degeneracy, measured rather than argued. With mu = Rf +
+beta*ERP, maximising the Sharpe ratio reduces to maximising beta/sigma, and the
+solution to that sits essentially on top of minimum variance. The factor alpha
+is capped at +/-2% and cannot move it.
+
+Consequence for the product: the risk slider does not do what the UI says. At
+risk level 5 the builder returns a minimum-variance portfolio. It presumably
+returns something close to minimum variance at every level, because the
+three-anchor blend interpolates between min-vol, max-Sharpe and max-return, and
+two of those three anchors are the same point.
+
+## The other results
+
+ERC lands between GMV and 1/N on volatility (19.05 vs 17.39 and 20.61) and on
+drawdown (-40.30 vs -38.68 and -41.55), which is exactly what Maillard, Roncalli
+& Teiletche predict. It also beat Current on Sharpe in all three configurations
+while trading LESS (7.83 vs 9.87 turnover per rebalance).
+
+GMV delivered the lowest drawdown in every configuration. It does what it says
+on the tin; it simply was not rewarded in this period.
+
+1/N won on Sharpe everywhere, and carried the worst drawdown everywhere.
+
+## What this does NOT establish
+
+One universe, one period, ~28 rebalances. 2019-2026 is a strong equity bull
+market with a V-shaped COVID crash, which flatters whichever portfolio holds the
+most equity risk — 1/N by construction. The screen also carries look-ahead bias
+(today's factor scores applied to the whole window), which inflates every
+absolute number equally.
+
+So: the LEVELS are not forecasts. The COLLAPSE of Current onto GMV is
+structural, reproduces under every parameter set, and follows from the algebra
+independently of the data.
+
+## Bugs this exercise surfaced
+
+1. Sector caps had a collective-feasibility hole. Per-sector checks each passed
+   while the caps jointly could not reach 1.0 (twelve names in two sectors,
+   each capped at 40%, tops out at 80%). SLSQP hit its iteration limit and the
+   failure path returned EQUAL WEIGHTS — a broken portfolio indistinguishable
+   from a deliberate one. Present in the shipped optimiser, now fixed in both.
+   Reachable in production via the conservative profile, which deletes four
+   growth sectors and can collapse the candidate set onto few sectors.
+
+2. HRP recursive bisection dropped the last element of every odd-length
+   cluster (slicing the second half by length rather than to the end). Dropped
+   assets kept their initial weight of 1.0 and survived normalisation as
+   enormous positions, which is why the first run had HRP posting the HIGHEST
+   volatility and worst drawdown of any method. Caught because a risk-parity
+   method topping the volatility table is impossible, not because a test failed.
+
+3. ERC would not converge. Raw risk contributions sum to portfolio volatility
+   (~0.09), so their squared dispersion is ~1e-6 — flat enough that SLSQP's
+   finite-difference gradients read as noise and it returned near-equal weights.
+   Fixed by optimising fractional contributions against a 1/n target, scaled to
+   O(1). Verified: dispersion goes to 0.00000 unconstrained.
+
+## Recommendation
+
+Build the risk slider out of GMV -> ERC -> 1/N. Those three are monotone in both
+volatility (17.39 / 19.05 / 20.61) and drawdown (-38.68 / -40.30 / -41.55) in
+this data, so the ladder is real rather than asserted, and NONE of them needs an
+expected-return vector. That removes the degeneracy at its source instead of
+patching around it.
+
+Keep GMV as the conservative anchor, ERC as the default, 1/N visible as the
+benchmark including when it wins.

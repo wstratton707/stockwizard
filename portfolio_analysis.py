@@ -252,6 +252,26 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
             # SLSQP then fails, and the code silently falls back to equal weights.
             if sector not in ("Market", "Commodities", "User", "Unknown"):
                 sector_indices[sector].append(i)
+        # Collective feasibility. The per-sector tests below are each necessary
+        # but not jointly sufficient: every capped sector can absorb at most
+        # max_sector_weight, so if the caps plus the uncapped names cannot
+        # between them reach 1.0, the budget constraint is unsatisfiable however
+        # the weights are arranged. SLSQP then hits its iteration limit and the
+        # failure path returns equal weights — a broken portfolio wearing the
+        # costume of a deliberate one.
+        #
+        # Reachable when the candidate set collapses onto few sectors, which is
+        # exactly what the conservative profile does by deleting the four growth
+        # sectors. Relax the cap to the tightest feasible value rather than
+        # dropping sector control altogether.
+        _capped   = {s: m for s, m in sector_indices.items() if len(m) > 1}
+        _n_free   = n - sum(len(m) for m in _capped.values())
+        _capacity = sum(min(max_sector_weight, len(m) * max_weight)
+                        for m in _capped.values()) + _n_free * max_weight
+        if _capped and _capacity < 1.0:
+            max_sector_weight = min(1.0, max((1.0 - _n_free * max_weight) / len(_capped) + 1e-3,
+                                             max_sector_weight))
+
         for sector, indices in sector_indices.items():
             k = len(indices)
             if k <= 1:
