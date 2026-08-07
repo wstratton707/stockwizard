@@ -433,8 +433,17 @@ def part_i_capm():
     rf    = get_risk_free_rate()
 
     check(abs(compute_betas(rdf[["SPY"]], mkt)["SPY"] - 1.0) < 0.05, "SPY self-beta == 1.0")
-    check(all(abs(capm[t] - (rf + betas[t] * EQUITY_RISK_PREMIUM)) < 1e-9 for t in oret.columns),
-          "CAPM = Rf + beta*ERP for every holding")
+    # The identity is Rf_long + Blume(beta)*ERP, not Rf_short + raw beta. Both
+    # departures are deliberate (see capm_expected_returns): these are multi-year
+    # equity expectations, so they take the 10-year rate, and the beta is used as
+    # a forecast, so it is shrunk toward 1. This assertion predated both changes
+    # and was failing the deploy gate against correct code.
+    from constants import get_long_risk_free_rate
+    from analysis import blume_adjust
+    _rf_long = get_long_risk_free_rate()
+    check(all(abs(capm[t] - (_rf_long + blume_adjust(betas[t]) * EQUITY_RISK_PREMIUM)) < 1e-9
+              for t in oret.columns),
+          "CAPM = Rf_long + Blume(beta)*ERP for every holding")
     check(all(-0.10 < capm[t] < 0.30 for t in oret.columns),
           "no holding's CAPM expected return is absurd (<30%)",
           f"max={max(capm.values())*100:.1f}%")
@@ -442,19 +451,32 @@ def part_i_capm():
     port = optimise_portfolio(oret, expected_returns=capm)
     w    = port["recommended"]
     pb   = portfolio_beta(w, betas)
-    capm_port = rf + pb * EQUITY_RISK_PREMIUM
+    capm_port = _rf_long + blume_adjust(pb) * EQUITY_RISK_PREMIUM
     check(0 < capm_port < 0.20, "portfolio CAPM expected return is believable (<20%)",
           f"{capm_port*100:.1f}% at beta {pb:.2f}")
     sm = compute_stock_metrics(oret, mkt)
     check(sm["AMD"].get("beta") is not None and sm["AMD"].get("capm_return") is not None,
           "compute_stock_metrics carries beta + capm_return")
 
-    # Risk tolerance must move beta: aggressive portfolio > conservative.
-    w_lo = optimise_portfolio(oret, risk_tolerance=2, expected_returns=capm)["recommended"]
-    w_hi = optimise_portfolio(oret, risk_tolerance=9, expected_returns=capm)["recommended"]
-    b_lo, b_hi = portfolio_beta(w_lo, betas), portfolio_beta(w_hi, betas)
-    check(b_hi > b_lo + 0.1, "aggressive risk → higher beta than conservative",
-          f"risk2 β={b_lo:.2f}  vs  risk9 β={b_hi:.2f}")
+    # Risk tolerance must move RISK. The builder ships allocators.risk_ladder,
+    # not optimise_portfolio's three-anchor blend, so that is what gets checked —
+    # a gate that validates a code path users never reach is worse than no gate.
+    # The ladder makes no beta claim: its anchors (GMV, ERC, 1/N) use no expected
+    # returns at all, so volatility is the honest thing to assert.
+    import numpy as _np
+    from allocators import risk_ladder as _ladder
+    _cov = _np.cov(oret.values.T) * 252
+    def _vol(_w):
+        _v = _np.array([_w.get(c, 0.0) for c in oret.columns])
+        return float(_np.sqrt(_v @ _cov @ _v))
+    v_lo = _vol(_ladder(oret, risk_tolerance=1))
+    v_mid = _vol(_ladder(oret, risk_tolerance=5))
+    v_hi = _vol(_ladder(oret, risk_tolerance=10))
+    check(v_lo < v_mid < v_hi, "risk ladder is monotone in volatility",
+          f"lvl1 {v_lo*100:.1f}%  lvl5 {v_mid*100:.1f}%  lvl10 {v_hi*100:.1f}%")
+    _w10 = _ladder(oret, risk_tolerance=10)
+    check(max(_w10.values()) - min(_w10.values()) < 1e-6,
+          "risk ladder reaches equal weight at 10")
 
 
 def main():

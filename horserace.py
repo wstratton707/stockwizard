@@ -49,7 +49,8 @@ warnings.filterwarnings("ignore")
 from dotenv import load_dotenv
 load_dotenv()
 
-from allocators import ALLOCATORS, DEFAULT_MAX_SECTOR_WEIGHT, DEFAULT_MAX_WEIGHT
+from allocators import (ALLOCATORS, DEFAULT_MAX_SECTOR_WEIGHT,
+                        DEFAULT_MAX_WEIGHT, risk_ladder)
 from constants import get_risk_free_rate
 from portfolio_analysis import (compute_betas, factor_tilted_expected_returns,
                                 optimise_portfolio)
@@ -148,6 +149,23 @@ METHODS = {
 }
 
 
+def _ladder_methods():
+    """Race the proposed risk ladder at each end and the middle.
+
+    The claim being tested is monotonicity: turning the slider up must actually
+    buy more volatility and a deeper drawdown, otherwise the control is
+    decorative — which is precisely the failure the ladder replaces.
+    """
+    def _at(level):
+        def _fn(returns_df, sector_map=None, scores=None, **_kw):
+            return risk_ladder(returns_df, risk_tolerance=level,
+                               sector_map=sector_map,
+                               max_weight=DEFAULT_MAX_WEIGHT,
+                               max_sector_weight=DEFAULT_MAX_SECTOR_WEIGHT)
+        return _fn
+    return {f"Ladder@{lv}": _at(lv) for lv in (1, 3, 5, 7, 10)}
+
+
 # ── walk-forward engine ───────────────────────────────────────────────────────
 
 def walk_forward(returns_df, sector_map, scores, lookback, hold):
@@ -229,7 +247,12 @@ def main():
     ap.add_argument("--years", type=int, default=10, help="price history to pull")
     ap.add_argument("--lookback", type=int, default=756, help="training days (~3y)")
     ap.add_argument("--hold", type=int, default=63, help="rebalance interval (~1q)")
+    ap.add_argument("--ladder", action="store_true",
+                    help="race the proposed risk ladder at levels 1/3/5/7/10 instead")
     args = ap.parse_args()
+    if args.ladder:
+        METHODS.clear()
+        METHODS.update(_ladder_methods())
 
     api_key = os.getenv("POLYGON_API_KEY", "")
     log("Building universe from precomputed factor rankings...")
@@ -256,9 +279,11 @@ def main():
     rows = {name: metrics(r["value"], r["dates"], r["turnover"])
             for name, r in results.items()}
     table = pd.DataFrame(rows).T
-    table = table.sort_values("Sharpe", ascending=False)
+    if not args.ladder:
+        table = table.sort_values("Sharpe", ascending=False)
 
-    span = f"{results['1/N']['dates'][0].date()} to {results['1/N']['dates'][-1].date()}"
+    _any = next(iter(results))
+    span = f"{results[_any]['dates'][0].date()} to {results[_any]['dates'][-1].date()}"
     print("\n" + "=" * 78)
     print(f"WALK-FORWARD HORSE RACE   {span}   net of {COST_PER_SIDE*1e4:.0f}bp/side")
     print("=" * 78)

@@ -7,6 +7,7 @@ from datetime import datetime
 
 import auth
 from constants import DEV_MODE_FREE, get_risk_free_rate, EQUITY_RISK_PREMIUM
+from allocators import risk_ladder
 from disclaimers import render_inline, render_section
 import disclaimers as _disc
 
@@ -139,10 +140,13 @@ def _render_step_0():
     risk = st.slider(
         "Risk Level",
         min_value=1, max_value=10, value=preset_map[preset_choice],
-        help="A modelling input, not a suitability assessment. It sets the target "
-             "portfolio beta the optimiser solves for: 1 ≈ 0.3, 10 ≈ 1.9."
+        help="A modelling input, not a suitability assessment. It slides the model "
+             "between three risk-based weightings: 1 = minimum variance, "
+             "5-6 = equal risk contribution, 10 = equal weight."
     )
-    st.caption(f"Preset: {preset_choice.lower()} · move the slider to model a different beta target.")
+    st.caption(f"Preset: {preset_choice.lower()} · higher settings hold more volatility "
+               f"and spread capital more evenly; lower settings concentrate into the "
+               f"calmest holdings.")
     risk_labels = {
         (1,3): ("Conservative","Capital preservation. Heavy bonds and defensive ETFs."),
         (4,6): ("Moderate",    "Balanced growth. Mix of growth stocks and stability."),
@@ -522,6 +526,39 @@ def _render_step_2(api_key):
                                             sector_map=sector_map,
                                             max_weight=prefs.get("max_per_stock", 0.30),
                                             expected_returns=capm_mu)
+
+            # ── Risk-matched model: the ladder, not the three-anchor blend ────
+            # The blend interpolated min-vol -> max-Sharpe -> max-return, and a
+            # walk-forward showed two of those three anchors were the same
+            # portfolio: volatility 17.32 / 17.35 / 17.39 and drawdown -38.69 /
+            # -38.69 / -38.68 for the blend, max-Sharpe and min-vol. That is the
+            # CAPM degeneracy — with mu = Rf + beta*ERP, maximising Sharpe is
+            # maximising beta/sigma, which lands on minimum variance — so the
+            # risk slider was moving between two points that coincided.
+            #
+            # GMV -> ERC -> 1/N instead. None of the three needs an expected
+            # return, so the degeneracy cannot come back, and the ladder measured
+            # monotone in both volatility (17.4 -> 20.6) and drawdown (-38.7 ->
+            # -41.6) across levels 1 to 10. max_sharpe / min_vol / max_return are
+            # left exactly as they were: they are separate options a user picks
+            # deliberately, and the frontier chart plots them.
+            portfolios["recommended"] = risk_ladder(
+                returns_df,
+                risk_tolerance=prefs.get("risk_tolerance", 5),
+                sector_map=sector_map,
+                max_weight=prefs.get("max_per_stock", 0.30))
+
+            # Re-measure the return target against the weights actually shipped.
+            # optimise_portfolio checked it against the blend it no longer
+            # returns, so leaving this alone would warn about a target the user's
+            # portfolio may well hit, or stay silent about one it misses.
+            if target_ret is not None and capm_mu:
+                _ach = sum(portfolios["recommended"].get(t, 0.0) * capm_mu.get(t, 0.0)
+                           for t in portfolios["recommended"])
+                portfolios["target_met"] = _ach >= target_ret * 0.95
+                if not portfolios["target_met"]:
+                    portfolios["target_achieved"]  = round(_ach * 100, 1)
+                    portfolios["target_requested"] = round(target_ret * 100, 1)
             progress.progress(80, text="Generating efficient frontier...")
 
             # Same CAPM basis as the optimizer + the plotted marker, so the
@@ -720,10 +757,12 @@ def _render_step_2(api_key):
             "low-volatility 20% · risk-adjusted return 20%). Momentum is percentile-ranked "
             "within sector; quality, volatility and Sharpe are ranked across the whole "
             "universe. **Tilt vs CAPM** is how much that score "
-            f"moves the expected return the optimiser sees, capped at ±{FACTOR_ALPHA_MAX*100:g}%/yr so a factor "
-            "reading can influence weights without dominating them. **Weight** then comes "
-            "from mean-variance optimisation on those expected returns and a "
-            "shrinkage-estimated covariance matrix."
+            f"moves the expected return, capped at ±{FACTOR_ALPHA_MAX*100:g}%/yr. It decides which "
+            "names are eligible, and it sets the expected returns behind the Maximum "
+            "Sharpe and Minimum Volatility models. The **Risk-Matched Model sizes "
+            "positions from the covariance matrix alone** — expected returns are the "
+            "noisiest input in portfolio construction, so the screen picks what to hold "
+            "and the risk model decides how much."
             + (f"  ·  Rankings computed {_meta.get('computed_at', 'unknown')}."
                if _meta.get("computed_at") else "")
         )
