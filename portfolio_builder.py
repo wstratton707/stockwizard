@@ -250,6 +250,14 @@ def _render_step_1(api_key):
             "Minimum number of holdings", 5, 20, 8, step=1,
             help="Forces the optimizer to keep at least this many positions in the final portfolio.",
         )
+        style_tilt = st.radio(
+            "Style tilt", ["Balanced", "Value tilt", "Growth tilt"],
+            index=0, horizontal=True, key="style_tilt_radio",
+            help="Leans the screen toward cheaper names (value: higher earnings "
+                 "yield vs sector peers) or faster-growing ones (growth: revenue "
+                 "and EPS growth vs sector peers). Affects which names are "
+                 "selected, not how they are weighted.",
+        )
 
     st.markdown("---")
     col1, col2 = st.columns(2)
@@ -296,6 +304,7 @@ def _render_step_1(api_key):
                 prefs["use_etfs"]        = use_etfs
                 prefs["max_per_stock"]   = max_per_stock / 100
                 prefs["min_holdings"]    = min_holdings
+                prefs["style_tilt"]      = style_tilt
                 st.session_state[_K_PREFS] = prefs
                 st.session_state[_K_STEP]  = 2
                 st.rerun()
@@ -344,6 +353,20 @@ def _render_step_2(api_key):
                 log(f"   Pre-computed rankings loaded — {n_ranked} tickers · computed {freshness}")
                 progress.progress(10, text=f"Selecting best stocks from {n_ranked}-ticker universe...")
 
+                # Style tilt: a bounded bonus on the sector-relative value or
+                # growth rank. (f - 0.5) spans ±0.5, so ×0.3 moves the selection
+                # score by at most ±0.15 — enough to reorder a sector's middle,
+                # not enough to drag a bottom-decile name to the top. Selection
+                # only: weights still come from the risk model.
+                _style = prefs.get("style_tilt", "Balanced")
+                def _sel_score(data):
+                    base = data.get("score", data.get("sharpe", 0)) or 0
+                    if _style == "Value tilt":
+                        return base + 0.3 * (data.get("f_value", 0.5) - 0.5)
+                    if _style == "Growth tilt":
+                        return base + 0.3 * (data.get("f_growth", 0.5) - 0.5)
+                    return base
+
                 # Group by sector, respecting user preferences
                 sector_groups: dict = defaultdict(list)
                 _gated = []
@@ -363,7 +386,7 @@ def _render_step_2(api_key):
                         continue
                     if sector not in incl_sectors and sector not in {"Market", "Commodities"}:
                         continue
-                    sector_groups[sector].append((ticker, data.get("score", data.get("sharpe", 0))))
+                    sector_groups[sector].append((ticker, _sel_score(data)))
 
                 if _gated:
                     log(f"   Screen gate excluded {len(_gated)}: {', '.join(sorted(_gated)[:8])}"
@@ -465,7 +488,7 @@ def _render_step_2(api_key):
                 best_tickers = sorted(
                     available,
                     key=lambda t: float('inf') if t in pinned_set
-                                  else rankings.get(t, {}).get("score", 0),
+                                  else _sel_score(rankings.get(t, {})),
                     reverse=True
                 )[:_MAX_PORTFOLIO_TICKERS]
                 log(f"   Final portfolio: {len(best_tickers)} stocks (precompute-ranked) — {', '.join(best_tickers)}")
@@ -784,6 +807,85 @@ def _render_step_2(api_key):
                 f"Rankings are partial — {_meta.get('tickers_done','?')} of "
                 f"{_meta.get('tickers_total','?')} tickers were scored when the "
                 f"nightly job last ran. Selection used what was available.")
+
+    # ── What each holding contributes ─────────────────────────────────────────
+    # Two scores per name, per the screen/risk-model split: the factor score
+    # says how the company ranks against its own sector; this block says what
+    # the position does for THIS portfolio — which is a different question, and
+    # the one a reader of the weights actually has. A middling-scored staple
+    # can be the most useful line in the book if it is uncorrelated with the
+    # rest; the best-scored name can be the least useful if it duplicates risk
+    # the portfolio already holds.
+    _rk_all = st.session_state.get(_K_RANKINGS) or {}
+    _cdf    = opt.get("close_df")
+    _held   = [t for t in selected_weights if _cdf is not None and t in _cdf.columns]
+    if len(_held) >= 3 and _cdf is not None and len(_cdf) > 21:
+        import numpy as _np
+        _rets = _cdf[_held].pct_change().dropna()
+        _wv   = _np.array([selected_weights[t] for t in _held], dtype=float)
+        _wv   = _wv / _wv.sum()
+        _cv   = _rets.cov().values * 252
+        _cm   = _rets.corr().values
+        _pvar = float(_wv @ _cv @ _wv)
+        # Fractional risk contributions — sum to 1, so each is directly
+        # comparable with the holding's weight share.
+        _rc   = (_wv * (_cv @ _wv) / _pvar) if _pvar > 0 else _wv
+
+        _FLAB = [("f_momentum", "momentum"), ("f_quality", "quality"),
+                 ("f_value", "value"), ("f_growth", "growth"),
+                 ("f_health", "fin. health"), ("f_lowvol", "low volatility")]
+
+        _section_header("What Each Holding Contributes")
+        st.caption(
+            "**Sector rank** is the holding's factor score against its own sector. "
+            "**Avg corr** is its weight-averaged correlation with the rest of the "
+            "portfolio — lower means it moves more independently. **Risk share vs "
+            "weight** compares the slice of portfolio risk a holding supplies with "
+            "the capital it takes: supplying less risk than weight is what "
+            "diversification looks like in numbers.")
+        _by_sec = {}
+        for _t2, _d2 in _rk_all.items():
+            if _t2 == "_meta" or not isinstance(_d2, dict):
+                continue
+            _by_sec.setdefault(_d2.get("sector", "Unknown"), []).append(
+                (_t2, _d2.get("score", 0) or 0))
+
+        for _i, _t in enumerate(sorted(_held, key=lambda x: -selected_weights[x])):
+            _d    = _rk_all.get(_t, {}) if isinstance(_rk_all.get(_t), dict) else {}
+            _sec  = _d.get("sector")
+            _rank_txt = "—"
+            if _sec and _sec in _by_sec and len(_by_sec[_sec]) >= 5:
+                _peers = sorted(_by_sec[_sec], key=lambda x: -x[1])
+                _pos   = next((_j + 1 for _j, (_pt, _ps) in enumerate(_peers) if _pt == _t), None)
+                if _pos:
+                    _rank_txt = (f"top {max(1, round(_pos / len(_peers) * 100))}% "
+                                 f"of {_sec} · #{_pos}/{len(_peers)}")
+            _comps = [(lab, _d.get(k)) for k, lab in _FLAB if _d.get(k) is not None]
+            if _comps:
+                _comps.sort(key=lambda x: -x[1])
+                _fact_txt = (f"strong: {_comps[0][0]}, {_comps[1][0]} · "
+                             f"weak: {_comps[-1][0]}") if len(_comps) >= 3 else "—"
+            else:
+                _fact_txt = "—"
+            # Weighted average correlation with everything else in the book.
+            _others = [_j for _j in range(len(_held)) if _held[_j] != _t]
+            _wo     = _np.array([_wv[_j] for _j in _others])
+            _idx    = _held.index(_t)
+            _avgc   = float((_wo * _cm[_idx, _others]).sum() / _wo.sum()) if _wo.sum() > 0 else 0.0
+            _rshare, _wshare = _rc[_idx] * 100, _wv[_idx] * 100
+            _is_div = _rshare < _wshare - 0.5
+            _rs_col = GREEN if _is_div else "#64748b"
+            st.markdown(f"""
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;
+                        padding:0.55rem 1rem;border-radius:8px;margin-bottom:0.35rem;
+                        background:#f8fafc;border:1px solid #e2e8f0;font-size:0.82rem">
+                <span style="font-weight:600;color:#0f172a;min-width:4.5rem">{_t}
+                    <span style="color:#94a3b8;font-weight:400">{_wshare:.1f}%</span></span>
+                <span style="color:#334155;flex:1">{_rank_txt}</span>
+                <span style="color:#64748b;flex:1.3">{_fact_txt}</span>
+                <span style="color:{_rs_col};white-space:nowrap">avg corr {_avgc:.2f} ·
+                    risk {_rshare:.1f}% vs weight {_wshare:.1f}%</span>
+            </div>""", unsafe_allow_html=True)
 
     _section_header("Portfolio Overview")
     cols = st.columns(5)

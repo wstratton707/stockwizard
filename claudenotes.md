@@ -1273,3 +1273,16 @@ cache under the new key, then it is warm for a month.
   4       analyst factor (consensus, target upside, revisions) as a small
           additive term, neutral when missing, from Finnhub/yfinance with the
           profiles_are_usable-style guard
+
+### Phase 2 shipped (2026-08-08)
+
+Style tilt (Balanced / Value / Growth) in the Portfolio Style step — a bounded
+bonus of 0.3 x (sector-relative rank - 0.5) on the SELECTION score only, so it
+reorders who gets in without touching how weights are sized. "What Each Holding
+Contributes" now renders under the screen table: sector rank (top X% of sector,
+#pos/n, only when the peer group has 5+ names), strongest/weakest factors, and
+the two portfolio-fit numbers — weight-averaged correlation with the rest of
+the book, and fractional risk contribution vs weight share (risk below weight,
+green, is diversification in numbers). Computed from the close_df already in
+session state; nothing new is fetched. Dividend preference and min-market-cap
+filters moved to phase 3 — both need data precompute does not yet carry.
