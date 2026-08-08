@@ -179,61 +179,87 @@ def _compute_factors(prices: pd.Series) -> dict | None:
     }
 
 
-def _fetch_quality(ticker: str):
-    """A 0-1 fundamental-quality sub-score (market-cap-free, so no extra price/cap
-    fetch): blends net margin, ROE, revenue growth, and the Piotroski F-Score.
-    Returns None on any miss so the caller can treat quality as neutral — this
-    factor is purely additive and never breaks or penalises a name for missing data.
+def _fetch_fundamentals(ticker: str):
+    """Per-ticker fundamental components from SEC EDGAR, cached 30 days.
 
-    Cached 30 days. Now that prices are batched, this SEC call is the whole
-    runtime: 579 tickers took 172s and ~150s of that was here, so a 4,000-name
-    universe would be ~27 minutes of mostly re-fetching statements that only
-    change on a quarterly filing. With the cache, only names new to the universe
-    pay the cost.
+    Returns a dict of raw metrics (each may be None) or None for non-filers
+    (ETFs) and fetch misses — every use downstream treats missing as neutral,
+    never as a penalty.
+
+    This used to return a single 0-1 "quality" scalar, which meant
+    compute_fundamentals was called and then almost everything it computed was
+    thrown away. The scoring rework needs the components themselves: quality,
+    value, growth and health are separate factors now, and each is
+    percentile-ranked WITHIN its sector, which cannot be done to a pre-blended
+    scalar. Same single EDGAR call, same 30-day cache economics (fundamentals
+    change on quarterly filings); only the cache key changes (fund_, not
+    quality_), so the first cron after this ships re-pays ~150s once to rebuild
+    the cache and is then warm for a month.
     """
-    _ck = f"quality_{ticker.upper()}"
+    _ck = f"fund_{ticker.upper()}"
     try:
         hit = cache_get(_ck)
-        if hit is not None:
-            # Stored as {"q": value_or_None} so a cached "no data" result is
+        if isinstance(hit, dict) and "c" in hit:
+            # Stored as {"c": dict_or_None} so a cached "no data" result is
             # distinguishable from a cache miss and isn't re-fetched daily.
-            return hit.get("q") if isinstance(hit, dict) else hit
+            return hit["c"]
     except Exception:
         pass
 
-    _val = _compute_quality(ticker)
+    _val = _compute_fundamentals(ticker)
     try:
-        cache_set(_ck, {"q": _val}, ttl_hours=720)
+        cache_set(_ck, {"c": _val}, ttl_hours=720)
     except Exception:
         pass
     return _val
 
 
-def _compute_quality(ticker: str):
-    """Uncached quality computation — see _fetch_quality."""
+def _compute_fundamentals(ticker: str):
+    """Uncached fundamentals computation — see _fetch_fundamentals."""
     try:
         from data import fetch_sec_financials
         from analysis import compute_fundamentals
         fin = fetch_sec_financials(ticker, log=lambda *a, **k: None)
         if not fin:
             return None
-        f = compute_fundamentals(fin)          # market_cap omitted — quality only
+        f = compute_fundamentals(fin)          # market_cap omitted — see `eps` note
         if not f.get("ok"):
             return None
-        marg, ret_, grw, q = (f.get("margins", {}), f.get("returns", {}),
-                              f.get("growth", {}), f.get("quality", {}))
-        bits = []
-        if marg.get("net") is not None:
-            bits.append(max(0.0, min(1.0, marg["net"] / 25.0)))          # 25%+ net margin -> 1
-        if ret_.get("roe") is not None:
-            bits.append(max(0.0, min(1.0, ret_["roe"] / 25.0)))          # 25%+ ROE -> 1
-        if grw.get("revenue_cagr") is not None:
-            bits.append(max(0.0, min(1.0, (grw["revenue_cagr"] + 5) / 25.0)))  # -5%..20%
-        if q.get("f_score") is not None:
-            bits.append(q["f_score"] / 9.0)                               # Piotroski 0-9
-        return round(sum(bits) / len(bits), 4) if bits else None
+        marg, ret_, grw = f.get("margins", {}), f.get("returns", {}), f.get("growth", {})
+        lev,  q,   inc  = f.get("leverage", {}), f.get("quality", {}), f.get("income", {})
+        return {
+            "net_margin": marg.get("net"),
+            "roe":        ret_.get("roe"),
+            "f_score":    q.get("f_score"),
+            "rev_cagr":   grw.get("revenue_cagr"),
+            "eps_cagr":   grw.get("eps_cagr"),
+            "d2e":        lev.get("debt_to_equity"),
+            "cur_ratio":  lev.get("current_ratio"),
+            # Diluted EPS enables the value factor without a share count:
+            # earnings yield = EPS / price. Every other valuation ratio (P/S,
+            # EV/EBITDA, FCF yield) needs market cap, i.e. shares outstanding,
+            # which EDGAR-only precompute doesn't have. Phase 3.
+            "eps":        inc.get("eps_diluted"),
+        }
     except Exception:
         return None
+
+
+def _quality_scalar(c):
+    """Legacy 0-1 quality blend, now derived from the stored components so the
+    `quality` field every existing consumer reads keeps its exact meaning."""
+    if not c:
+        return None
+    bits = []
+    if c.get("net_margin") is not None:
+        bits.append(max(0.0, min(1.0, c["net_margin"] / 25.0)))          # 25%+ net margin -> 1
+    if c.get("roe") is not None:
+        bits.append(max(0.0, min(1.0, c["roe"] / 25.0)))                 # 25%+ ROE -> 1
+    if c.get("rev_cagr") is not None:
+        bits.append(max(0.0, min(1.0, (c["rev_cagr"] + 5) / 25.0)))      # -5%..20%
+    if c.get("f_score") is not None:
+        bits.append(c["f_score"] / 9.0)                                  # Piotroski 0-9
+    return round(sum(bits) / len(bits), 4) if bits else None
 
 
 def _add_combined_scores(rankings: dict) -> dict:
@@ -244,11 +270,23 @@ def _add_combined_scores(rankings: dict) -> dict:
     predictor of future returns, so the score spreads across four evidence-based
     factors instead of leaning on "what already went up":
 
-      30%  Momentum        (12-1 / 6m / 3m composite — a real, documented factor)
-      30%  Quality         (fundamentals: margins, ROE, growth, Piotroski — the
-                            forward-persistent signal; neutral when unavailable)
-      20%  Low volatility   (the low-vol anomaly — steadier names)
-      20%  Risk-adjusted    (Sharpe — kept, but no longer dominant)
+      25%  Momentum   (12-1 / 6m / 3m composite — the best-documented factor)
+      20%  Quality    (net margin, ROE, Piotroski — sector-relative)
+      15%  Value      (earnings yield = diluted EPS / price — sector-relative)
+      15%  Growth     (revenue CAGR, EPS CAGR — sector-relative)
+      10%  Health     (D/E, current ratio, F-Score — sector-relative)
+      15%  Low vol    (the low-vol anomaly — absolute, a calm name is calm
+                       regardless of its neighbours)
+
+    Every fundamental factor is percentile-ranked WITHIN its sector: a 15% net
+    margin is exceptional for a grocer and mediocre for a software company, so a
+    cross-universe rank measures the sector, not the company. Missing data is
+    neutral (0.5), never a penalty — ETFs and non-filers ride on momentum and
+    volatility alone.
+
+    Sharpe was dropped from the composite: it is momentum divided by
+    volatility, and both are already here — a correlated metric acting as a
+    second vote for the same information.
 
     This is a factor *tilt*, not a prediction — no method reliably forecasts
     returns; a low-cost index is the benchmark to beat.
@@ -302,40 +340,85 @@ def _add_combined_scores(rankings: dict) -> dict:
     for t in tickers:
         groups[rankings[t].get("sector", "Unknown")].append(t)
 
-    # Momentum is sector-relative. Volatility, Sharpe and quality stay absolute —
-    # a genuinely low-volatility name is low-volatility regardless of what its
+    # Momentum is sector-relative, as before. Volatility stays absolute — a
+    # genuinely low-volatility name is low-volatility regardless of what its
     # neighbours do, and that is the property being selected for.
-    #
-    # (Quality being absolute is a real limitation, not an oversight: ranking a
-    # utility's ROE against a semiconductor's measures the sector. Making it
-    # sector-relative is worth doing, but it interacts with the "Unknown" bucket
-    # below, so it is not a one-line change. Until then, do not describe quality
-    # as sector-relative in the UI — portfolio_builder's caption did, and it
-    # wasn't true.)
     g_12m = _by_group("mom_12m_adj", groups)
     g_6m  = _by_group("mom_6m",      groups)
     g_3m  = _by_group("mom_3m",      groups)
 
-    a_sharpe = dict(zip(tickers, _pct_rank([rankings[t].get("sharpe", 0)  or 0 for t in tickers])))
-    a_vol    = dict(zip(tickers, _pct_rank([rankings[t].get("ann_vol", 0) or 0 for t in tickers])))
+    a_vol = dict(zip(tickers, _pct_rank([rankings[t].get("ann_vol", 0) or 0 for t in tickers])))
 
-    q_vals   = [rankings[t].get("quality") for t in tickers]
-    have_q   = [t for t, v in zip(tickers, q_vals) if v is not None]
-    q_rank   = dict(zip(have_q, _pct_rank([rankings[t]["quality"] for t in have_q]))) if have_q else {}
+    def _fund_of(t):
+        f = rankings[t].get("fund")
+        return f if isinstance(f, dict) else {}
+
+    def _by_group_opt(getter, invert=False):
+        """Sector-relative percentile rank for OPTIONAL values.
+
+        _by_group coerces missing to 0 (`.get(field, 0) or 0`), which is
+        harmless for momentum (0% return sits mid-pack) but poisonous for
+        fundamentals: a missing debt/equity coerced to 0 would rank as the
+        least-levered name in its sector. Here only names that HAVE the value
+        are ranked against each other; everyone else is neutral 0.5.
+        """
+        out = {}
+        for _g, members in groups.items():
+            have = [(t, getter(t)) for t in members if getter(t) is not None]
+            if len(have) < 3:                # a rank over <3 carries no signal
+                for t in members:
+                    out[t] = 0.5
+                continue
+            ranks = _pct_rank([v for _t, v in have])
+            for (t, _v), r in zip(have, ranks):
+                out[t] = (1.0 - r) if invert else r
+            for t in members:
+                out.setdefault(t, 0.5)
+        return out
+
+    # Value: earnings yield = diluted EPS / price. Negative earnings produce a
+    # negative yield and rank at the bottom of their sector, which is the point.
+    def _eyield(t):
+        eps, px = _fund_of(t).get("eps"), rankings[t].get("last_price")
+        return (eps / px) if (eps is not None and px) else None
+
+    g_q    = _by_group_opt(lambda t: rankings[t].get("quality"))
+    g_val  = _by_group_opt(_eyield)
+    g_revg = _by_group_opt(lambda t: _fund_of(t).get("rev_cagr"))
+    g_epsg = _by_group_opt(lambda t: _fund_of(t).get("eps_cagr"))
+    g_d2e  = _by_group_opt(lambda t: _fund_of(t).get("d2e"), invert=True)
+    g_cur  = _by_group_opt(lambda t: _fund_of(t).get("cur_ratio"))
 
     for t in tickers:
+        f        = _fund_of(t)
         momentum = (g_12m[t] + g_6m[t] + g_3m[t]) / 3.0
         low_vol  = 1.0 - a_vol[t]                        # lower volatility → higher
-        quality  = q_rank.get(t, 0.5)                    # neutral when unavailable
-        score = (0.30 * momentum + 0.30 * quality +
-                 0.20 * low_vol  + 0.20 * a_sharpe[t])
+        quality  = g_q[t]
+        value    = g_val[t]
+        growth   = (g_revg[t] + g_epsg[t]) / 2.0
+        _fs      = f.get("f_score")
+        health   = (g_d2e[t] + g_cur[t] + (_fs / 9.0 if _fs is not None else 0.5)) / 3.0
+        score = (0.25 * momentum + 0.20 * quality + 0.15 * value +
+                 0.15 * growth   + 0.10 * health  + 0.15 * low_vol)
         rankings[t]["score"] = round(score, 4)
         # Keep the components — the UI attributes each holding to them, and
         # without this the reason a name was picked is unrecoverable.
         rankings[t]["f_momentum"] = round(momentum, 4)
         rankings[t]["f_quality"]  = round(quality, 4)
+        rankings[t]["f_value"]    = round(value, 4)
+        rankings[t]["f_growth"]   = round(growth, 4)
+        rankings[t]["f_health"]   = round(health, 4)
         rankings[t]["f_lowvol"]   = round(low_vol, 4)
-        rankings[t]["f_sharpe"]   = round(a_sharpe[t], 4)
+
+        # Hard gate — a flag, not a deletion, so the rankings cache shape and
+        # the Top Stocks page are untouched. High leverage AND weak fundamentals
+        # together is the combination a single shiny metric can't excuse; the
+        # builder skips gated names in auto-selection, user picks are exempt.
+        d2e = f.get("d2e")
+        if (d2e is not None and d2e > 3.0 and (_fs is None or _fs <= 3)):
+            rankings[t]["gate"] = f"D/E {d2e:.1f} with F-Score {_fs if _fs is not None else '—'}/9"
+        else:
+            rankings[t].pop("gate", None)
 
     return rankings
 
@@ -399,7 +482,8 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
         return _add_combined_scores(raw)
 
     print(f"Computing multi-factor rankings for {len(run_tickers)} tickers...")
-    print(f"Factors: Momentum (30%) · Quality (30%) · Low-Vol (20%) · Sharpe (20%)\n")
+    print("Factors: Momentum 25% · Quality 20% · Value 15% · Growth 15% · "
+          "Health 10% · Low-Vol 15% — fundamentals sector-relative\n")
 
     CHECKPOINT_EVERY = 200  # write partial results to Supabase every N tickers
 
@@ -424,14 +508,14 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
     # Quality needs one SEC call per ticker, so it stays threaded — but at a real
     # pool size now that price fetching isn't the bottleneck.
     with ThreadPoolExecutor(max_workers=6) as ex:
-        futures = {ex.submit(_fetch_quality, t): t for t in price_map}
-        quality_map = {}
+        futures = {ex.submit(_fetch_fundamentals, t): t for t in price_map}
+        fund_map = {}
         for future in as_completed(futures):
             t = futures[future]
             try:
-                quality_map[t] = future.result()
+                fund_map[t] = future.result()
             except Exception:
-                quality_map[t] = None
+                fund_map[t] = None
 
     for ticker, prices in price_map.items():
         done += 1
@@ -439,9 +523,13 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
         if not factors:
             print(f"  [{done:>4}/{len(price_map)}] ⚠ {ticker} — insufficient data")
             continue
-        # Additive fundamental-quality factor; None (neutral) for ETFs/non-filers
-        # or any fetch miss — never blocks the run.
-        factors["quality"] = quality_map.get(ticker)
+        # Additive fundamental components; None (neutral) for ETFs/non-filers
+        # or any fetch miss — never blocks the run. The legacy scalar is kept so
+        # everything that reads `quality` is unaffected by the component split.
+        _fund = fund_map.get(ticker)
+        factors["fund"]       = _fund
+        factors["quality"]    = _quality_scalar(_fund)
+        factors["last_price"] = round(float(prices.iloc[-1]), 4)
         raw[ticker] = {"ticker": ticker, "sector": universe.get(ticker, "Unknown"), **factors}
         if done % 25 == 0 or done <= 5:
             _q = factors["quality"]

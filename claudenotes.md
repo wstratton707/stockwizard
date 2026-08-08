@@ -1178,3 +1178,98 @@ patching around it.
 
 Keep GMV as the conservative anchor, ERC as the default, 1/N visible as the
 benchmark including when it wins.
+
+---
+
+# SECTOR-RELATIVE FACTOR SCREEN — ANALYSIS AND PLAN (2026-08-08)
+
+Prompted by an external (ChatGPT) architecture proposal for the Portfolio
+Builder: sector-relative factor ranking -> eligible universe -> expected
+returns -> constrained MPT -> explainable portfolio. This note records what we
+adopt, what we change, and why — so the next session doesn't re-litigate it.
+
+## Where the proposal is right, and where we already are
+
+The core architecture it proposes is the one we already converged on from the
+literature (2026-08-05 note): the SCREEN decides what is eligible, the
+OPTIMISER decides how much. Its strongest specific points:
+
+1. Percentile-rank metrics WITHIN sector — a 32x forward P/E means something
+   different in Technology than in Utilities. We already do this for momentum;
+   quality, vol and Sharpe are ranked across the whole universe, and the code
+   itself flags sector-relative quality as a known gap (precompute.py comment).
+2. Group correlated metrics into factors before weighting, so fifteen
+   correlated ratios don't act as one metric with fifteen votes.
+3. Hard exclusion gates so one great metric can't smuggle in a broken company.
+4. Two scores per holding — "how good is the company" (fundamental) vs "how
+   useful is it in this portfolio" (fit/diversification). Genuinely good
+   product idea; cheap to compute from the covariance we already estimate.
+5. Explainable output ("top 8% of Technology; added for diversification").
+
+## Where the proposal is wrong for us, with receipts
+
+1. "Expected Return Engine: CAPM + fundamental/analyst inputs -> optimizer."
+   We MEASURED this exact architecture failing (2026-08-07 note): CAPM-mu
+   mean-variance collapsed onto minimum variance (vol 17.32/17.35/17.39 across
+   three supposedly different portfolios) and lost to 1/N by 0.69 vs 0.92
+   Sharpe. The risk-matched model now sizes from covariance alone (GMV->ERC->1/N
+   ladder) and that stays. Factor scores affect WHICH names enter, not how much.
+2. Analyst Outlook at 15% weight. Analyst consensus is our flakiest feed
+   (yfinance throttling caused the all-Unknown-sectors bug) and the weakest
+   evidence base — consensus is largely priced in. Deferred to a phase-4
+   optional factor, small weight, neutral when missing.
+3. Momentum at 5%. Backwards: momentum is the best-documented cross-sectional
+   factor there is. It keeps a 25% weight.
+4. "Top 25% per sector, max 30" implies a universe of thousands. Ours is ~331
+   ranked names (top 30/sector IS the universe). Universe expansion is its own
+   phase with its own problems (sector labels for dynamic names; precompute
+   runtime), not a scoring change.
+
+## The new composite (Phase 1, shipped)
+
+All fundamentals sector-relative, missing -> neutral 0.5, never a penalty:
+
+  25%  Momentum   12-1/6m/3m, sector-relative (unchanged)
+  20%  Quality    net margin, ROE, F-Score -> NOW sector-relative
+  15%  Value      earnings yield (diluted EPS / price), sector-relative
+  15%  Growth     revenue CAGR + EPS CAGR, sector-relative
+  10%  Health     D/E (inverted), current ratio, F-Score/9, sector-relative
+  15%  Low-vol    absolute (a calm name is calm regardless of neighbours)
+
+Sharpe is DROPPED from the composite: it is momentum divided by volatility,
+both already present — the proposal's own correlated-metrics argument applied
+to our own scorecard.
+
+Value uses earnings yield because EPS/price needs no share count: EDGAR gives
+diluted EPS, we have price. P/S, EV/EBITDA, FCF yield all need market cap and
+therefore shares outstanding — phase 3, alongside the market-cap gate.
+
+Hard gate (flag, not deletion): D/E > 3 with F-Score <= 3 -> "gate" reason
+string on the ranking entry. The builder skips gated names during auto-
+selection; user-typed tickers are never gated. Kept as a flag so the Top
+Stocks page and the rankings cache shape don't change.
+
+## Why no new Supabase table
+
+"Cache every sector in Supabase" already exists twice over: rankings are
+written per-day to the sharpe_rankings_{date} bundle by the sector-sharded
+cron, and per-ticker fundamentals now cache under fund_{TICKER} (TTL 30 days,
+same pattern the old quality_{TICKER} scalar used — fundamentals change on
+quarterly filings, so 30d is conservative). No DDL, nothing for the user to
+run. First cron after this change pays ~150s to rebuild the fundamentals
+cache under the new key, then it is warm for a month.
+
+## Phases
+
+  1 DONE  components cache + sector-relative 6-factor composite + gate flags
+          + builder skips gated names + copy updated to match
+  2       eligible-universe UX: per-holding explanation (sector percentile,
+          factor breakdown), Portfolio Fit score (diversification benefit from
+          the covariance matrix) shown next to the factor score, user filters
+          (dividend preference, growth/value tilt, min market cap)
+  3       market cap + shares outstanding into precompute -> real P/E, P/S,
+          EV/EBITDA, FCF yield, market-cap gates; universe expansion beyond
+          ~331 (needs sector labels for dynamic names — the old blocker)
+  4       analyst factor (consensus, target upside, revisions) as a small
+          additive term, neutral when missing, from Finnhub/yfinance with the
+          profiles_are_usable-style guard

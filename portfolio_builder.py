@@ -346,10 +346,17 @@ def _render_step_2(api_key):
 
                 # Group by sector, respecting user preferences
                 sector_groups: dict = defaultdict(list)
+                _gated = []
                 for ticker, data in rankings.items():
                     if ticker == "_meta":   # skip the freshness-metadata entry
                         continue
                     if ticker in excl_tickers:
+                        continue
+                    # Hard screen gate from precompute (e.g. extreme leverage
+                    # with a weak F-Score). Auto-selection skips these; a ticker
+                    # the user typed themselves is never gated — their call.
+                    if data.get("gate") and ticker not in user_tickers:
+                        _gated.append(ticker)
                         continue
                     sector = data.get("sector", "Unknown")
                     if sector in excl_sectors:
@@ -357,6 +364,10 @@ def _render_step_2(api_key):
                     if sector not in incl_sectors and sector not in {"Market", "Commodities"}:
                         continue
                     sector_groups[sector].append((ticker, data.get("score", data.get("sharpe", 0))))
+
+                if _gated:
+                    log(f"   Screen gate excluded {len(_gated)}: {', '.join(sorted(_gated)[:8])}"
+                        f"{' …' if len(_gated) > 8 else ''}")
 
                 # Conservative profile — skip growth sectors
                 GROWTH_SECTORS = {"Technology", "Consumer Discretionary",
@@ -753,10 +764,12 @@ def _render_step_2(api_key):
     if _rows:
         st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
         st.caption(
-            "**Factor score** is the selection composite (momentum 30% · quality 30% · "
-            "low-volatility 20% · risk-adjusted return 20%). Momentum is percentile-ranked "
-            "within sector; quality, volatility and Sharpe are ranked across the whole "
-            "universe. **Tilt vs CAPM** is how much that score "
+            "**Factor score** is the selection composite (momentum 25% · quality 20% · "
+            "value 15% · growth 15% · financial health 10% · low-volatility 15%). "
+            "Momentum and every fundamental factor are percentile-ranked within the "
+            "stock's own sector — a good margin for a grocer is not a good margin for "
+            "a software company; volatility is ranked across the whole universe. "
+            "**Tilt vs CAPM** is how much that score "
             f"moves the expected return, capped at ±{FACTOR_ALPHA_MAX*100:g}%/yr. It decides which "
             "names are eligible, and it sets the expected returns behind the Maximum "
             "Sharpe and Minimum Volatility models. The **Risk-Matched Model sizes "
