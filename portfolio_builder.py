@@ -128,6 +128,46 @@ def _section_header(text):
 
 # ── Step 0 — Preferences ──────────────────────────────────────────────────────
 
+def _factor_caption(meta: dict) -> str:
+    """Describe the model the CACHED DATA actually contains, not the one the
+    code implements.
+
+    These drifted apart in production: the interface asserted a six-factor
+    sector-relative composite with an analyst adjustment while the live
+    rankings still held the previous four-factor blend, because the cron had
+    not re-run since the rework. Reading the stamped version means the copy
+    cannot outrun the data again.
+    """
+    from factor_model import FACTOR_MODEL_VERSION, WEIGHTS
+    v = meta.get("factor_model_version")
+    stamp = (f"  ·  Rankings computed {meta.get('computed_at', 'unknown')}."
+             if meta.get("computed_at") else "")
+
+    if v == FACTOR_MODEL_VERSION:
+        mix = " · ".join(f"{k} {w}%" for k, w in WEIGHTS.items())
+        return (
+            f"**Factor score** is the sector-relative composite ({mix}), plus an "
+            f"analyst-consensus adjustment of at most ±3 points where three or more "
+            f"analysts cover the name. Value averages earnings yield, free-cash-flow "
+            f"yield and EBITDA/EV against sector peers; volatility is ranked across "
+            f"the whole universe, because the low-volatility effect is market-wide "
+            f"rather than within-sector. Financials are scored without EV/EBITDA, "
+            f"free cash flow or leverage ratios, which do not describe a bank. "
+            f"Missing data is neutral, never zero. **Tilt vs CAPM** is how much the "
+            f"score moves the expected return behind the Maximum Sharpe and Minimum "
+            f"Volatility models, capped at ±2%/yr. The Risk-Matched Model sizes "
+            f"positions from the covariance matrix alone." + stamp)
+
+    return (
+        f"**Factor score** comes from the previous factor model (v{v or 'unversioned'}), "
+        f"because the nightly ranking job has not yet re-run since the current model "
+        f"(v{FACTOR_MODEL_VERSION}) shipped. Names were ranked on momentum, quality, "
+        f"low volatility and risk-adjusted return, with quality measured across the "
+        f"whole universe rather than within sector. Sector-relative valuation, growth "
+        f"and financial-health factors are **not** reflected in these scores yet."
+        + stamp)
+
+
 def _render_step_0():
     st.markdown(render_inline(_disc.BUILDER_SCOPE), unsafe_allow_html=True)
 
@@ -149,11 +189,26 @@ def _render_step_0():
     st.caption(f"Preset: {preset_choice.lower()} · higher settings hold more volatility "
                f"and spread capital more evenly; lower settings concentrate into the "
                f"calmest holdings.")
+    # These describe what the optimiser DOES. The previous copy promised
+    # "maximum growth, heavy equities" at the top of the scale and "all-in on
+    # high-growth equities" at 10, while the ladder actually converges on equal
+    # weight — measured weight spread 19.8pp at level 2, 11.1pp at 5, 2.1pp at
+    # 9, and level 10 is literally 1/N. The aggressive build was the MOST
+    # diversified of the three. Copy that inverts the algorithm is worse than
+    # no copy.
     risk_labels = {
-        (1,3): ("Conservative","Capital preservation. Heavy bonds and defensive ETFs."),
-        (4,6): ("Moderate",    "Balanced growth. Mix of growth stocks and stability."),
-        (7,9): ("Aggressive",  "Maximum growth. Heavy equities, higher volatility."),
-        (10,10):("Ultra Aggressive","All-in on high-growth equities. Significant risk."),
+        (1,3): ("Concentrated in the calmest names",
+                "Minimum-variance weighting. Fewest effective holdings, largest "
+                "single positions, lowest expected volatility."),
+        (4,6): ("Balanced by risk contribution",
+                "Each holding contributes a similar share of portfolio risk. "
+                "Volatile names get smaller positions."),
+        (7,9): ("Spread more evenly",
+                "Moves toward equal weight. More effective holdings, smaller "
+                "maximum position, higher expected volatility."),
+        (10,10):("Equal weight",
+                "Every holding the same size. Highest expected volatility and "
+                "the widest spread of capital, with no view on which name is best."),
     }
     for (lo,hi),(label,desc) in risk_labels.items():
         if lo <= risk <= hi:
@@ -378,42 +433,39 @@ def _render_step_2(api_key):
                         return base + 0.3 * (data.get("f_growth", 0.5) - 0.5)
                     return base
 
-                # Group by sector, respecting user preferences
-                sector_groups: dict = defaultdict(list)
-                _gated = []
-                _too_small = []
-                _min_mcap = prefs.get("min_mcap", 0)
-                for ticker, data in rankings.items():
-                    if ticker == "_meta":   # skip the freshness-metadata entry
-                        continue
-                    if ticker in excl_tickers:
-                        continue
-                    # Hard screen gate from precompute (e.g. extreme leverage
-                    # with a weak F-Score). Auto-selection skips these; a ticker
-                    # the user typed themselves is never gated — their call.
-                    if data.get("gate") and ticker not in user_tickers:
-                        _gated.append(ticker)
-                        continue
-                    # Market-cap floor. Only names WITH an estimate are filtered:
-                    # an ETF or a non-filer has no diluted share count, and
-                    # missing data must never read as "small".
-                    _mc = data.get("mcap_est")
-                    if (_min_mcap and ticker not in user_tickers
-                            and _mc is not None and _mc < _min_mcap):
-                        _too_small.append(ticker)
-                        continue
-                    sector = data.get("sector", "Unknown")
-                    if sector in excl_sectors:
-                        continue
-                    if sector not in incl_sectors and sector not in {"Market", "Commodities"}:
-                        continue
-                    sector_groups[sector].append((ticker, _sel_score(data)))
+                # Hard eligibility filters + the per-sector cut, in
+                # factor_model.eligible_universe. Data quality and
+                # investability only — nothing is dropped for scoring badly on
+                # a factor, so a cheap unloved name still reaches the optimiser
+                # and loses there on its merits rather than here.
+                from factor_model import eligible_universe as _elig
+                _eligible, _diag = _elig(
+                    rankings,
+                    include_sectors=set(incl_sectors) | {"Market", "Commodities"},
+                    exclude_sectors=excl_sectors,
+                    exclude_tickers=excl_tickers,
+                    min_market_cap=prefs.get("min_mcap", 0),
+                    always_keep=set(user_tickers),
+                )
+                _eligible_set = set(_eligible)
+                if _diag["gated"]:
+                    log(f"   Screen gate excluded {len(_diag['gated'])}: "
+                        f"{', '.join(sorted(_diag['gated'])[:8])}"
+                        f"{' …' if len(_diag['gated']) > 8 else ''}")
+                if _diag["too_small"]:
+                    log(f"   Market-cap floor excluded {len(_diag['too_small'])} name(s)")
+                log(f"   Eligible universe: {len(_eligible)} of {n_ranked} "
+                    f"— per-sector cut {_diag['sector_cut']}")
 
-                if _gated:
-                    log(f"   Screen gate excluded {len(_gated)}: {', '.join(sorted(_gated)[:8])}"
-                        f"{' …' if len(_gated) > 8 else ''}")
-                if _too_small:
-                    log(f"   Market-cap floor excluded {len(_too_small)} name(s)")
+                # Group the eligible names by sector for the slot allocation
+                # below, which balances sector representation against score.
+                sector_groups: dict = defaultdict(list)
+                for ticker in _eligible:
+                    data = rankings.get(ticker)
+                    if not isinstance(data, dict):
+                        continue
+                    sector_groups[data.get("sector", "Unknown")].append(
+                        (ticker, _sel_score(data)))
 
                 # Conservative profile — skip growth sectors
                 GROWTH_SECTORS = {"Technology", "Consumer Discretionary",
@@ -805,25 +857,8 @@ def _render_step_2(api_key):
         })
     if _rows:
         st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
-        st.caption(
-            "**Factor score** is the selection composite (momentum 25% · quality 20% · "
-            "value 15% · growth 15% · financial health 10% · low-volatility 15%, "
-            "plus an analyst-consensus adjustment of at most ±0.05 where three or "
-            "more analysts cover the name). Value averages earnings yield, free-cash-"
-            "flow yield and EBITDA/EV against sector peers. "
-            "Momentum and every fundamental factor are percentile-ranked within the "
-            "stock's own sector — a good margin for a grocer is not a good margin for "
-            "a software company; volatility is ranked across the whole universe. "
-            "**Tilt vs CAPM** is how much that score "
-            f"moves the expected return, capped at ±{FACTOR_ALPHA_MAX*100:g}%/yr. It decides which "
-            "names are eligible, and it sets the expected returns behind the Maximum "
-            "Sharpe and Minimum Volatility models. The **Risk-Matched Model sizes "
-            "positions from the covariance matrix alone** — expected returns are the "
-            "noisiest input in portfolio construction, so the screen picks what to hold "
-            "and the risk model decides how much."
-            + (f"  ·  Rankings computed {_meta.get('computed_at', 'unknown')}."
-               if _meta.get("computed_at") else "")
-        )
+        st.caption(_factor_caption(_meta))
+
         if _meta.get("partial"):
             st.warning(
                 f"Rankings are partial — {_meta.get('tickers_done','?')} of "

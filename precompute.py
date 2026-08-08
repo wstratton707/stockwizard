@@ -327,208 +327,20 @@ def _fetch_analyst(ticker: str):
 
 
 def _add_combined_scores(rankings: dict) -> dict:
+    """Delegate to factor_model.score_universe.
+
+    The scoring logic used to live here as a 150-line closure over `rankings`,
+    which meant it could only ever be exercised by running the whole cron. It
+    now lives in factor_model.py as a pure function of the ranking dict, so the
+    sector-relative behaviour, the missing/invalid/negative taxonomy, the
+    financials branch and the eligible-universe cut are all unit-testable on
+    synthetic input with no network.
+
+    Kept as a wrapper because three call sites (resume, checkpoint, final) and
+    the tests all reference it.
     """
-    Diversified multi-factor score, normalised to [0,1] across the universe.
-
-    A single backward metric (the old 50% trailing-Sharpe weight) is a weak
-    predictor of future returns, so the score spreads across four evidence-based
-    factors instead of leaning on "what already went up":
-
-      25%  Momentum   (12-1 / 6m / 3m composite — the best-documented factor)
-      20%  Quality    (net margin, ROE, Piotroski — sector-relative)
-      15%  Value      (earnings yield = diluted EPS / price — sector-relative)
-      15%  Growth     (revenue CAGR, EPS CAGR — sector-relative)
-      10%  Health     (D/E, current ratio, F-Score — sector-relative)
-      15%  Low vol    (the low-vol anomaly — absolute, a calm name is calm
-                       regardless of its neighbours)
-
-    Every fundamental factor is percentile-ranked WITHIN its sector: a 15% net
-    margin is exceptional for a grocer and mediocre for a software company, so a
-    cross-universe rank measures the sector, not the company. Missing data is
-    neutral (0.5), never a penalty — ETFs and non-filers ride on momentum and
-    volatility alone.
-
-    Sharpe was dropped from the composite: it is momentum divided by
-    volatility, and both are already here — a correlated metric acting as a
-    second vote for the same information.
-
-    This is a factor *tilt*, not a prediction — no method reliably forecasts
-    returns; a low-cost index is the benchmark to beat.
-    """
-    if not rankings:
-        return rankings
-
-    def _pct_rank(values: list) -> list:
-        """Percentile rank in [0,1]. Replaces min-max, which is hostage to
-        outliers: one name up 400% compresses every other score toward zero, so
-        adding or removing a single ticker rescales the whole universe. A rank is
-        invariant to that."""
-        n = len(values)
-        if n == 1:
-            return [0.5]
-        order = sorted(range(n), key=lambda i: values[i])
-        out   = [0.0] * n
-        i = 0
-        while i < n:
-            j = i
-            while j + 1 < n and values[order[j + 1]] == values[order[i]]:
-                j += 1
-            avg_rank = (i + j) / 2.0            # average rank for ties
-            for k in range(i, j + 1):
-                out[order[k]] = avg_rank / (n - 1)
-            i = j + 1
-        return out
-
-    tickers = list(rankings.keys())
-
-    def _by_group(field, groups, invert=False):
-        """Percentile-rank `field` WITHIN each sector, not across the whole
-        universe. Comparing a utility's ROE or volatility against a semiconductor's
-        measures the sector, not the company — cross-sectional ranking without
-        this systematically selects whole sectors. Groups of one fall back to
-        neutral 0.5, since a rank of one thing carries no information."""
-        out = {}
-        for g, members in groups.items():
-            vals = [rankings[t].get(field, 0) or 0 for t in members]
-            if len(members) < 3:
-                for t in members:
-                    out[t] = 0.5
-                continue
-            ranks = _pct_rank(vals)
-            for t, r in zip(members, ranks):
-                out[t] = (1.0 - r) if invert else r
-        return out
-
-    from collections import defaultdict
-    groups = defaultdict(list)
-    for t in tickers:
-        groups[rankings[t].get("sector", "Unknown")].append(t)
-
-    # Momentum is sector-relative, as before. Volatility stays absolute — a
-    # genuinely low-volatility name is low-volatility regardless of what its
-    # neighbours do, and that is the property being selected for.
-    g_12m = _by_group("mom_12m_adj", groups)
-    g_6m  = _by_group("mom_6m",      groups)
-    g_3m  = _by_group("mom_3m",      groups)
-
-    a_vol = dict(zip(tickers, _pct_rank([rankings[t].get("ann_vol", 0) or 0 for t in tickers])))
-
-    def _fund_of(t):
-        f = rankings[t].get("fund")
-        return f if isinstance(f, dict) else {}
-
-    def _by_group_opt(getter, invert=False):
-        """Sector-relative percentile rank for OPTIONAL values.
-
-        _by_group coerces missing to 0 (`.get(field, 0) or 0`), which is
-        harmless for momentum (0% return sits mid-pack) but poisonous for
-        fundamentals: a missing debt/equity coerced to 0 would rank as the
-        least-levered name in its sector. Here only names that HAVE the value
-        are ranked against each other; everyone else is neutral 0.5.
-        """
-        out = {}
-        for _g, members in groups.items():
-            have = [(t, getter(t)) for t in members if getter(t) is not None]
-            if len(have) < 3:                # a rank over <3 carries no signal
-                for t in members:
-                    out[t] = 0.5
-                continue
-            ranks = _pct_rank([v for _t, v in have])
-            for (t, _v), r in zip(have, ranks):
-                out[t] = (1.0 - r) if invert else r
-            for t in members:
-                out.setdefault(t, 0.5)
-        return out
-
-    # Market cap estimate: diluted shares (from the same EDGAR filing) times the
-    # latest close. Assembled at SCORING time so the ratios always price today's
-    # market against the latest filed fundamentals — a 30-day-old cache entry
-    # never freezes a 30-day-old P/E.
-    def _mcap(t):
-        sh, px = _fund_of(t).get("shares"), rankings[t].get("last_price")
-        return (sh * px) if (sh and px and sh > 0) else None
-
-    # Value is the average of up to three yields, each sector-relative:
-    # earnings (EPS/price — covers the most names, needs no share count),
-    # free cash flow (FCF/mcap), and EBITDA/EV. Negative values rank at the
-    # bottom of their sector, which is the point.
-    def _eyield(t):
-        eps, px = _fund_of(t).get("eps"), rankings[t].get("last_price")
-        return (eps / px) if (eps is not None and px) else None
-
-    def _fcf_yield(t):
-        v, mc = _fund_of(t).get("fcf"), _mcap(t)
-        return (v / mc) if (v is not None and mc) else None
-
-    def _ebitda_ev(t):
-        f, mc = _fund_of(t), _mcap(t)
-        e = f.get("ebitda")
-        if e is None or not mc:
-            return None
-        ev = mc + (f.get("debt") or 0) - (f.get("cash") or 0)
-        return e / ev if ev > 0 else None
-
-    _val_metrics = [_eyield, _fcf_yield, _ebitda_ev]
-    _val_ranks   = [_by_group_opt(m) for m in _val_metrics]
-
-    def _value_of(t):
-        # Average only the metrics this name actually has — averaging in the
-        # 0.5 defaults would drag every partially-covered name toward neutral.
-        rs = [r[t] for m, r in zip(_val_metrics, _val_ranks) if m(t) is not None]
-        return sum(rs) / len(rs) if rs else 0.5
-
-    g_q    = _by_group_opt(lambda t: rankings[t].get("quality"))
-    g_revg = _by_group_opt(lambda t: _fund_of(t).get("rev_cagr"))
-    g_epsg = _by_group_opt(lambda t: _fund_of(t).get("eps_cagr"))
-    g_d2e  = _by_group_opt(lambda t: _fund_of(t).get("d2e"), invert=True)
-    g_cur  = _by_group_opt(lambda t: _fund_of(t).get("cur_ratio"))
-
-    for t in tickers:
-        f        = _fund_of(t)
-        momentum = (g_12m[t] + g_6m[t] + g_3m[t]) / 3.0
-        low_vol  = 1.0 - a_vol[t]                        # lower volatility → higher
-        quality  = g_q[t]
-        value    = _value_of(t)
-        growth   = (g_revg[t] + g_epsg[t]) / 2.0
-        _fs      = f.get("f_score")
-        health   = (g_d2e[t] + g_cur[t] + (_fs / 9.0 if _fs is not None else 0.5)) / 3.0
-        score = (0.25 * momentum + 0.20 * quality + 0.15 * value +
-                 0.15 * growth   + 0.10 * health  + 0.15 * low_vol)
-
-        # Analyst consensus: a small ADDITIVE adjustment (at most ±0.05), never
-        # a core factor. Consensus is largely priced in and it is our least
-        # reliable feed, so it nudges ties rather than drives ranks — and a
-        # name with no coverage is untouched, not penalised.
-        _an = rankings[t].get("analyst")
-        if _an is not None:
-            score += 0.10 * (_an - 0.5)
-            rankings[t]["f_analyst"] = round(_an, 4)
-        else:
-            rankings[t].pop("f_analyst", None)
-
-        _mc = _mcap(t)
-        rankings[t]["mcap_est"] = round(_mc) if _mc else None
-        rankings[t]["score"] = round(min(1.0, max(0.0, score)), 4)
-        # Keep the components — the UI attributes each holding to them, and
-        # without this the reason a name was picked is unrecoverable.
-        rankings[t]["f_momentum"] = round(momentum, 4)
-        rankings[t]["f_quality"]  = round(quality, 4)
-        rankings[t]["f_value"]    = round(value, 4)
-        rankings[t]["f_growth"]   = round(growth, 4)
-        rankings[t]["f_health"]   = round(health, 4)
-        rankings[t]["f_lowvol"]   = round(low_vol, 4)
-
-        # Hard gate — a flag, not a deletion, so the rankings cache shape and
-        # the Top Stocks page are untouched. High leverage AND weak fundamentals
-        # together is the combination a single shiny metric can't excuse; the
-        # builder skips gated names in auto-selection, user picks are exempt.
-        d2e = f.get("d2e")
-        if (d2e is not None and d2e > 3.0 and (_fs is None or _fs <= 3)):
-            rankings[t]["gate"] = f"D/E {d2e:.1f} with F-Score {_fs if _fs is not None else '—'}/9"
-        else:
-            rankings[t].pop("gate", None)
-
-    return rankings
+    from factor_model import score_universe
+    return score_universe(rankings)
 
 
 # ── Main computation ───────────────────────────────────────────────────────────
@@ -590,9 +402,9 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
         return _add_combined_scores(raw)
 
     print(f"Computing multi-factor rankings for {len(run_tickers)} tickers...")
-    print("Factors: Momentum 25% · Quality 20% · Value 15% · Growth 15% · "
-          "Health 10% · Low-Vol 15%, ± up to 0.05 analyst bonus — "
-          "fundamentals sector-relative\n")
+    from factor_model import WEIGHTS as _W, FACTOR_MODEL_VERSION as _V
+    print("Factor model v%d — %s\n" % (
+        _V, " / ".join(f"{k} {v}%" for k, v in _W.items())))
 
     CHECKPOINT_EVERY = 200  # write partial results to Supabase every N tickers
 
@@ -660,8 +472,14 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
         # Checkpoint: save partial results so a killed run isn't wasted
         if done % CHECKPOINT_EVERY == 0 and raw:
             partial = _add_combined_scores(dict(raw))
+            from factor_model import FACTOR_MODEL_VERSION, METHODOLOGY_NAME
             partial["_meta"] = {"computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
-                                "partial": True, "tickers_done": done, "tickers_total": len(price_map)}
+                                "partial": True, "tickers_done": done,
+                                "tickers_total": len(price_map),
+                                "factor_model_version": FACTOR_MODEL_VERSION,
+                                "methodology": METHODOLOGY_NAME,
+                                "as_of_date": TODAY,
+                                "data_timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z"}
             cache_set(CACHE_KEY, partial, ttl_hours=RANKINGS_TTL_HOURS)
             print(f"  💾 Checkpoint saved — {len(partial) - 1} tickers ranked so far")
 
@@ -711,10 +529,19 @@ def main():
     # flag it as partial so the next workflow batch knows to merge in.
     full_universe_size = sum(len(v) for v in SECTOR_UNIVERSE.values()) + len(BOND_ETFS) + 5
     is_partial = sector_filter is not None and len(rankings) < full_universe_size * 0.9
+    from factor_model import FACTOR_MODEL_VERSION, METHODOLOGY_NAME
     rankings["_meta"] = {
         "computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         "partial": is_partial,
         "tickers_done": len(rankings),
+        # Versioning so the UI can never describe a model the cache does not
+        # contain. The builder reads these and describes what is actually
+        # present. Bump FACTOR_MODEL_VERSION on any factor, weight, direction
+        # or sector-treatment change.
+        "factor_model_version": FACTOR_MODEL_VERSION,
+        "methodology": METHODOLOGY_NAME,
+        "as_of_date": TODAY,
+        "data_timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
     ok      = cache_set(CACHE_KEY, rankings, ttl_hours=RANKINGS_TTL_HOURS)
     elapsed = time.time() - t0
@@ -736,7 +563,7 @@ def main():
     for r in top:
         _q = r.get("quality")
         print(f"  {r['ticker']:<6}  {r['sector']:<28}  "
-              f"Score={r.get('score',0):.3f}  "
+              f"Score={r.get('fundamental_score') or 0:.1f}  "
               f"Sharpe={r['sharpe']:+.2f}  "
               f"12M={r.get('mom_12m', 0):+.1f}%  "
               f"Q={('%.2f' % _q) if _q is not None else '—'}")
