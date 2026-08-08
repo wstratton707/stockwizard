@@ -6,7 +6,8 @@ import plotly.express as px
 from datetime import datetime
 
 import auth
-from constants import DEV_MODE_FREE, get_risk_free_rate, EQUITY_RISK_PREMIUM
+from constants import (DEV_MODE_FREE, get_risk_free_rate,
+                       get_long_risk_free_rate, EQUITY_RISK_PREMIUM)
 from allocators import risk_ladder
 from disclaimers import render_inline, render_section
 import disclaimers as _disc
@@ -33,6 +34,7 @@ from portfolio_analysis import (
     compute_monthly_heatmap, run_portfolio_monte_carlo,
     compute_diversification_score, get_rebalancing_recommendations,
     compute_betas, capm_expected_returns, portfolio_beta, shrunk_covariance,
+    portfolio_capm,
     factor_tilted_expected_returns, FACTOR_ALPHA_MAX,
 )
 from portfolio_excel import build_portfolio_excel
@@ -761,22 +763,18 @@ def _render_step_2(api_key):
 
     # Portfolio metrics
     returns_df = opt["returns_df"]
-    ann_ret, ann_vol, sharpe, pbeta = 0, 0, 0, 1.0
-    # RFR is in decimal form (e.g. 0.045); convert to % to match ann_ret/ann_vol
-    _rfr_pct = get_risk_free_rate() * 100
+    ann_ret, ann_vol, sharpe, pbeta, pbeta_adj = 0, 0, 0, 1.0, 1.0
     tickers_in = [t for t in selected_weights if t in returns_df.columns]
+    _cap = None
     if tickers_in:
-        w_arr   = np.array([selected_weights[t] for t in tickers_in])
-        w_arr  /= w_arr.sum()
-        cov     = shrunk_covariance(returns_df[tickers_in])
-        ann_vol = np.sqrt(w_arr @ cov @ w_arr) * 100
-        # Expected return is CAPM (Rf + portfolio-beta × ERP) — driven by how much
-        # market risk the portfolio carries, NOT the raw 2-yr mean (which over-
-        # weighted recent winners and produced unreal ~40% figures).
-        _betas  = {t: (stock_metrics.get(t, {}).get("beta") or 1.0) for t in tickers_in}
-        pbeta   = portfolio_beta(selected_weights, _betas)
-        ann_ret = (get_risk_free_rate() + pbeta * EQUITY_RISK_PREMIUM) * 100
-        sharpe  = (ann_ret - _rfr_pct) / ann_vol if ann_vol > 0 else 0
+        # One canonical expected-return calculation, shared with the Compare
+        # panel below. This block previously used the 3-month rate and the raw
+        # beta while Compare used the 10-year rate and an adjusted beta, so the
+        # same portfolio showed two different returns and two Sharpes.
+        _cap = portfolio_capm(selected_weights, returns_df, stock_metrics=stock_metrics)
+        ann_ret, ann_vol = _cap["exp_return"], _cap["vol"]
+        sharpe, pbeta, pbeta_adj = _cap["sharpe"], _cap["beta_raw"], _cap["beta_adj"]
+    _rfr_pct = (_cap["rf"] if _cap else get_long_risk_free_rate() * 100)
 
     # ── Why each holding is here ──────────────────────────────────────────────
     # Every number below was already computed and then discarded at render time.
@@ -913,15 +911,24 @@ def _render_step_2(api_key):
 
     _section_header("Portfolio Overview")
     cols = st.columns(5)
-    for col, label, value, color in [
+    for _card in [
         (cols[0], "Expected Ann. Return", f"{ann_ret:.1f}%",  ct.color.positive if ann_ret > 0 else ct.color.negative),
-        (cols[1], "Portfolio Beta",       f"{pbeta:.2f}",      ct.color.ink),
+        # Both betas, as the Excel report does. They are different objects: the
+        # raw one describes the past, the adjusted one is what the expected
+        # return above is actually built on. Showing only the raw beside a
+        # number derived from the adjusted invited exactly the reconciliation
+        # failure this section used to have.
+        (cols[1], "Portfolio Beta",       f"{pbeta:.2f}",      ct.color.ink,
+         f"{pbeta_adj:.2f} adjusted, used"),
         (cols[2], "Expected Volatility",  f"{ann_vol:.1f}%",  ct.color.ink),
         (cols[3], "Sharpe Ratio",         f"{sharpe:.2f}",    ct.color.positive if sharpe > 1 else ct.color.value_line),
         (cols[4], "Diversification",      f"{div_score}/10",  ct.color.positive if div_score > 6 else ct.color.value_line),
     ]:
+        col, label, value, color = _card[:4]
+        sub = _card[4] if len(_card) > 4 else None
         with col:
-            st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
+            st.markdown(_metric_card(label, value, color, subtitle=sub),
+                        unsafe_allow_html=True)
 
     with st.expander("About these numbers — methodology & assumptions"):
         st.markdown(f"""
@@ -980,10 +987,9 @@ concentration penalty for any single position above 25%.
         # a *lower* Sharpe than "Min Volatility" (it maximises *expected*, not past,
         # risk-adjusted return), which reads like a bug. Fall back to the historical
         # mean only if a CAPM number is missing for any holding.
-        _capm_vec = [stock_metrics.get(t, {}).get("capm_return") for t in _ct2]
-        _cer = (float(np.array([stock_metrics[t]["capm_return"] for t in _ct2]) @ _cwa)
-                if all(v is not None for v in _capm_vec) else _car)
-        _csh  = (_cer - _rfr_pct) / _cvol if _cvol > 0 else 0
+        # Same canonical basis as the Overview — see portfolio_capm().
+        _cc   = portfolio_capm(_cw, returns_df, stock_metrics=stock_metrics)
+        _cer, _cvol, _csh = _cc["exp_return"], _cc["vol"], _cc["sharpe"]
         _ccum = (1 + (returns_df[_ct2] @ _cwa)).cumprod()
         _cdd  = ((_ccum - _ccum.cummax()) / _ccum.cummax()).min() * 100
         _top_t = max(_cw, key=_cw.get)
@@ -1282,8 +1288,11 @@ def _render_step_3():
         (cols[2], "vs S&P 500",       f"{bt_met.get('vs S&P 500',0):.1f}%" if isinstance(bt_met.get('vs S&P 500'), float) else "N/A", GREEN if isinstance(bt_met.get('vs S&P 500'), float) and bt_met.get('vs S&P 500',0)>0 else RED),
         (cols[3], "Sharpe Ratio",     f"{bt_met.get('Sharpe Ratio',0):.2f}",     GREEN if bt_met.get("Sharpe Ratio",0)>1 else AMBER),
     ]:
+        col, label, value, color = _card[:4]
+        sub = _card[4] if len(_card) > 4 else None
         with col:
-            st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
+            st.markdown(_metric_card(label, value, color, subtitle=sub),
+                        unsafe_allow_html=True)
 
     # ── Did the optimiser earn its keep? ──────────────────────────────────────
     _eqm = bt.get("equal")
@@ -1330,8 +1339,11 @@ def _render_step_3():
         (cols2[2], "Best Month",       f"{bt_met.get('Best Month',0):.1f}%",      GREEN),
         (cols2[3], "% Months Positive",f"{bt_met.get('% Months Positive',0):.0f}%",GREEN if bt_met.get('% Months Positive',0)>50 else RED),
     ]:
+        col, label, value, color = _card[:4]
+        sub = _card[4] if len(_card) > 4 else None
         with col:
-            st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
+            st.markdown(_metric_card(label, value, color, subtitle=sub),
+                        unsafe_allow_html=True)
 
     # Portfolio vs S&P vs Contributions chart
     _section_header("Portfolio Growth vs Benchmark")
@@ -1820,8 +1832,11 @@ def _render_step_4():
         (cols[1], "Prob. of Doubling",    prob_double_val, BLUE),
         (cols[2], "Prob. of >20% Loss",   prob_loss_val,   RED),
     ]:
+        col, label, value, color = _card[:4]
+        sub = _card[4] if len(_card) > 4 else None
         with col:
-            st.markdown(_metric_card(label, value, color), unsafe_allow_html=True)
+            st.markdown(_metric_card(label, value, color, subtitle=sub),
+                        unsafe_allow_html=True)
 
     with st.expander("How Monte Carlo probabilities are calculated"):
         st.markdown("""

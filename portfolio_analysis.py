@@ -46,6 +46,12 @@ def compute_stock_metrics(returns_df, market_returns=None):
             "max_drawdown": round(max_dd * 100, 2),
             "total_return": round(((1 + r).prod() - 1) * 100, 2),
             "beta":         round(betas[ticker], 3) if ticker in betas else None,
+            # Unrounded companion. The display value is rounded to 3dp, and
+            # aggregating rounded betas into a portfolio beta left the
+            # metrics-derived figure ~2e-5 from the directly-computed one —
+            # invisible on screen, but enough that two code paths claiming the
+            # same number could not be asserted equal.
+            "beta_exact":   float(betas[ticker]) if ticker in betas else None,
             "capm_return":  round(capm[ticker] * 100, 2) if ticker in capm else None,  # forward (CAPM)
         }
     return metrics
@@ -176,6 +182,74 @@ def portfolio_beta(weights, betas):
 
 
 # ── Portfolio optimisation (Mean-Variance) ────────────────────────────────────
+
+def portfolio_capm(weights, returns_df, stock_metrics=None, betas=None,
+                   market_returns=None):
+    """THE portfolio expected-return calculation. There must be exactly one.
+
+    Returns {exp_return, beta_raw, beta_adj, vol, sharpe, rf} — all percentages
+    except the betas, so callers can render without re-deriving anything.
+
+    There used to be two. The Portfolio Overview computed
+    `get_risk_free_rate() + raw_beta * ERP` (the 3-month cash rate, unadjusted
+    beta) while the Compare panel weighted each holding's `capm_return` (the
+    10-year rate, Blume-adjusted beta). Same portfolio, same screen: 6.8% and
+    8.3% expected return, 0.28 and 0.41 Sharpe. The shipped Excel report
+    independently uses the second convention, which settles which one was
+    stale.
+
+    Two deliberate choices:
+
+    * The 10-year rate and Blume-adjusted betas, matching capm_expected_returns
+      and the Excel report. These are multi-year equity expectations, not
+      overnight cash, and a regression beta used as a FORECAST should be shrunk
+      toward 1.
+    * Sharpe subtracts the SAME rate that anchors the numerator. Building an
+      expected return on the 10-year and then subtracting the 3-month books the
+      term premium as if it were alpha — worth about +0.08 of Sharpe on a
+      typical portfolio here. Trailing/backtest Sharpe elsewhere keeps the cash
+      rate, which is the right convention for a realised excess return; this
+      one is forward-looking and must be internally consistent.
+
+    Beta is reported both ways because they are different objects: beta_raw
+    describes the past, beta_adj is what the expected return is actually built
+    on. The Excel report already shows both; the app showed only the raw one
+    beside a number derived from the adjusted one.
+    """
+    from constants import get_long_risk_free_rate, EQUITY_RISK_PREMIUM
+    from analysis import blume_adjust
+
+    cols = [t for t in weights if t in returns_df.columns]
+    if not cols:
+        return {"exp_return": 0.0, "beta_raw": 1.0, "beta_adj": 1.0,
+                "vol": 0.0, "sharpe": 0.0, "rf": get_long_risk_free_rate() * 100}
+    w = np.array([weights[t] for t in cols], dtype=float)
+    w = w / w.sum() if w.sum() > 0 else np.ones(len(cols)) / len(cols)
+
+    if betas is None:
+        if stock_metrics:
+            betas = {t: (stock_metrics.get(t, {}).get("beta_exact")
+                         if stock_metrics.get(t, {}).get("beta_exact") is not None
+                         else stock_metrics.get(t, {}).get("beta"))
+                     for t in cols}
+            betas = {t: (b if b is not None else 1.0) for t, b in betas.items()}
+        elif market_returns is not None:
+            betas = compute_betas(returns_df[cols], market_returns)
+        else:
+            betas = {t: 1.0 for t in cols}
+
+    b_raw = float(sum(w[i] * float(betas.get(t, 1.0)) for i, t in enumerate(cols)))
+    # Blume is affine, so adjusting the portfolio beta equals the weighted mean
+    # of adjusted holding betas. Doing it once here keeps the two agreeing.
+    b_adj = blume_adjust(b_raw)
+
+    rf = get_long_risk_free_rate()
+    exp_return = (rf + b_adj * EQUITY_RISK_PREMIUM) * 100
+    vol = float(np.sqrt(w @ shrunk_covariance(returns_df[cols]) @ w)) * 100
+    sharpe = (exp_return - rf * 100) / vol if vol > 0 else 0.0
+    return {"exp_return": exp_return, "beta_raw": b_raw, "beta_adj": b_adj,
+            "vol": vol, "sharpe": sharpe, "rf": rf * 100}
+
 
 def portfolio_metrics(weights, returns_df):
     weights      = np.array(weights)
@@ -789,32 +863,64 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
 
 # ── Diversification score ─────────────────────────────────────────────────────
 
+# Effective holdings at which the breadth term saturates. Beyond roughly this
+# many independent-ish positions the marginal diversification benefit of one
+# more name is small, which is the standard finding on naive diversification.
+DIVERSIFICATION_TARGET_N = 20.0
+
+
 def compute_diversification_score(weights, returns_df):
-    """
-    Score from 1-10. Higher = more diversified.
-    Based on effective number of assets and avg pairwise correlation.
+    """Score 1-10, higher = more diversified. Monotone in actual diversification.
+
+    Formula, on three components:
+
+        breadth     = min(effective_N / 20, 1)          effective_N = 1 / sum(w^2)
+        independence= (1 - clamp(avg_pairwise_corr, 0, 1))   undefined -> 0.35
+        concentration = 1 - clamp((max_weight - 0.25) / 0.75, 0, 1)
+
+        score = 10 * (0.50*breadth + 0.35*independence + 0.15*concentration)
+                clamped to [1, 10]
+
+    Two defects this replaces, both of which made the old score non-monotone —
+    it rated one stock 9.0, two stocks 9.5 and a real 18-name portfolio 7.9:
+
+    1. Breadth was `effective_N / len(tickers)`, which measures how EVEN the
+       weights are, not how many there are. A single holding is perfectly even
+       and scored a full 1.0, identical to fifty equally-weighted names.
+       Breadth is now measured against an absolute target, so holding more
+       genuinely scores higher.
+
+    2. With fewer than two holdings the correlation upper triangle is empty and
+       `avg_corr` is NaN. The old code computed `1 - max(0, avg_corr)`, and
+       Python evaluates `max(0, nan)` to 0 — so an UNDEFINED correlation
+       silently became a perfect one, the single largest contributor to a
+       one-stock portfolio scoring 9.0. Undefined is now treated as unknown and
+       given a below-neutral 0.35, because a portfolio too small to have a
+       correlation structure has not demonstrated independence.
     """
     tickers = [t for t in weights.keys() if t in returns_df.columns]
-    w_arr   = np.array([weights[t] for t in tickers])
-    w_arr  /= w_arr.sum()
+    if not tickers:
+        return 1.0
+    w_arr = np.array([weights[t] for t in tickers], dtype=float)
+    total = w_arr.sum()
+    w_arr = w_arr / total if total > 0 else np.ones(len(tickers)) / len(tickers)
 
-    # Effective N (Herfindahl-Hirschman Index)
-    hhi      = np.sum(w_arr ** 2)
-    eff_n    = 1 / hhi
-    n_score  = min(eff_n / len(tickers), 1.0)
+    eff_n   = 1.0 / float(np.sum(w_arr ** 2))
+    breadth = min(eff_n / DIVERSIFICATION_TARGET_N, 1.0)
 
-    # Average pairwise correlation
-    corr     = returns_df[tickers].corr()
-    mask     = np.triu(np.ones(corr.shape), k=1).astype(bool)
-    avg_corr = corr.where(mask).stack().mean()
-    c_score  = 1 - max(0, avg_corr)
+    if len(tickers) >= 2:
+        corr = returns_df[tickers].corr()
+        mask = np.triu(np.ones(corr.shape), k=1).astype(bool)
+        avg_corr = corr.where(mask).stack().mean()
+        independence = (0.35 if not np.isfinite(avg_corr)
+                        else 1.0 - min(max(float(avg_corr), 0.0), 1.0))
+    else:
+        independence = 0.35          # undefined, not ideal
 
-    # Concentration penalty: any single position >25% drags the score down
-    max_w        = w_arr.max()
-    conc_penalty = max(0.0, (max_w - 0.25) / 0.75)  # 0 at 25%, 1.0 at 100%
+    conc = 1.0 - min(max((float(w_arr.max()) - 0.25) / 0.75, 0.0), 1.0)
 
-    raw = (n_score * 0.5 + c_score * 0.4 + (1 - conc_penalty) * 0.1) * 10
-    return round(min(10, max(1, raw)), 1)
+    raw = (0.50 * breadth + 0.35 * independence + 0.15 * conc) * 10
+    return round(min(10.0, max(1.0, raw)), 1)
 
 
 # ── Rebalancing recommendations ───────────────────────────────────────────────
