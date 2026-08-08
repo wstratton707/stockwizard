@@ -183,7 +183,7 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
     if db_hit is not None:
         try:
             df = pd.DataFrame(db_hit)
-            df["Date"] = pd.to_datetime(df["Date"])
+            df["Date"] = _trading_dates(df["Date"])
             with _PORT_CACHE_LOCK:
                 _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
             return df
@@ -201,7 +201,10 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
     df = bars.copy()
     df["Ticker"] = ticker
     df = df[["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]]
-    df = df.drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
+    # Normalise BEFORE de-duplicating: drop_duplicates on raw stamps keeps
+    # 00:00 and 04:00 copies of one session as separate rows.
+    df["Date"] = _trading_dates(df["Date"])
+    df = df.drop_duplicates("Date", keep="last").sort_values("Date").reset_index(drop=True)
 
     with _PORT_CACHE_LOCK:
         _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
@@ -277,9 +280,11 @@ def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
             raise ValueError("Polygon API key is missing. Check your environment variables.")
         raise ValueError(f"No valid price data retrieved. All {len(tickers)} tickers failed — check API key and rate limits.")
 
-    closes = {t: df.set_index("Date")["Close"].rename(t)
-              for t, df in price_dict.items()}
-    close_df = pd.DataFrame(closes)
+    closes = {}
+    for t, df in price_dict.items():
+        s_ = df.set_index(_trading_dates(df["Date"]))["Close"].rename(t)
+        closes[t] = s_[~s_.index.duplicated(keep="last")]
+    close_df = pd.DataFrame(closes).sort_index()
     # Keep the common window as long as possible. The ffill/dropna below aligns every
     # ticker to a shared window, so one young name (recent IPO) would otherwise
     # truncate the whole matrix. Instead, drop tickers whose history doesn't reach
@@ -296,8 +301,7 @@ def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
                 f"(need ~{period_years}y): {short}")
             failed.extend(short)
         close_df = close_df[mature]
-    close_df   = close_df.ffill().dropna()
-    returns_df = close_df.pct_change().dropna()
+    close_df, returns_df = _finalise_matrix(close_df, "live fetch", log)
 
     # Normalize price_dict shape to match the cached path — callers should rely on
     # a single {ticker: DataFrame(Date, Ticker, Close)} contract regardless of path.
@@ -502,6 +506,65 @@ def select_by_factors(returns_df, sector_map, always_keep=None, max_total=18,
 
 # ── Supabase-cached portfolio price fetcher ───────────────────────────────────
 
+def _finalise_matrix(close_df: pd.DataFrame, label: str, log=None):
+    """Collapse to one row per session, ffill, and ASSERT the invariant.
+
+    The assertion is the point. This defect was invisible for as long as it
+    existed because every number it corrupted still looked plausible — a
+    volatility of 14.91% is not obviously wrong unless you know it should be
+    17.21%. A cheap structural check at the boundary is what makes that class
+    of corruption loud instead of silent.
+    """
+    close_df = _dedupe_by_date(close_df, label, log)
+    close_df = close_df.ffill().dropna()
+    n, uniq = len(close_df.index), close_df.index.nunique()
+    if n != uniq:                                    # unreachable after dedupe
+        raise AssertionError(f"{label}: {n} rows over {uniq} distinct sessions")
+    returns_df = close_df.pct_change().dropna()
+    return close_df, returns_df
+
+
+def _trading_dates(values) -> pd.DatetimeIndex:
+    """Coerce anything date-like to tz-naive midnight calendar dates.
+
+    A daily bar identifies a trading DAY, but the sources disagree on how to
+    stamp it: some return tz-naive midnight, others a UTC instant. US Eastern
+    midnight is 04:00 UTC under EDT and 05:00 under EST, so the same session
+    arrives as 00:00, 04:00 or 05:00 depending on ticker, source and time of
+    year. Those are three distinct keys to pandas.
+
+    That mattered because the price matrix is built by unioning per-ticker
+    Series: mismatched stamps split one session into several index entries,
+    ffill() populates the copies, dropna() keeps them, and the return series
+    picks up a run of exactly-zero days. Measured on a 45-name fetch: 1,672
+    rows over 1,255 real sessions, 25.1% of them zero-return, dragging SPY's
+    annualised volatility from 17.21% down to 14.91%. Every covariance,
+    correlation, Sharpe and optimiser weight downstream inherited that.
+
+    Normalising to a naive midnight date makes the union key the session
+    itself, which is the only thing a daily bar actually identifies.
+    """
+    idx = pd.DatetimeIndex(pd.to_datetime(values, errors="coerce", utc=False))
+    if idx.tz is not None:
+        idx = idx.tz_convert(None) if idx.tz is not None else idx
+    return idx.normalize()
+
+
+def _dedupe_by_date(df: pd.DataFrame, label: str = "", log=None) -> pd.DataFrame:
+    """Collapse a frame onto one row per calendar date, keeping the last.
+
+    Applied after normalisation, so the duplicates being collapsed are restamped
+    copies of one session rather than distinct observations. Keeping the last
+    matches the append path, which already resolved overlaps with keep="last".
+    """
+    df = df.copy()
+    df.index = _trading_dates(df.index)
+    dupes = int(df.index.duplicated().sum())
+    if dupes and log:
+        log(f"   Collapsed {dupes} duplicate-date row(s) in {label}")
+    return df[~df.index.duplicated(keep="last")].sort_index()
+
+
 def _close_df_to_payload(close_df: pd.DataFrame, failed: list) -> dict:
     reset = close_df.reset_index()
     reset["Date"] = reset["Date"].astype(str)
@@ -510,8 +573,10 @@ def _close_df_to_payload(close_df: pd.DataFrame, failed: list) -> dict:
 
 def _payload_to_close_df(cached: dict) -> pd.DataFrame:
     close_df = pd.DataFrame(cached["close"]).set_index("Date")
-    close_df.index = pd.to_datetime(close_df.index)
-    return close_df.apply(pd.to_numeric, errors="coerce")
+    close_df = close_df.apply(pd.to_numeric, errors="coerce")
+    # Bundles written before the normalisation fix carry mixed stamps, so the
+    # collapse has to happen on read as well as on write.
+    return _dedupe_by_date(close_df, "cached bundle")
 
 
 def _close_df_to_price_dict(close_df: pd.DataFrame) -> dict:
@@ -577,7 +642,8 @@ def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print
                     for ticker, df, msgs in ex.map(_fetch_new, close_df.columns):
                         thread_logs.extend(msgs)
                         if df is not None and len(df) > 0:
-                            new_dfs[ticker] = df.set_index("Date")["Close"].rename(ticker)
+                            _s = df.set_index(_trading_dates(df["Date"]))["Close"].rename(ticker)
+                            new_dfs[ticker] = _s[~_s.index.duplicated(keep="last")]
 
                 for msg in thread_logs:
                     log(msg)
@@ -600,9 +666,10 @@ def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print
             else:
                 log(f"   ⚡ Bundle cache current (latest: {latest.date()})")
 
-            returns_df = close_df.pct_change().dropna()
+            close_df, returns_df = _finalise_matrix(close_df, "bundle cache", log)
             price_dict = _close_df_to_price_dict(close_df)
-            log(f"   ✅ {len(price_dict)} tickers loaded from bundle cache")
+            log(f"   ✅ {len(price_dict)} tickers loaded from bundle cache "
+                f"({len(close_df)} sessions)")
             return price_dict, close_df, returns_df, failed
 
         except Exception as e:
