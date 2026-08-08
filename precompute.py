@@ -196,7 +196,11 @@ def _fetch_fundamentals(ticker: str):
     quality_), so the first cron after this ships re-pays ~150s once to rebuild
     the cache and is then warm for a month.
     """
-    _ck = f"fund_{ticker.upper()}"
+    # fund2, not fund: phase 3 added the cap-structure fields (shares, ni,
+    # ebitda, debt, cash, fcf) to this dict, and a phase-1 "fund_" entry served
+    # from cache would pin those to None for its whole 30-day TTL. Bumping the
+    # key is the cache-versioning: old entries simply expire unread.
+    _ck = f"fund2_{ticker.upper()}"
     try:
         hit = cache_get(_ck)
         if isinstance(hit, dict) and "c" in hit:
@@ -227,6 +231,19 @@ def _compute_fundamentals(ticker: str):
             return None
         marg, ret_, grw = f.get("margins", {}), f.get("returns", {}), f.get("growth", {})
         lev,  q,   inc  = f.get("leverage", {}), f.get("quality", {}), f.get("income", {})
+        # Cap-structure components. EDGAR already carries diluted share count,
+        # D&A and capex, so the full valuation-ratio set costs nothing extra:
+        # market cap and the yields are assembled at SCORING time from these
+        # plus the day's price, so a 30-day-old cache entry never freezes a
+        # 30-day-old P/E.
+        from analysis import _fin_val
+        _inc_f = fin.get("income_statement")
+        _cf_f  = fin.get("cash_flow_statement")
+        _bal   = f.get("balance", {})
+        _oi    = f.get("income", {}).get("operating_income")
+        _da    = _fin_val(_inc_f, "depreciation_amortization")
+        _ocf   = f.get("cashflow", {}).get("operating")
+        _capex = _fin_val(_cf_f, "capex")
         return {
             "net_margin": marg.get("net"),
             "roe":        ret_.get("roe"),
@@ -235,11 +252,13 @@ def _compute_fundamentals(ticker: str):
             "eps_cagr":   grw.get("eps_cagr"),
             "d2e":        lev.get("debt_to_equity"),
             "cur_ratio":  lev.get("current_ratio"),
-            # Diluted EPS enables the value factor without a share count:
-            # earnings yield = EPS / price. Every other valuation ratio (P/S,
-            # EV/EBITDA, FCF yield) needs market cap, i.e. shares outstanding,
-            # which EDGAR-only precompute doesn't have. Phase 3.
             "eps":        inc.get("eps_diluted"),
+            "shares":     _fin_val(_inc_f, "diluted_shares"),
+            "ni":         f.get("income", {}).get("net_income"),
+            "ebitda":     (_oi + _da) if (_oi is not None and _da is not None) else None,
+            "debt":       _bal.get("long_term_debt"),
+            "cash":       _bal.get("cash"),
+            "fcf":        (_ocf - _capex) if (_ocf is not None and _capex is not None) else None,
         }
     except Exception:
         return None
@@ -260,6 +279,51 @@ def _quality_scalar(c):
     if c.get("f_score") is not None:
         bits.append(c["f_score"] / 9.0)                                  # Piotroski 0-9
     return round(sum(bits) / len(bits), 4) if bits else None
+
+
+def _fetch_analyst(ticker: str):
+    """Wall-Street consensus mapped to [0,1], from Finnhub's free recommendation
+    endpoint. Cached 7 days: opinions move faster than filings, slower than
+    prices. Returns None (neutral, uncached) when there is no key, so a keyless
+    local run can never poison the cron's cache with a week of empty results;
+    None (cached) when coverage is under 3 analysts, because a rating from one
+    or two desks is anecdote, not consensus.
+    """
+    _ck = f"analyst_{ticker.upper()}"
+    try:
+        hit = cache_get(_ck)
+        if isinstance(hit, dict) and "a" in hit:
+            return hit["a"]
+    except Exception:
+        pass
+
+    try:
+        from market_data import get_analyst_data, finnhub_key
+        if not finnhub_key():
+            return None                      # no key -> no fetch, no cache write
+        rec = (get_analyst_data(ticker) or {}).get("recommendation")
+    except Exception:
+        rec = None
+
+    val = None
+    if rec:
+        sb  = int(rec.get("strongBuy", 0) or 0)
+        b   = int(rec.get("buy", 0) or 0)
+        h   = int(rec.get("hold", 0) or 0)
+        sl  = int(rec.get("sell", 0) or 0)
+        ssl = int(rec.get("strongSell", 0) or 0)
+        n   = sb + b + h + sl + ssl
+        if n >= 3:
+            raw = (2 * sb + b - sl - 2 * ssl) / (2.0 * n)     # [-1, 1]
+            val = round((raw + 1.0) / 2.0, 4)
+    try:
+        cache_set(_ck, {"a": val}, ttl_hours=168)
+    except Exception:
+        pass
+    # Finnhub free tier allows 60 calls/min and this stage runs single-threaded;
+    # the pause only costs on cache misses, i.e. one cold pass per week.
+    time.sleep(1.0)
+    return val
 
 
 def _add_combined_scores(rankings: dict) -> dict:
@@ -376,14 +440,44 @@ def _add_combined_scores(rankings: dict) -> dict:
                 out.setdefault(t, 0.5)
         return out
 
-    # Value: earnings yield = diluted EPS / price. Negative earnings produce a
-    # negative yield and rank at the bottom of their sector, which is the point.
+    # Market cap estimate: diluted shares (from the same EDGAR filing) times the
+    # latest close. Assembled at SCORING time so the ratios always price today's
+    # market against the latest filed fundamentals — a 30-day-old cache entry
+    # never freezes a 30-day-old P/E.
+    def _mcap(t):
+        sh, px = _fund_of(t).get("shares"), rankings[t].get("last_price")
+        return (sh * px) if (sh and px and sh > 0) else None
+
+    # Value is the average of up to three yields, each sector-relative:
+    # earnings (EPS/price — covers the most names, needs no share count),
+    # free cash flow (FCF/mcap), and EBITDA/EV. Negative values rank at the
+    # bottom of their sector, which is the point.
     def _eyield(t):
         eps, px = _fund_of(t).get("eps"), rankings[t].get("last_price")
         return (eps / px) if (eps is not None and px) else None
 
+    def _fcf_yield(t):
+        v, mc = _fund_of(t).get("fcf"), _mcap(t)
+        return (v / mc) if (v is not None and mc) else None
+
+    def _ebitda_ev(t):
+        f, mc = _fund_of(t), _mcap(t)
+        e = f.get("ebitda")
+        if e is None or not mc:
+            return None
+        ev = mc + (f.get("debt") or 0) - (f.get("cash") or 0)
+        return e / ev if ev > 0 else None
+
+    _val_metrics = [_eyield, _fcf_yield, _ebitda_ev]
+    _val_ranks   = [_by_group_opt(m) for m in _val_metrics]
+
+    def _value_of(t):
+        # Average only the metrics this name actually has — averaging in the
+        # 0.5 defaults would drag every partially-covered name toward neutral.
+        rs = [r[t] for m, r in zip(_val_metrics, _val_ranks) if m(t) is not None]
+        return sum(rs) / len(rs) if rs else 0.5
+
     g_q    = _by_group_opt(lambda t: rankings[t].get("quality"))
-    g_val  = _by_group_opt(_eyield)
     g_revg = _by_group_opt(lambda t: _fund_of(t).get("rev_cagr"))
     g_epsg = _by_group_opt(lambda t: _fund_of(t).get("eps_cagr"))
     g_d2e  = _by_group_opt(lambda t: _fund_of(t).get("d2e"), invert=True)
@@ -394,13 +488,27 @@ def _add_combined_scores(rankings: dict) -> dict:
         momentum = (g_12m[t] + g_6m[t] + g_3m[t]) / 3.0
         low_vol  = 1.0 - a_vol[t]                        # lower volatility → higher
         quality  = g_q[t]
-        value    = g_val[t]
+        value    = _value_of(t)
         growth   = (g_revg[t] + g_epsg[t]) / 2.0
         _fs      = f.get("f_score")
         health   = (g_d2e[t] + g_cur[t] + (_fs / 9.0 if _fs is not None else 0.5)) / 3.0
         score = (0.25 * momentum + 0.20 * quality + 0.15 * value +
                  0.15 * growth   + 0.10 * health  + 0.15 * low_vol)
-        rankings[t]["score"] = round(score, 4)
+
+        # Analyst consensus: a small ADDITIVE adjustment (at most ±0.05), never
+        # a core factor. Consensus is largely priced in and it is our least
+        # reliable feed, so it nudges ties rather than drives ranks — and a
+        # name with no coverage is untouched, not penalised.
+        _an = rankings[t].get("analyst")
+        if _an is not None:
+            score += 0.10 * (_an - 0.5)
+            rankings[t]["f_analyst"] = round(_an, 4)
+        else:
+            rankings[t].pop("f_analyst", None)
+
+        _mc = _mcap(t)
+        rankings[t]["mcap_est"] = round(_mc) if _mc else None
+        rankings[t]["score"] = round(min(1.0, max(0.0, score)), 4)
         # Keep the components — the UI attributes each holding to them, and
         # without this the reason a name was picked is unrecoverable.
         rankings[t]["f_momentum"] = round(momentum, 4)
@@ -483,7 +591,8 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
 
     print(f"Computing multi-factor rankings for {len(run_tickers)} tickers...")
     print("Factors: Momentum 25% · Quality 20% · Value 15% · Growth 15% · "
-          "Health 10% · Low-Vol 15% — fundamentals sector-relative\n")
+          "Health 10% · Low-Vol 15%, ± up to 0.05 analyst bonus — "
+          "fundamentals sector-relative\n")
 
     CHECKPOINT_EVERY = 200  # write partial results to Supabase every N tickers
 
@@ -517,6 +626,15 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
             except Exception:
                 fund_map[t] = None
 
+    # Analyst consensus, single-threaded on purpose: Finnhub's free tier is
+    # 60 calls/min, and with the 7-day cache all but one run a week is warm.
+    analyst_map = {}
+    try:
+        for _t in price_map:
+            analyst_map[_t] = _fetch_analyst(_t)
+    except Exception:
+        pass
+
     for ticker, prices in price_map.items():
         done += 1
         factors = _compute_factors(prices)
@@ -529,6 +647,7 @@ def compute_rankings(sector_filter: list[str] | None = None) -> dict:
         _fund = fund_map.get(ticker)
         factors["fund"]       = _fund
         factors["quality"]    = _quality_scalar(_fund)
+        factors["analyst"]    = analyst_map.get(ticker)
         factors["last_price"] = round(float(prices.iloc[-1]), 4)
         raw[ticker] = {"ticker": ticker, "sector": universe.get(ticker, "Unknown"), **factors}
         if done % 25 == 0 or done <= 5:

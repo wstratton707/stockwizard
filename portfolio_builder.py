@@ -245,6 +245,13 @@ def _render_step_1(api_key):
             "Max weight per stock (%)", 5, 40, 25, step=5,
             help="Caps single-position concentration during optimization.",
         )
+        min_mcap_label = st.selectbox(
+            "Minimum market cap", ["Any", "$2B+", "$10B+", "$50B+"], index=0,
+            help="Filters auto-selected names by estimated market cap (diluted "
+                 "shares from SEC filings times the latest close). Tickers you "
+                 "add yourself are never filtered; names without an estimate "
+                 "(ETFs) pass.",
+        )
     with col2:
         min_holdings  = st.slider(
             "Minimum number of holdings", 5, 20, 8, step=1,
@@ -305,6 +312,8 @@ def _render_step_1(api_key):
                 prefs["max_per_stock"]   = max_per_stock / 100
                 prefs["min_holdings"]    = min_holdings
                 prefs["style_tilt"]      = style_tilt
+                prefs["min_mcap"]        = {"Any": 0, "$2B+": 2e9, "$10B+": 10e9,
+                                            "$50B+": 50e9}[min_mcap_label]
                 st.session_state[_K_PREFS] = prefs
                 st.session_state[_K_STEP]  = 2
                 st.rerun()
@@ -370,6 +379,8 @@ def _render_step_2(api_key):
                 # Group by sector, respecting user preferences
                 sector_groups: dict = defaultdict(list)
                 _gated = []
+                _too_small = []
+                _min_mcap = prefs.get("min_mcap", 0)
                 for ticker, data in rankings.items():
                     if ticker == "_meta":   # skip the freshness-metadata entry
                         continue
@@ -381,6 +392,14 @@ def _render_step_2(api_key):
                     if data.get("gate") and ticker not in user_tickers:
                         _gated.append(ticker)
                         continue
+                    # Market-cap floor. Only names WITH an estimate are filtered:
+                    # an ETF or a non-filer has no diluted share count, and
+                    # missing data must never read as "small".
+                    _mc = data.get("mcap_est")
+                    if (_min_mcap and ticker not in user_tickers
+                            and _mc is not None and _mc < _min_mcap):
+                        _too_small.append(ticker)
+                        continue
                     sector = data.get("sector", "Unknown")
                     if sector in excl_sectors:
                         continue
@@ -391,6 +410,8 @@ def _render_step_2(api_key):
                 if _gated:
                     log(f"   Screen gate excluded {len(_gated)}: {', '.join(sorted(_gated)[:8])}"
                         f"{' …' if len(_gated) > 8 else ''}")
+                if _too_small:
+                    log(f"   Market-cap floor excluded {len(_too_small)} name(s)")
 
                 # Conservative profile — skip growth sectors
                 GROWTH_SECTORS = {"Technology", "Consumer Discretionary",
@@ -788,7 +809,10 @@ def _render_step_2(api_key):
         st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
         st.caption(
             "**Factor score** is the selection composite (momentum 25% · quality 20% · "
-            "value 15% · growth 15% · financial health 10% · low-volatility 15%). "
+            "value 15% · growth 15% · financial health 10% · low-volatility 15%, "
+            "plus an analyst-consensus adjustment of at most ±0.05 where three or "
+            "more analysts cover the name). Value averages earnings yield, free-cash-"
+            "flow yield and EBITDA/EV against sector peers. "
             "Momentum and every fundamental factor are percentile-ranked within the "
             "stock's own sector — a good margin for a grocer is not a good margin for "
             "a software company; volatility is ranked across the whole universe. "

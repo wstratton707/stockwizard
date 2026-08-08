@@ -1286,3 +1286,31 @@ the book, and fractional risk contribution vs weight share (risk below weight,
 green, is diversification in numbers). Computed from the close_df already in
 session state; nothing new is fetched. Dividend preference and min-market-cap
 filters moved to phase 3 — both need data precompute does not yet carry.
+
+### Phases 3 and 4 shipped (2026-08-08)
+
+Phase 3 — real valuation, from data already on hand. EDGAR carries diluted
+share count, D&A and capex, so the fund cache now stores the cap structure
+(shares, net income, EBITDA, long-term debt, cash, FCF) and market cap is
+assembled at SCORING time as shares x latest close — a 30-day-old cache entry
+never freezes a 30-day-old P/E. The value factor is now the sector-relative
+average of up to three yields: earnings (EPS/price), FCF/mcap, and EBITDA/EV.
+A name is averaged only over the metrics it has, so partial coverage is not
+dragged toward neutral. mcap_est rides on every ranking entry, and the builder
+gained a Minimum market cap filter (Any/$2B/$10B/$50B) — names WITHOUT an
+estimate pass, because missing data must never read as "small". Cache key
+bumped fund_ -> fund2_ so phase-1 entries expire unread instead of pinning the
+new fields to None for a month.
+
+Phase 4 — analyst factor, deliberately small. Finnhub consensus (the same feed
+the Analysis page uses, NOT the flaky yfinance path) mapped to [0,1], cached 7
+days, requiring 3+ analysts — one desk's rating is anecdote. It is an ADDITIVE
+bonus capped at +/-0.05 on the composite, never a core factor: consensus is
+largely priced in. No coverage means no adjustment and no f_analyst field. The
+fetch stage is single-threaded with a 1s pause (Finnhub free tier is 60/min)
+and skips entirely without a key, uncached, so a keyless local run cannot
+poison the cron's cache.
+
+Still deferred: universe expansion beyond ~331 (needs sector labels for
+dynamic names + cron runtime work) and dividend-preference filtering (needs a
+dividend feed that does not go through yfinance .info throttling).
