@@ -24,14 +24,17 @@ import chart_theme as ct
 
 from tracker import track_portfolio, dollars_to_lots, amount_to_shares
 from market_data import get_ticker_profiles, profiles_are_usable
-from portfolio_excel import build_tracked_portfolio_excel
-from portfolio_docx import build_portfolio_docx
+# Report builders are imported at the point of use, not here.
+# Between them they pull in matplotlib, openpyxl, python-docx and python-pptx
+# — about 100 MB of resident memory that every visitor paid for even though
+# only the ones who click Export ever need it. Python never releases an
+# imported module, so an eager import is a permanent tax on the whole process.
 
-try:
-    from portfolio_pptx import build_portfolio_review_pptx
-    _PPTX_OK = True
-except Exception:                       # python-pptx missing on this instance
-    _PPTX_OK = False
+from importlib.util import find_spec
+# Feature detection WITHOUT importing. The old `try: import portfolio_pptx`
+# pulled in pptx_builder -> matplotlib and portfolio_excel -> openpyxl on every
+# page load, purely to find out whether python-pptx was installed.
+_PPTX_OK = find_spec("pptx") is not None
 from database import (
     save_tracked_portfolio, load_tracked_portfolios,
     update_tracked_portfolio, delete_tracked_portfolio,
@@ -447,10 +450,13 @@ def _render_exports(pid, name, res):
                 tickers = tuple(sorted(h["ticker"] for h in res["holdings"]))
                 profiles = _profiles(tickers)
                 if _kind == "excel":
+                    from portfolio_excel import build_tracked_portfolio_excel
                     buf = build_tracked_portfolio_excel(name, res, profiles)
                 elif _kind == "word":
+                    from portfolio_docx import build_portfolio_docx
                     buf = build_portfolio_docx(name, res, profiles)
                 else:
+                    from portfolio_pptx import build_portfolio_review_pptx
                     buf = build_portfolio_review_pptx(name, res, profiles)
                 if buf is None:
                     st.error("That format isn't available on this instance.")

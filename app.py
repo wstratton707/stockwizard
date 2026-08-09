@@ -54,13 +54,14 @@ from analysis import (
     run_monte_carlo, run_custom_forecast, generate_summary_paragraph,
     compute_fundamentals, dcf_valuation, market_beta
 )
-from excel_builder import build_excel
-from pptx_builder import build_stock_pptx, build_portfolio_pptx, PPTX_AVAILABLE
-try:
-    from docx_builder import build_stock_docx
-    DOCX_AVAILABLE = True
-except Exception:
-    DOCX_AVAILABLE = False
+# Report builders are imported at the point of use, not here.
+# Between them they pull in matplotlib, openpyxl, python-docx and python-pptx
+# — about 100 MB of resident memory that every visitor paid for even though
+# only the ones who click Export ever need it. Python never releases an
+# imported module, so an eager import is a permanent tax on the whole process.
+from importlib.util import find_spec
+PPTX_AVAILABLE = find_spec("pptx") is not None   # cheap: does not import pptx
+DOCX_AVAILABLE = find_spec("docx") is not None   # cheap: does not import docx
 try:
     from valuation import (get_valuation_data as _get_valuation_data,
                            build_valuation_figure, build_eps_figure, build_dividend_figure)
@@ -1867,6 +1868,7 @@ elif _page == "analysis":
                         with st.spinner(f"Building your {_name.lower()}…"):
                             try:
                                 if _kind == "excel":
+                                    from excel_builder import build_excel
                                     st.session_state[_buf_key] = build_excel(
                                         ticker_input, _rdf, _rlabel,
                                         company_details=company_details, sector_df=sector_df,
@@ -1882,6 +1884,7 @@ elif _page == "analysis":
                                     # dcf= was missing here while Excel and Word
                                     # both passed it, so the deck's valuation
                                     # slide had nothing to render.
+                                    from pptx_builder import build_stock_pptx
                                     st.session_state[_buf_key] = build_stock_pptx(
                                         ticker_input, _rdf, _rlabel,
                                         company_details=company_details,
@@ -1890,6 +1893,7 @@ elif _page == "analysis":
                                         fundamentals=_fund_report, dcf=_dcf_report,
                                     )
                                 else:
+                                    from docx_builder import build_stock_docx
                                     st.session_state[_buf_key] = build_stock_docx(
                                         ticker_input, _rdf, _rlabel,
                                         company_details=company_details,

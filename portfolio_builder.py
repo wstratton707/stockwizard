@@ -37,8 +37,13 @@ from portfolio_analysis import (
     portfolio_capm,
     factor_tilted_expected_returns, FACTOR_ALPHA_MAX,
 )
-from portfolio_excel import build_portfolio_excel
-from pptx_builder import build_portfolio_pptx, PPTX_AVAILABLE
+# Report builders are imported at the point of use, not here.
+# Between them they pull in matplotlib, openpyxl, python-docx and python-pptx
+# — about 100 MB of resident memory that every visitor paid for even though
+# only the ones who click Export ever need it. Python never releases an
+# imported module, so an eager import is a permanent tax on the whole process.
+from importlib.util import find_spec
+PPTX_AVAILABLE = find_spec("pptx") is not None   # cheap: does not import pptx
 import chart_theme as ct
 
 # Accent for the goal/target callout and the rolling-correlation series. The
@@ -2046,6 +2051,7 @@ reflects that.
                     corr_mat   = opt_data.get("corr_matrix")
                     div_sc     = opt_data.get("div_score", 5)
                     t_info     = opt_data.get("ticker_info", {})
+                    from portfolio_excel import build_portfolio_excel
                     excel_buf  = build_portfolio_excel(
                         preferences           = prefs,
                         final_weights         = weights,
@@ -2076,6 +2082,7 @@ reflects that.
                     corr_mat   = opt_data.get("corr_matrix")
                     div_sc     = opt_data.get("div_score", 5)
                     t_info     = opt_data.get("ticker_info", {})
+                    from pptx_builder import build_portfolio_pptx
                     pptx_buf   = build_portfolio_pptx(
                         preferences           = prefs,
                         final_weights         = weights,
