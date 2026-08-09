@@ -544,6 +544,30 @@ def main():
         "data_timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
     ok      = cache_set(CACHE_KEY, rankings, ttl_hours=RANKINGS_TTL_HOURS)
+
+    # Point-in-time archive: one retained snapshot per month, kept for years.
+    #
+    # The daily key expires after a week, so nothing survives long enough to
+    # measure whether the factors predict anything. That gap is not academic —
+    # an information-coefficient study run on the current fundamentals snapshot
+    # applied to past dates produced a t-statistic of 4.6 for the fundamental
+    # factors, which is not a signal, it is look-ahead: today's known margins
+    # and growth used to rank stocks three years ago. The two factors that COULD
+    # be reconstructed point-in-time from prices (momentum, low volatility) came
+    # out at an information coefficient of 0.004 and -0.068 respectively.
+    #
+    # Until real point-in-time fundamentals accumulate, no claim about the
+    # predictive value of this screen can be tested. Archiving monthly starts
+    # that clock. Monthly rather than daily because filings change quarterly and
+    # a daily archive would be almost entirely redundant rows.
+    try:
+        _arch_key = f"rankings_archive_{TODAY[:7]}"
+        if cache_get(_arch_key) is None:
+            cache_set(_arch_key, rankings, ttl_hours=24 * 365 * 3)
+            print(f"Point-in-time archive written: {_arch_key}")
+    except Exception as _e:
+        print(f"Archive write skipped: {_e}")
+
     elapsed = time.time() - t0
 
     print(f"\n{'='*55}")

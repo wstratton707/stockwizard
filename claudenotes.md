@@ -1372,3 +1372,75 @@ removes growth sectors, not the scoring bug.
 
 Three separate questions, three separate steps: how good is the company, how
 much of each sector, how much of each name.
+
+
+---
+
+# EXPERIMENT 2 + 3 — DOES THE SCREEN PREDICT ANYTHING? (2026-08-08)
+
+Diagnostic, not a backtest. 14 quarterly rebalances, 63-day forward horizon,
+316 names, Spearman rank IC.
+
+## Point-in-time integrity (the whole point)
+
+  momentum, low-vol : CLEAN. Rebuilt from prices up to each date.
+  value             : price clean, EPS/FCF/EBITDA from current snapshot.
+  quality/growth/health : CONTAMINATED. One current snapshot on all dates.
+
+## Experiment 2 — normalisation barely matters
+
+  factor       sector    global   hybrid    clean?
+  momentum      0.012     0.004    0.006     yes
+  lowvol       -0.020    -0.068   -0.048     yes
+  value         0.078     0.094    0.088     partial
+  growth        0.028     0.045    0.040     no
+  quality       0.048     0.065    0.058     no
+  health        0.013     0.007    0.010     no
+  COMPOSITE     0.058     0.055    0.059     mixed
+
+Outcome B. Global is marginally better for value/quality but well inside noise.
+Where the percentile is computed is not the binding constraint.
+
+## Experiment 3 — combinations (global, n=14)
+
+  combination              IC      t    hit%   Q5-Q1%   clean?
+  fundamentals only      0.103   4.60    93     4.91     no
+  value+quality only     0.111   6.54    93     4.89     no
+  shipped (v4)           0.055   1.29    57     1.83     no
+  fundamentals+momentum  0.062   1.37    64     3.37     no
+  fund+mom+lowvol        0.031   0.61    50     0.67     no
+  momentum only          0.004   0.07    64     0.46     YES
+  lowvol only           -0.068  -0.90    29    -5.53     YES
+
+## Reading
+
+The two factors measurable without look-ahead show NOTHING (momentum 0.004)
+and NEGATIVE (low-vol -0.068, Q5-Q1 -5.5%/qtr). The factors with t-stats of
+4.6 and 6.5 are precisely the ones built from a current snapshot applied to
+past dates. That is what look-ahead looks like; it is not evidence.
+
+Conclusion: the screen has NOT been demonstrated to have predictive value.
+It has been demonstrated to produce a diversified, sector-balanced portfolio,
+which is a different and weaker claim, and the one the product should make.
+
+## Deliberately not done
+
+Did not reweight toward fundamentals. Contaminated evidence favouring them is
+the overfitting trap; acting on it would bake look-ahead into the shipped model.
+
+## Done instead
+
+Monthly point-in-time archive of the full rankings (3-year TTL). The daily key
+expired weekly, so nothing survived to test against. In ~1 year this becomes
+answerable with real data.
+
+## Caveats
+
+n=14 is small. 2021-2026 is one regime, a bull market in which low-vol would be
+expected to lag. Universe is currently-listed only (survivorship).
+
+## Open question for the next pass
+
+Momentum at 20% and low-vol at 10% are carrying weight that this data does not
+support. Reducing them cannot be justified on contaminated evidence either.
+The defensible move is to wait for point-in-time data rather than guess.
