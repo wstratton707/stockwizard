@@ -5,6 +5,7 @@
 # bumping, install into the .venv and smoke-test the app first.
 #
 # Removed with the Custom Forecast (2026-08-08): arch, scikit-learn, xgboost.
+# Removed with Day Trader Mode (2026-08-09): streamlit-autorefresh.
 # Together they cost roughly 150 MB resident and were the app's three heaviest
 # dependencies. arch and xgboost had exactly one caller each; scikit-learn had
 # two, and the other one (Ledoit-Wolf shrinkage) is now fifteen lines of numpy
@@ -20,7 +21,6 @@ scipy==1.17.1
 plotly==6.6.0
 stripe==15.0.0
 python-dotenv==1.2.2
-streamlit-autorefresh==1.0.1
 python-pptx==1.0.2
 python-docx==1.2.0
 yfinance==1.4.1   # multi-source market data (history/quotes) via market_data.py

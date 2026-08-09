@@ -43,11 +43,6 @@ from cached_fetchers import (
     cached_detect_support_resistance, cached_build_correlation_matrix,
     cached_get_analyst_data,
 )
-try:
-    from streamlit_autorefresh import st_autorefresh
-    _HAS_AUTOREFRESH = True
-except ImportError:
-    _HAS_AUTOREFRESH = False
 from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP
 from analysis import (
     detect_support_resistance, build_correlation_matrix,
@@ -229,7 +224,7 @@ def _render_stock_news(ticker, company_name=None):
                     st.markdown(f"**[{s['n']}]** [{s['title']}]({s['url']}) — *{s['source']}*")
 
     st.markdown(_news_feed_html(arts, 12), unsafe_allow_html=True)
-from live_data import get_live_price, get_intraday_data, get_top_movers, get_tape_prices
+from live_data import get_live_price, get_top_movers, get_tape_prices
 import auth
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
@@ -301,7 +296,6 @@ st.plotly_chart = _plotly_chart_no_toolbar
 if "is_pro"       not in st.session_state: st.session_state["is_pro"]       = DEV_MODE_FREE
 if "user_email"   not in st.session_state: st.session_state["user_email"]   = ""
 if "show_payment" not in st.session_state: st.session_state["show_payment"] = False
-if "candle_tf"    not in st.session_state: st.session_state["candle_tf"]    = "5min"
 
 # ── Check returning from Stripe ───────────────────────────────────────────────
 # DEV_MODE_FREE: skip all Stripe session verification — preserved, not deleted.
@@ -932,18 +926,6 @@ elif _page == "analysis":
                 date_start   = (_today - timedelta(days=365 * HISTORY_YEARS)
                                 ).strftime("%Y-%m-%d")
                 period_label = f"{HISTORY_YEARS}Y"
-        else:
-            custom_range = False
-            date_start   = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
-            date_end     = datetime.today().strftime("%Y-%m-%d")
-            bar_size     = "day"
-            period_label = "1Y"
-            st.markdown('<div class="field-label">Candle Size</div>',
-                        unsafe_allow_html=True)
-            tf_options = {"1 Min":"1min","5 Min":"5min","15 Min":"15min","1 Hour":"1hour"}
-            tf_label   = st.radio("", list(tf_options.keys()), index=1,
-                                  horizontal=True, label_visibility="collapsed")
-            st.session_state["candle_tf"] = tf_options[tf_label]
 
         # ── Benchmarks ────────────────────────────────────────────────────────────
         st.markdown('<div class="field-label">Benchmarks</div>',
@@ -1329,198 +1311,10 @@ elif _page == "analysis":
         _poly_ticker = CRYPTO_TICKERS.get(ticker_input, (f"X:{ticker_input}USD", None))[0] \
                        if is_crypto else ticker_input
 
-        # Live price ticker — fetched here so Day Trader Mode can use it too.
-        # The full hero panel (with day/52W range bars, etc.) is rendered after
-        # df is loaded inside Investor Mode below.
+        # Live price ticker. The full hero panel (day/52W range bars, etc.) is
+        # rendered once df is loaded below.
         live = get_live_price(_poly_ticker, POLYGON_API_KEY)
 
-        # Day Trader Mode skips the full hero — show the slim live card here.
-        if mode == "Day Trader Mode" and live:
-            asset_tag = ""
-            if is_crypto:
-                asset_tag = '<span class="stock-hero-tag crypto" style="margin-left:0.6rem">CRYPTO</span>'
-            elif is_etf:
-                asset_tag = '<span class="stock-hero-tag etf" style="margin-left:0.6rem">ETF</span>'
-            sign       = "+" if live["change"] >= 0 else ""
-            change_cls = "live-change-pos" if live["change"] >= 0 else "live-change-neg"
-            _dt_live   = live.get("source") == "finnhub"
-            _dt_qlabel = "● Live" if _dt_live else "● Delayed quote"
-            _dt_qcolor = "#059669" if _dt_live else "#94a3b8"
-            _dt_qsub   = "Real-time (Finnhub)" if _dt_live else "~15-min delayed (free data tier)"
-            st.markdown(f"""
-            <div class="live-ticker">
-                <div>
-                    <span style="color:#6b7a8d;font-size:0.8rem;font-weight:600;
-                                 letter-spacing:0.5px;text-transform:uppercase">{ticker_input}</span>{asset_tag}
-                    <div class="live-price">${live['price']:,.2f}</div>
-                    <span class="{change_cls}">{sign}{live['change']:,.2f} ({sign}{live['pct']:.2f}%)</span>
-                </div>
-                <div style="text-align:right">
-                    <div><span style="color:{_dt_qcolor};font-size:0.78rem">{_dt_qlabel}</span></div>
-                    <div style="color:#6b7a8d;font-size:0.75rem;margin-top:4px">As of {live['time']}</div>
-                    <div style="color:#6b7a8d;font-size:0.72rem">{_dt_qsub}</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # ── Day Trader Mode ───────────────────────────────────────────────────
-        if mode == "Day Trader Mode" and st.session_state["is_pro"]:
-
-            st.markdown('<div class="section-header">Day Trader Mode <span class="pro-badge">PRO</span></div>',
-                        unsafe_allow_html=True)
-
-            tf         = st.session_state["candle_tf"]
-            tf_map     = {"1min":(1,"minute"),"5min":(5,"minute"),"15min":(15,"minute"),"1hour":(1,"hour")}
-            mult, span = tf_map.get(tf, (5,"minute"))
-
-            with st.spinner("Loading intraday data..."):
-                intraday_df = get_intraday_data(ticker_input, POLYGON_API_KEY, mult, span)
-
-            if intraday_df is not None and not intraday_df.empty:
-
-                fig_candle = go.Figure(data=[go.Candlestick(
-                    x=intraday_df["Time"],
-                    open=intraday_df["Open"], high=intraday_df["High"],
-                    low=intraday_df["Low"],   close=intraday_df["Close"],
-                    increasing_line_color=ct.color.positive,
-                    decreasing_line_color=ct.color.negative,
-                    name=ticker_input,
-                )])
-                fig_candle.add_trace(go.Bar(
-                    x=intraday_df["Time"], y=intraday_df["Volume"], name="Volume",
-                    marker_color=[ct.color.positive if c >= o else ct.color.negative
-                                  for c, o in zip(intraday_df["Close"], intraday_df["Open"])],
-                    marker_line_width=0, opacity=0.4, yaxis="y2",
-                ))
-                ct.style(
-                    fig_candle,
-                    height=500,
-                    margin=dict(l=64, r=20, t=44, b=40),
-                    x=ct.time_axis(fy_ticks=False, title=None,
-                                   rangeslider=dict(visible=False)),
-                    y=ct.value_axis(tick_format=",.2f", zero=False, title="Price ($)"),
-                    y2=dict(title="Volume", overlaying="y", side="right",
-                            showgrid=False, showticklabels=False,
-                            range=[0, intraday_df["Volume"].max() * 5]),
-                    title=dict(text=f"{ticker_input} — Intraday Candlestick",
-                               font=dict(size=13, color=ct.color.ink,
-                                         family=ct.font.data),
-                               x=0, xanchor="left", y=0.97, yanchor="top"),
-                )
-                st.plotly_chart(fig_candle, use_container_width=True)
-
-                try:
-                    import ta
-                    closes = intraday_df["Close"]
-                    if len(closes) >= 14:
-                        intraday_df["RSI"]        = ta.momentum.RSIIndicator(closes, window=14).rsi()
-                        macd_ind                  = ta.trend.MACD(closes)
-                        intraday_df["MACD"]        = macd_ind.macd()
-                        intraday_df["MACD_Signal"] = macd_ind.macd_signal()
-                        intraday_df["MACD_Hist"]   = intraday_df["MACD"] - intraday_df["MACD_Signal"]
-
-                        r1, r2 = st.columns(2)
-                        with r1:
-                            st.markdown('<div class="section-header">RSI (14)</div>', unsafe_allow_html=True)
-                            fig_rsi = go.Figure()
-                            fig_rsi.add_trace(go.Scatter(x=intraday_df["Time"], y=intraday_df["RSI"],
-                                                         line=dict(color=ct.color.brand, width=ct.stroke.price), name="RSI"))
-                            fig_rsi.add_hline(y=70, line_dash="dash", line_color=ct.color.negative, opacity=0.6)
-                            fig_rsi.add_hline(y=30, line_dash="dash", line_color=ct.color.positive, opacity=0.6)
-                            fig_rsi.add_hrect(y0=70, y1=100, fillcolor=ct._rgba(ct.color.negative, 0.06), line_width=0)
-                            fig_rsi.add_hrect(y0=0,  y1=30,  fillcolor=ct._rgba(ct.color.positive, 0.06), line_width=0)
-                            fig_rsi.add_annotation(x=intraday_df["Time"].iloc[-1], y=73, text="Overbought",
-                                showarrow=False, font=dict(size=10, color=ct.color.negative,
-                                                           family=ct.font.data), xanchor="right")
-                            fig_rsi.add_annotation(x=intraday_df["Time"].iloc[-1], y=27, text="Oversold",
-                                showarrow=False, font=dict(size=10, color=ct.color.positive,
-                                                           family=ct.font.data), xanchor="right")
-                            ct.style(
-                                fig_rsi,
-                                height=200, legend=None,
-                                margin=dict(l=56, r=20, t=44, b=30),
-                                x=ct.time_axis(fy_ticks=False, title=None),
-                                y=ct.plain_axis(range=[0, 100], title="RSI (0–100)",
-                                                tickvals=[0, 30, 50, 70, 100]),
-                                title=dict(text="RSI (14)",
-                                           font=dict(size=13, color=ct.color.ink,
-                                                     family=ct.font.data),
-                                           x=0, xanchor="left"),
-                            )
-                            st.plotly_chart(fig_rsi, use_container_width=True)
-
-                        with r2:
-                            st.markdown('<div class="section-header">MACD</div>', unsafe_allow_html=True)
-                            fig_macd = go.Figure()
-                            fig_macd.add_trace(go.Scatter(x=intraday_df["Time"], y=intraday_df["MACD"],
-                                                          line=dict(color=ct.color.ink, width=ct.stroke.price), name="MACD"))
-                            fig_macd.add_trace(go.Scatter(x=intraday_df["Time"], y=intraday_df["MACD_Signal"],
-                                                          line=dict(color=ct.color.brand, width=ct.stroke.price), name="Signal"))
-                            hist_colors = [ct.color.positive if v >= 0 else ct.color.negative
-                                           for v in intraday_df["MACD_Hist"]]
-                            fig_macd.add_trace(go.Bar(x=intraday_df["Time"], y=intraday_df["MACD_Hist"],
-                                                      marker_color=hist_colors, marker_line_width=0,
-                                                      name="Histogram", opacity=0.6))
-                            ct.style(
-                                fig_macd,
-                                height=200,
-                                margin=dict(l=64, r=20, t=44, b=30),
-                                x=ct.time_axis(fy_ticks=False, title=None),
-                                y=ct.plain_axis(tick_format=".4f", title="MACD Value",
-                                                zeroline=True, zerolinecolor=ct.color.rule),
-                                title=dict(text="MACD",
-                                           font=dict(size=13, color=ct.color.ink,
-                                                     family=ct.font.data),
-                                           x=0, xanchor="left"),
-                            )
-                            st.plotly_chart(fig_macd, use_container_width=True)
-                except Exception:
-                    pass
-
-                st.markdown('<div class="section-header">Intraday Stats</div>', unsafe_allow_html=True)
-                if not intraday_df.empty:
-                    ic1, ic2, ic3, ic4 = st.columns(4)
-                    day_open  = intraday_df["Open"].iloc[0]
-                    day_high  = intraday_df["High"].max()
-                    day_low   = intraday_df["Low"].min()
-                    day_vol   = intraday_df["Volume"].sum()
-                    for col, label, value in [
-                        (ic1, "Day Open",  f"${day_open:,.2f}"),
-                        (ic2, "Day High",  f"${day_high:,.2f}"),
-                        (ic3, "Day Low",   f"${day_low:,.2f}"),
-                        (ic4, "Volume",    f"{day_vol:,.0f}"),
-                    ]:
-                        with col:
-                            st.markdown(f"""
-                            <div class="metric-card">
-                                <div class="metric-label">{label}</div>
-                                <div class="metric-value">{value}</div>
-                            </div>""", unsafe_allow_html=True)
-
-            else:
-                st.warning("No intraday data available. Market may be closed — showing previous session.")
-
-            if _HAS_AUTOREFRESH:
-                st_autorefresh(interval=30_000, key="day_trader_refresh")
-
-        elif mode == "Day Trader Mode" and not st.session_state["is_pro"]:
-            # DEV_MODE_FREE: is_pro is True so this branch is never reached in dev mode.
-            # Original locked-screen UI preserved below — do not delete.
-            st.markdown("""
-            <div class="pro-locked">
-                <div style="margin-bottom:0.5rem"><span class="material-symbols-outlined" style="font-size:1.8rem;color:#94a3b8">lock</span></div>
-                <div style="color:#fff;font-weight:600;font-size:1.1rem;margin-bottom:0.5rem">
-                    Day Trader Mode is Pro Only
-                </div>
-                <div style="color:#6b7a8d;font-size:0.88rem;margin-bottom:1.25rem">
-                    Get intraday charts (15-min delayed), technical signals, and full day-trading tools for $9.99/month
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            if not DEV_MODE_FREE and SHOW_PRICING:
-                if st.button("Upgrade to Pro — $9.99/month", type="primary", key="upgrade_locked"):
-                    st.session_state["show_payment"] = True
-                    st.rerun()
 
         # ── Investor Mode ─────────────────────────────────────────────────────
         if mode == "Investor Mode":
