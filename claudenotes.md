@@ -1314,3 +1314,61 @@ poison the cron's cache.
 Still deferred: universe expansion beyond ~331 (needs sector labels for
 dynamic names + cron runtime work) and dividend-preference filtering (needs a
 dividend feed that does not go through yfinance .info throttling).
+
+
+---
+
+# FACTOR-WEIGHT EXPERIMENT AND THE SECTOR-ALLOCATION FIX (2026-08-08)
+
+Four weightings x sector-constraint on/off, identical universe and optimiser.
+
+## The finding
+
+Technology was 0.0% under ALL FOUR weightings, including low-vol at 5%. The
+weight was not the cause.
+
+Five of six factors are WITHIN-sector percentiles, so each averages 0.50 in
+every sector and contributes nothing across sectors. Only low-vol is absolute.
+Live universe: mean quality is exactly 0.50 in all 11 sectors; mean low-vol
+runs 0.83 (Utilities) to 0.14 (Technology); mean composite tracks it, 55.4 to
+46.1. A cross-sector sort by this composite IS a sort by inverse volatility.
+
+Tech was never filtered out — AAPL, NVDA, MSFT were eligible every run. It just
+never won a global sort it was structurally unable to win.
+
+## Results (moderate request, 18 holdings)
+
+               unconstrained trim          sector-allocation trim
+  model        Shrp  CAGR   tech  #sec     Shrp  CAGR   tech  #sec  defensive
+  A_current    0.26  13.55   0.0    7      0.28  13.11   4.0   12     30.0
+  B_balanced   0.27  13.72   0.0    8      0.29  16.18   3.0   12     33.3
+  C_growth     0.27  15.30   0.0    8      0.29  18.24   3.4   12     34.3
+  D_value      0.27  14.39   0.0    9      0.28  12.79   3.8   12     32.8
+
+Sector allocation does more than any weight change: defensive 59.4% -> 30%,
+sectors 7 -> 12, Sharpe +0.02 everywhere.
+
+## Decision
+
+Shipped B_balanced (mom 20 / qual 20 / val 20 / growth 15 / health 15 / lowvol
+10) with sector allocation. Once allocation is separate the low-vol weight is
+no longer distorting, so there is no reason to gut it to 5%. The four models
+differ by 0.17pp of expected return and 0.01 of Sharpe — not separable.
+Realised CAGR spread (12.8-18.2%) is one window with look-ahead; not decisive.
+
+## Live, after
+
+  moderate:  7 sectors, beta 0.27, div 6.5  ->  13 sectors, beta 0.62, div 7.9
+  aggressive: Tech 5.1%, 13 sectors, Sharpe 0.29
+
+Conservative still shows Tech 0%, but that is the explicit risk<=3 rule that
+removes growth sectors, not the scoring bug.
+
+## Architecture now
+
+  331 -> sector-relative scoring -> top 40%/sector (eligible universe)
+      -> SECTOR ALLOCATION (slots per sector) -> pick within sector by score
+      -> risk ladder (GMV/ERC/1N) for weights
+
+Three separate questions, three separate steps: how good is the company, how
+much of each sector, how much of each name.

@@ -583,13 +583,33 @@ def _render_step_2(api_key):
                 available = [t for t in candidates if t in returns_df.columns]
                 pinned_set = {t for t, s in sector_map.items()
                               if s in ("Market", "Commodities", "User")}
-                best_tickers = sorted(
-                    available,
-                    key=lambda t: float('inf') if t in pinned_set
-                                  else _sel_score(rankings.get(t, {})),
-                    reverse=True
-                )[:_MAX_PORTFOLIO_TICKERS]
-                log(f"   Final portfolio: {len(best_tickers)} stocks (precompute-ranked) — {', '.join(best_tickers)}")
+                # Sector allocation, then selection within sector — NOT a
+                # global sort by composite score.
+                #
+                # Five of the six factors are percentile ranks computed within a
+                # sector, so each averages 0.50 in every sector by construction
+                # and contributes nothing to a cross-sector comparison. Only
+                # low-volatility is absolute. Measured on the live universe,
+                # mean quality is exactly 0.50 in all eleven sectors while mean
+                # low-vol runs 0.83 (Utilities) to 0.14 (Technology) — and the
+                # mean composite tracks it precisely, 55.4 down to 46.1. A
+                # global sort by this score is therefore a sort of sectors by
+                # inverse volatility wearing a fundamental costume, which is how
+                # portfolios came back holding zero Technology however the
+                # weights were set.
+                from factor_model import select_holdings as _select
+                best_tickers = _select(
+                    available, rankings,
+                    n=_MAX_PORTFOLIO_TICKERS,
+                    always_keep=[t for t in available if t in pinned_set],
+                    max_per_sector=3,
+                    score_key=_sel_score)
+                _spread2 = {}
+                for _t in best_tickers:
+                    _s2 = rankings.get(_t, {}).get("sector", "?")
+                    _spread2[_s2] = _spread2.get(_s2, 0) + 1
+                log(f"   Final portfolio: {len(best_tickers)} stocks across "
+                    f"{len(_spread2)} sectors {_spread2} — {', '.join(best_tickers)}")
             else:
                 best_tickers = select_by_factors(returns_df, sector_map,
                                                  max_total=_MAX_PORTFOLIO_TICKERS, top_n_per_sector=_TOP_N_PER_SECTOR)

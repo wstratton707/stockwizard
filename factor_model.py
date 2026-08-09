@@ -25,27 +25,42 @@ from collections import defaultdict
 # FACTOR_MODEL_VERSION whenever factors, weights, directions or the sector
 # treatment change, and the builder will fall back to describing what is
 # actually present rather than what the code believes.
-FACTOR_MODEL_VERSION = 3
-METHODOLOGY_NAME = "sector-relative six-factor, v3"
+FACTOR_MODEL_VERSION = 4
+METHODOLOGY_NAME = "sector-relative six-factor + sector allocation, v4"
 
 # ── Composite weights ─────────────────────────────────────────────────────────
 # Sum to 100 so the composite reads directly as a 0-100 score.
 #
-# Reasoning, not convention:
-#   momentum 23 — the best-evidenced cross-sectional factor there is; the audit
-#                 brief asked whether 20-25% is right and it is.
-#   quality  21 — the most persistent fundamental signal.
-#   value    19 — now an average of up to three yields rather than one ratio,
-#                 so it is more reliable than it was and earns a bigger share.
-#   growth   12 — deliberately below value and quality: revenue growth and EPS
-#                 growth are cousins, and both are partly re-expressed by
-#                 momentum. Held down to avoid paying three times for one idea.
-#   lowvol   15 — the low-volatility anomaly, and the only factor here that is
-#                 measured absolutely.
-#   health   10 — real but slow-moving, and the weakest of the fundamentals in
-#                 EDGAR-only data.
-WEIGHTS = {"momentum": 23, "quality": 21, "value": 19,
-           "growth": 12, "lowvol": 15, "health": 10}
+# Active model: B_balanced, chosen by measurement rather than argument (see
+# WEIGHT_MODELS below and the controlled comparison in claudenotes).
+#
+# The key finding is that once sector allocation is a SEPARATE step, the low-vol
+# weight stops being dangerous — it was only distorting the portfolio because it
+# was the sole absolute factor in a composite used, wrongly, to rank across
+# sectors. With that fixed there is no reason to gut a well-documented factor to
+# 5%, and the four weightings land within noise of each other on every
+# forward-looking measure (expected return 8.54-8.71, Sharpe 0.28-0.29).
+WEIGHTS = {"momentum": 20, "quality": 20, "value": 20,
+           "growth": 15, "lowvol": 10, "health": 15}
+
+# Candidate weightings for the controlled comparison. Weights are an investment
+# decision, not a coding one, so they are named and swappable rather than
+# buried — and the choice between them is settled by measuring the portfolios
+# each produces, not by argument.
+WEIGHT_MODELS = {
+    # As shipped in v3. Heaviest low-vol weight; the most defensive.
+    "A_current":  {"momentum": 23, "quality": 21, "value": 19,
+                   "growth": 12, "health": 10, "lowvol": 15},
+    # Even across the fundamentals, low-vol reduced to 10.
+    "B_balanced": {"momentum": 20, "quality": 20, "value": 20,
+                   "growth": 15, "health": 15, "lowvol": 10},
+    # Quality and growth led, low-vol nearly removed.
+    "C_growth":   {"momentum": 20, "quality": 25, "value": 15,
+                   "growth": 20, "health": 15, "lowvol": 5},
+    # Quality and value led, low-vol nearly removed.
+    "D_value":    {"momentum": 15, "quality": 25, "value": 25,
+                   "growth": 15, "health": 15, "lowvol": 5},
+}
 
 # Analyst consensus is an ADJUSTMENT, not a factor. Consensus is largely priced
 # in and it is the least reliable feed we carry, so it may move a score by at
@@ -289,11 +304,12 @@ def _factor_from(entries, groups, metrics, group_name):
     return out
 
 
-def score_universe(rankings: dict) -> dict:
+def score_universe(rankings: dict, weights: dict | None = None) -> dict:
     """Attach fundamental_score (0-100) and factor detail to every entry.
 
     Mutates and returns `rankings` (the shape precompute already caches).
     """
+    W = weights or WEIGHTS
     entries = {t: e for t, e in rankings.items()
                if t != "_meta" and isinstance(e, dict)}
     if not entries:
@@ -378,8 +394,8 @@ def score_universe(rankings: dict) -> dict:
                      "lowvol": lowvol.get(t) or NEUTRAL}
             imputed = []
 
-        wsum = sum(WEIGHTS[k] for k in parts) or 1
-        score = sum(WEIGHTS[k] * v for k, v in parts.items()) / wsum * 100.0
+        wsum = sum(W[k] for k in parts) or 1
+        score = sum(W[k] * v for k, v in parts.items()) / wsum * 100.0
         avail = parts
 
         analyst = _num(e.get("analyst"))
@@ -479,6 +495,97 @@ def _apply_hard_filters(entries: dict) -> None:
 KEEP_PCT = 0.40
 KEEP_MIN = 5
 KEEP_MAX = 30
+
+
+def allocate_sector_slots(depth: dict, n_slots: int, max_per_sector: int = 3,
+                          sector_weights: dict | None = None) -> dict:
+    """Decide HOW MANY holdings each sector gets, before deciding which ones.
+
+    A separate decision from the company score, deliberately. `depth` is
+    {sector: eligible name count}; `sector_weights` optionally biases the split
+    (user preference, risk tolerance, benchmark weights) and defaults to even.
+
+    Largest-remainder apportionment, capped, with leftovers redistributed to
+    sectors that still have room.
+    """
+    sectors = [s for s, d in depth.items() if d > 0]
+    if not sectors or n_slots <= 0:
+        return {}
+    w = {s: max(0.0, float((sector_weights or {}).get(s, 1.0))) for s in sectors}
+    tot = sum(w.values()) or 1.0
+
+    exact = {s: n_slots * w[s] / tot for s in sectors}
+    slots = {s: min(int(exact[s]), depth[s], max_per_sector) for s in sectors}
+    # Largest remainder, then any capacity left over.
+    for _ in range(2):
+        left = n_slots - sum(slots.values())
+        if left <= 0:
+            break
+        room = [s for s in sectors if slots[s] < min(depth[s], max_per_sector)]
+        room.sort(key=lambda s: -(exact[s] - slots[s]))
+        for s in room[:left]:
+            slots[s] += 1
+    return {s: v for s, v in slots.items() if v > 0}
+
+
+def select_holdings(pool, rankings, n=18, always_keep=None,
+                    max_per_sector=3, score_key=None, sector_weights=None):
+    """Choose the final holdings: allocate sector slots, then fill within sector.
+
+    Why not simply take the top n by composite score — the thing this replaces:
+
+    Five of the six factors are percentile ranks computed WITHIN a sector, so
+    each of them averages 0.5 in every sector by construction and contributes
+    nothing to a comparison BETWEEN sectors. Only low-volatility is absolute.
+    Measured on the live universe, mean quality is exactly 0.50 in all eleven
+    sectors while mean low-vol runs from 0.83 (Utilities) to 0.14 (Technology),
+    and mean composite tracks it precisely: Utilities 55.4, Technology 46.1.
+
+    So a cross-sector ranking by this composite is, to a very good
+    approximation, a ranking of sectors by inverse volatility — and no change to
+    the low-vol weight fixes it, because the low-vol term is the only thing
+    creating cross-sector spread at all. Dropping it from 15% to 5% narrowed the
+    gap between the best Technology name and the best Utility from 21.3 points
+    to 18.2 and still produced zero Technology.
+
+    The score is valid for "how does this company rank against its peers". It is
+    not a cross-sector quality measure and must not be used as one. Sector
+    allocation is therefore its own step, and the score only picks winners
+    inside each sector.
+    """
+    always_keep = list(always_keep or [])
+    score_key = score_key or (lambda e: e.get("fundamental_score") or 0)
+
+    by_sector = defaultdict(list)
+    for t in pool:
+        e = rankings.get(t)
+        if not isinstance(e, dict) or t in always_keep:
+            continue
+        # Benchmarks and diversifiers are not part of the sector budget; they
+        # are pinned deliberately by the caller.
+        if not e.get("is_operating", True):
+            continue
+        by_sector[e.get("sector", "Unknown")].append((t, score_key(e)))
+    for s in by_sector:
+        by_sector[s].sort(key=lambda x: -x[1])
+
+    picked = list(always_keep)
+    budget = max(0, n - len(picked))
+    slots = allocate_sector_slots({s: len(v) for s, v in by_sector.items()},
+                                  budget, max_per_sector, sector_weights)
+    for sector, k in slots.items():
+        picked.extend(t for t, _s in by_sector[sector][:k])
+
+    # Backfill by score if capacity ran out (few sectors survived the filters).
+    if len(picked) < n:
+        rest = sorted(((t, sc) for v in by_sector.values() for t, sc in v),
+                      key=lambda x: -x[1])
+        for t, _sc in rest:
+            if len(picked) >= n:
+                break
+            if t not in picked:
+                picked.append(t)
+    return picked[:n]
 
 
 def eligible_universe(rankings: dict, include_sectors=None, exclude_sectors=None,
