@@ -39,7 +39,6 @@ from data import (
 from portfolio_data import get_ticker_info as _get_ticker_info
 from analysis import (
     run_monte_carlo as _run_monte_carlo,
-    run_custom_forecast as _run_custom_forecast,
     detect_support_resistance as _detect_support_resistance,
     build_correlation_matrix as _build_correlation_matrix,
 )
@@ -182,12 +181,6 @@ def cached_fetch_etf_details(ticker, _fmp_key):
 def cached_run_monte_carlo(ticker, window_key, n_simulations, forecast_days, _df):
     return _run_monte_carlo(_df, n_simulations=n_simulations,
                             forecast_days=forecast_days, log=lambda m: None)
-
-
-@st.cache_data(ttl=_TTL_MEDIUM, max_entries=10, show_spinner=False)
-def cached_run_custom_forecast(ticker, window_key, n_simulations, forecast_days, _df):
-    return _run_custom_forecast(_df, n_simulations=n_simulations,
-                                forecast_days=forecast_days, log=lambda m: None)
 
 
 @st.cache_data(ttl=_TTL_MEDIUM, max_entries=_MAX_ENTRIES, show_spinner=False)

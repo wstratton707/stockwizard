@@ -65,7 +65,7 @@ def compute_correlation_matrix(returns_df):
 
 def shrunk_covariance(returns_df, annualise=True):
     """Annualised covariance via Ledoit-Wolf shrinkage, falling back to the
-    sample estimate if sklearn is unavailable or the fit fails.
+    sample estimate if the shrinkage computation fails.
 
     The sample covariance of ~18 assets over ~1,250 daily observations is noisy,
     and mean-variance optimisation is an error-maximiser: it systematically loads
@@ -102,8 +102,8 @@ def _ledoit_wolf(X):
 
     Verified against sklearn on eight cases including the live 316-ticker
     return matrix: worst relative difference 1.3e-17, i.e. floating-point
-    rounding. sklearn is still a dependency (the Custom Forecast uses
-    RandomForest) but is no longer loaded to build a portfolio.
+    rounding. scikit-learn has since been removed from the project entirely —
+    this was its last remaining caller once the Custom Forecast went.
     """
     X = np.asarray(X, dtype=float)
     n, p = X.shape

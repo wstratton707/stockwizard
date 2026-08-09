@@ -39,7 +39,7 @@ from cached_fetchers import (
     cached_fetch_peer_comparison, cached_fetch_sector_data,
     cached_fetch_next_earnings, cached_fetch_crypto_data,
     cached_fetch_crypto_details, cached_fetch_etf_details,
-    cached_run_monte_carlo, cached_run_custom_forecast,
+    cached_run_monte_carlo,
     cached_detect_support_resistance, cached_build_correlation_matrix,
     cached_get_analyst_data,
 )
@@ -51,7 +51,7 @@ except ImportError:
 from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP
 from analysis import (
     detect_support_resistance, build_correlation_matrix,
-    run_monte_carlo, run_custom_forecast, generate_summary_paragraph,
+    run_monte_carlo, generate_summary_paragraph,
     compute_fundamentals, dcf_valuation, market_beta
 )
 # Report builders are imported at the point of use, not here.
@@ -971,32 +971,7 @@ elif _page == "analysis":
             if do_mc:
                 st.markdown('<div class="field-label">Forecast Settings</div>',
                             unsafe_allow_html=True)
-                forecast_method = st.selectbox(
-                    "Method",
-                    ["Monte Carlo", "Custom Forecast"],
-                    label_visibility="collapsed",
-                )
-                if forecast_method == "Custom Forecast":
-                    st.markdown(
-                        '<div style="font-size:0.73rem;line-height:1.6;'
-                        'padding:0.65rem 0.75rem;'
-                        'background:rgba(29,78,216,0.04);'
-                        'border-radius:2px;'
-                        'border:1px solid #e2e8f0;'
-                        'border-left:3px solid #1d4ed8;'
-                        'margin-bottom:0.5rem;'
-                        'font-family:var(--font-sans)">'
-                        'Our <span style="color:#1d4ed8 !important;font-weight:600">Custom Forecast</span> '
-                        'combines three models — '
-                        '<span style="color:#1d4ed8 !important;font-weight:500">GARCH</span> volatility modeling, '
-                        '<span style="color:#1d4ed8 !important;font-weight:500">Monte Carlo</span> simulation, '
-                        'and a <span style="color:#1d4ed8 !important;font-weight:500">ML ensemble</span> '
-                        '(Random Forest / XGBoost) — for smarter, more adaptive price projections. '
-                        'GARCH captures volatility clustering, Monte Carlo simulates thousands of '
-                        'price paths, and the ML model adds a data-driven drift signal — '
-                        'all powered by multi-source market data (Polygon, Yahoo Finance &amp; Finnhub).</div>',
-                        unsafe_allow_html=True,
-                    )
+                forecast_method = "Monte Carlo"
                 n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
                 n_horizon = st.slider("Horizon (days)",  21,  504,  252, step=21)
             else:
@@ -1672,22 +1647,14 @@ elif _page == "analysis":
                     )
 
                 mc_sim_df = mc_summary = None
-                custom_garch_vols = custom_ml_drift = None
                 if do_mc:
-                    if forecast_method == "Custom Forecast":
-                        progress.progress(75, text="Running Custom Forecast (GARCH + ML + Monte Carlo)...")
-                        mc_sim_df, custom_garch_vols, custom_ml_drift, mc_summary = \
-                            cached_run_custom_forecast(
-                                ticker_input, _mw_key, n_sims, n_horizon, dfm,
-                            )
-                    else:
-                        progress.progress(75, text="Running Monte Carlo simulation...")
-                        # Volatility and beta come from the risk window, not the
-                        # full pull — a decade of history would price today's
-                        # forecast off regimes that are long gone.
-                        mc_sim_df, mc_summary = cached_run_monte_carlo(
-                            ticker_input, _mw_key, n_sims, n_horizon, dfm,
-                        )
+                    progress.progress(75, text="Running Monte Carlo simulation...")
+                    # Volatility and beta come from the risk window, not the
+                    # full pull — a decade of history would price today's
+                    # forecast off regimes that are long gone.
+                    mc_sim_df, mc_summary = cached_run_monte_carlo(
+                        ticker_input, _mw_key, n_sims, n_horizon, dfm,
+                    )
 
                 progress.progress(85, text="Generating summary...")
                 ret      = dfm["Daily_Return"].dropna()
@@ -3300,8 +3267,7 @@ color:var(--muted);background:var(--surface2)}
                 st.plotly_chart(fig_macd, use_container_width=True)
 
             if mc_summary:
-                _is_custom = forecast_method == "Custom Forecast"
-                _header    = "Custom Forecast" if _is_custom else "Monte Carlo Forecast"
+                _header    = "Monte Carlo Forecast"
                 st.markdown(f'<div class="section-header"'
                             f'{_sec_id("sec-forecast", "Forecast")}>{_header}</div>',
                             unsafe_allow_html=True)
@@ -3324,11 +3290,6 @@ color:var(--muted);background:var(--surface2)}
 
                 # ── Metric cards — row 2: stats ────────────────────────────────
                 _r2_items = [("Prob. of Gain", mc_summary["Prob. of Gain"], "#1d4ed8")]
-                if _is_custom:
-                    _r2_items += [
-                        ("GARCH Vol", mc_summary.get("Ann. Volatility (GARCH)", "—"), "#4a9eff"),
-                        ("ML Drift",  mc_summary.get("ML Drift (daily)", "—"),        "#059669"),
-                    ]
                 _r2 = st.columns(len(_r2_items))
                 for col, (_lbl, _val, _clr) in zip(_r2, _r2_items):
                     with col:
@@ -3381,73 +3342,6 @@ color:var(--muted);background:var(--surface2)}
                     )
                     st.plotly_chart(fig_mc, use_container_width=True)
 
-                # ── Custom Forecast extra charts ──────────────────────────────
-                if _is_custom and custom_garch_vols is not None:
-                    _garch_x  = list(range(len(custom_garch_vols)))
-                    _ann_vols = (custom_garch_vols * np.sqrt(252) * 100).tolist()
-                    _vol_mean = float(np.mean(_ann_vols))
-
-                    col_garch, col_drift = st.columns(2)
-
-                    with col_garch:
-                        st.markdown('<div class="section-header" style="font-size:0.85rem">GARCH Volatility Forecast</div>',
-                                    unsafe_allow_html=True)
-                        fig_gv = go.Figure()
-                        # shaded area under curve
-                        fig_gv.add_trace(go.Scatter(
-                            x=_garch_x, y=_ann_vols,
-                            name="Ann. Vol (%)",
-                            mode="lines",
-                            line=dict(color=ct.color.brand, width=ct.stroke.value),
-                            fill="tozeroy", fillcolor=ct._rgba(ct.color.brand, 0.10),
-                            hovertemplate="Day %{x}: %{y:.2f}%<extra></extra>",
-                        ))
-                        # long-run mean reference line
-                        fig_gv.add_hline(
-                            y=_vol_mean,
-                            line_dash="dot", line_color=ct.color.ink_muted, line_width=1,
-                            annotation_text=f"Mean {_vol_mean:.1f}%",
-                            annotation_font=dict(color=ct.color.ink_muted, size=10,
-                                                 family=ct.font.data),
-                            annotation_position="top right",
-                        )
-                        ct.style(
-                            fig_gv,
-                            height=250,
-                            margin=dict(l=52, r=20, t=44, b=44),
-                            legend=None,
-                            crosshair=False,
-                            x=ct.linear_axis(title="Trading Days"),
-                            y=ct.pct_axis(tick_format=".1f", title="Ann. Volatility (%)"),
-                            title=dict(text="GARCH Volatility Forecast",
-                                       font=dict(size=13, color=ct.color.ink,
-                                                 family=ct.font.data),
-                                       x=0, xanchor="left"),
-                        )
-                        st.plotly_chart(fig_gv, use_container_width=True)
-
-                    with col_drift:
-                        st.markdown('<div class="section-header" style="font-size:0.85rem">ML Predicted Drift Signal</div>',
-                                    unsafe_allow_html=True)
-                        _drift_pct = (custom_ml_drift or 0) * 100
-                        _drift_color = "#059669" if _drift_pct >= 0 else "#dc2626"
-                        _drift_label = "Bullish" if _drift_pct >= 0 else "Bearish"
-                        st.markdown(f"""
-                        <div style="display:flex;flex-direction:column;align-items:center;
-                                    justify-content:center;height:180px;
-                                    background:#ffffff;border-radius:2px;
-                                    border:1px solid #e2e8f0">
-                            <div style="font-size:2.4rem;font-weight:700;color:{_drift_color}">
-                                {_drift_pct:+.4f}%
-                            </div>
-                            <div style="font-size:0.85rem;color:#6b7a8d;margin-top:0.4rem">
-                                Daily drift per step &nbsp;·&nbsp;
-                                <span style="color:{_drift_color};font-weight:600">{_drift_label}</span>
-                            </div>
-                            <div style="font-size:0.72rem;color:#6b7a8d;margin-top:0.3rem">
-                                Random Forest + XGBoost ensemble
-                            </div>
-                        </div>""", unsafe_allow_html=True)
 
             st.markdown(f'<div class="section-header"'
                         f'{_sec_id("sec-volume", "Volume")}>Volume</div>',

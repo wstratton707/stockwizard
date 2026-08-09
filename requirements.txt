@@ -1,9 +1,14 @@
 # Pinned to known-good versions (== exact) for reproducible installs and
 # deploys. Previously these used >= floors, which meant a fresh install pulled
 # the latest majors (e.g. pandas 3.0) that the app hasn't been tested against.
-# Core packages match the environment the app is verified running on; arch /
-# scikit-learn / xgboost (used by the Custom Forecast) are pinned to current
-# wheels. When bumping, install into the .venv and smoke-test the app first.
+# Core packages match the environment the app is verified running on. When
+# bumping, install into the .venv and smoke-test the app first.
+#
+# Removed with the Custom Forecast (2026-08-08): arch, scikit-learn, xgboost.
+# Together they cost roughly 150 MB resident and were the app's three heaviest
+# dependencies. arch and xgboost had exactly one caller each; scikit-learn had
+# two, and the other one (Ledoit-Wolf shrinkage) is now fifteen lines of numpy
+# in portfolio_analysis, verified identical to sklearn to 1.3e-17.
 streamlit==1.55.0
 pandas==2.3.3
 numpy==2.4.3
@@ -18,9 +23,6 @@ python-dotenv==1.2.2
 streamlit-autorefresh==1.0.1
 python-pptx==1.0.2
 python-docx==1.2.0
-arch==8.0.0
-scikit-learn==1.9.0
-xgboost==3.2.0
 yfinance==1.4.1   # multi-source market data (history/quotes) via market_data.py
 anthropic==0.120.0   # Claude Haiku — grounded, source-cited AI news briefs (news_research.py)
 # REQUIRED by st.login / st.user (auth.py). Streamlit does not declare it as a
