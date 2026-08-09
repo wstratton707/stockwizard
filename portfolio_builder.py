@@ -439,9 +439,19 @@ def _render_step_2(api_key):
                 # a factor, so a cheap unloved name still reaches the optimiser
                 # and loses there on its merits rather than here.
                 from factor_model import eligible_universe as _elig
+                # Market and Commodities are always admissible: they are the
+                # benchmark and diversifier sleeves the pinning logic below
+                # draws on. Bond sleeves are admitted ONLY where the user asked
+                # for them — each bond category is its own sector label, so
+                # admitting them all hands six of eighteen slots to bonds.
+                _bond_sectors = {f"Bond-{c}" for c in
+                                 prefs.get("include_bond_categories", [])}
+                if _bond_sectors:
+                    _bond_sectors |= {"Government"}
+                _elig_sectors = set(incl_sectors) | {"Market", "Commodities"} | _bond_sectors
                 _eligible, _diag = _elig(
                     rankings,
-                    include_sectors=set(incl_sectors) | {"Market", "Commodities"},
+                    include_sectors=_elig_sectors,
                     exclude_sectors=excl_sectors,
                     exclude_tickers=excl_tickers,
                     min_market_cap=prefs.get("min_mcap", 0),
@@ -464,8 +474,21 @@ def _render_step_2(api_key):
                     data = rankings.get(ticker)
                     if not isinstance(data, dict):
                         continue
-                    sector_groups[data.get("sector", "Unknown")].append(
-                        (ticker, _sel_score(data)))
+                    _sec = data.get("sector", "Unknown")
+                    # Every bond category carries its own sector label
+                    # ("Bond-Municipal", "Bond-Corporate", "Government", ...).
+                    # The slot allocation below guarantees each sector a floor,
+                    # so leaving them separate handed six of eighteen slots to
+                    # fixed income and returned a "balanced" portfolio at beta
+                    # 0.25. Bonds are one sleeve competing for one floor slot,
+                    # not six sectors.
+                    #
+                    # Worth recording that this only became visible now: the
+                    # previous sector filter dropped every bond label, so the
+                    # user's bond-category preference had no effect at all.
+                    if _sec.startswith("Bond-") or _sec == "Government":
+                        _sec = "Fixed Income"
+                    sector_groups[_sec].append((ticker, _sel_score(data)))
 
                 # Conservative profile — skip growth sectors
                 GROWTH_SECTORS = {"Technology", "Consumer Discretionary",

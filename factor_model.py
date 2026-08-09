@@ -508,9 +508,13 @@ def eligible_universe(rankings: dict, include_sectors=None, exclude_sectors=None
         sector = e.get("sector", "Unknown")
         if sector in exclude_sectors:
             diag["excluded"].append(t); continue
-        if (include_sectors is not None and sector not in include_sectors
-                and sector not in NON_OPERATING
-                and not str(sector).startswith(_BOND_PREFIX)):
+        # Non-operating instruments bypass the SCORE-BASED cut, not the user's
+        # sector choice. Exempting them from this filter too put six bond ETFs
+        # into an eighteen-name "moderate" portfolio — each bond category is its
+        # own sector label, so each claimed a guaranteed slot downstream and the
+        # portfolio came back at beta 0.25. Whether to hold bonds at all is the
+        # user's call, made in the preferences step.
+        if include_sectors is not None and sector not in include_sectors:
             continue
         if e.get("gate"):
             diag["gated"].append(t); continue
