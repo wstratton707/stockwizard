@@ -2099,10 +2099,16 @@ reflects that.
     # Export downloads
     _section_header("Download Full Portfolio Report")
 
+    # Both formats share one gate: they are the same portfolio in two wrappers.
+    # Note this only skips the export block — the Back / Start New navigation
+    # below must still render, or a signed-out user is stranded on this step.
+    from entitlements import require_export, record, render_quota_note
+    _exp_ok, _exp_user = require_export("portfolio")
+
     _gen_col1, _gen_col2 = st.columns(2)
     with _gen_col1:
-        if st.button("Generate Excel Report", type="primary",
-                     use_container_width=True, key="gen_excel"):
+        if _exp_ok and st.button("Generate Excel Report", type="primary",
+                                 use_container_width=True, key="gen_excel"):
             with st.spinner("Building Excel report..."):
                 try:
                     bt_data    = st.session_state.get(_K_BACKTEST, {})
@@ -2127,13 +2133,16 @@ reflects that.
                         ticker_info           = t_info,
                     )
                     st.session_state[_K_EXCEL] = excel_buf
+                    record(_exp_user, "portfolio_excel",
+                           f"{len(weights)} holdings")
                 except Exception as e:
                     st.error(f"Excel build failed: {e}")
                     import traceback as _tb; print(_tb.format_exc())   # server log, not UI
 
     with _gen_col2:
-        if PPTX_AVAILABLE and st.button("Generate PowerPoint Report", type="primary",
-                                         use_container_width=True, key="gen_pptx"):
+        if _exp_ok and PPTX_AVAILABLE and st.button(
+                "Generate PowerPoint Report", type="primary",
+                use_container_width=True, key="gen_pptx"):
             with st.spinner("Building PowerPoint report..."):
                 try:
                     bt_data    = st.session_state.get(_K_BACKTEST, {})
@@ -2157,13 +2166,15 @@ reflects that.
                         ticker_info           = t_info,
                     )
                     st.session_state[_K_PPTX] = pptx_buf
+                    record(_exp_user, "portfolio_pptx",
+                           f"{len(weights)} holdings")
                 except Exception as e:
                     st.error(f"PowerPoint build failed: {e}")
                     import traceback as _tb; print(_tb.format_exc())   # server log, not UI
 
     _dl_col1, _dl_col2 = st.columns(2)
     with _dl_col1:
-        if _K_EXCEL in st.session_state:
+        if _exp_ok and _K_EXCEL in st.session_state:
             st.download_button(
                 label="Download Portfolio Report (.xlsx)",
                 data=st.session_state[_K_EXCEL],
@@ -2172,7 +2183,7 @@ reflects that.
                 use_container_width=True, type="primary", key="download_portfolio",
             )
     with _dl_col2:
-        if _K_PPTX in st.session_state:
+        if _exp_ok and _K_PPTX in st.session_state:
             st.session_state[_K_PPTX].seek(0)
             st.download_button(
                 label="Download Portfolio Report (.pptx)",
@@ -2181,6 +2192,8 @@ reflects that.
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 use_container_width=True, type="primary", key="download_portfolio_pptx",
             )
+    if _exp_ok:
+        render_quota_note(_exp_user)
 
     st.markdown("---")
     col1, col2 = st.columns(2)

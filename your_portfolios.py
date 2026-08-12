@@ -434,6 +434,13 @@ _EXPORTS = [
 
 
 def _render_exports(pid, name, res):
+    # Reaching this page already required sign-in, so in practice the gate here
+    # only enforces the quota — but it is checked rather than assumed.
+    from entitlements import require_export, record, render_quota_note
+    _exp_ok, _exp_user = require_export(f"tracked_{pid}")
+    if not _exp_ok:
+        return
+
     _formats = [f for f in _EXPORTS if f[0] != "pptx" or _PPTX_OK]
     _labels = [f[1] for f in _formats]
     _pick = st.radio("Report format", _labels, horizontal=True,
@@ -462,6 +469,7 @@ def _render_exports(pid, name, res):
                     st.error("That format isn't available on this instance.")
                 else:
                     st.session_state[_key] = buf.getvalue()
+                    record(_exp_user, f"tracked_{_kind}", name)
             except Exception as e:
                 st.error(f"Couldn't build the report: {e}")
                 import traceback as _tb; print(_tb.format_exc())   # server log, not UI
@@ -472,6 +480,7 @@ def _render_exports(pid, name, res):
             f"Download .{_ext}", data=st.session_state[_key],
             file_name=f"QuantWizard {_safe} {date.today().isoformat()}.{_ext}",
             mime=_mime, key=f"dl_{_kind}_{pid}")
+    render_quota_note(_exp_user)
 
 
 # ── Per-portfolio card ──────────────────────────────────────────────────────────

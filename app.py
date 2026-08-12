@@ -1609,6 +1609,14 @@ elif _page == "analysis":
                           "10 years": HISTORY_YEARS}
 
             def _stock_exports(suffix):
+                # Sign-in and quota are checked before the format picker, so a
+                # signed-out visitor is asked once rather than after choosing.
+                from entitlements import (require_export, record,
+                                          render_quota_note)
+                _ok, _user = require_export(f"stock_{suffix}")
+                if not _ok:
+                    return
+
                 _labels = [f[0] for f in _FORMATS]
                 _pick = st.radio("Format", _labels, horizontal=True,
                                  key=f"fmt_{suffix}", label_visibility="collapsed")
@@ -1685,6 +1693,12 @@ elif _page == "analysis":
                             except Exception:
                                 st.session_state[_buf_key] = None
                             st.session_state[_id_key] = _report_id
+                        # Count the build, not the download — downloading the
+                        # same file twice is one report. A failed build isn't
+                        # counted at all.
+                        if st.session_state.get(_buf_key) is not None:
+                            record(_user, f"stock_{_kind}",
+                                   f"{ticker_input} {_rlabel}")
                         _ready = True
                     if _ready:
                         _buf = st.session_state.get(_buf_key)
@@ -1704,6 +1718,7 @@ elif _page == "analysis":
                             )
                         else:
                             st.caption(f"{_name} export isn’t available.")
+                render_quota_note(_user)
 
             _stock_exports("top")
             st.markdown("---")

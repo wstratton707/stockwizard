@@ -582,3 +582,77 @@ def has_accepted_terms(user_email: str, terms_version: str) -> bool:
 def terms_storage_status() -> str:
     """Terms-acceptance persistence health — see _table_status for the values."""
     return _table_status(_TERMS_TABLE)
+
+
+# ── Report generations (export metering) ───────────────────────────────────────
+# One-time table setup (run in the Supabase SQL editor):
+#
+#   create table if not exists report_generations (
+#     id           uuid primary key default gen_random_uuid(),
+#     user_email   text        not null,
+#     report_kind  text        not null,
+#     subject      text,
+#     created_at   timestamptz not null default now()
+#   );
+#   create index if not exists idx_report_gen_user on report_generations(user_email);
+#
+# A log of every export, not a decrementing counter. Three reasons: a counter
+# that fails to write silently gives away a free report and nobody ever knows; a
+# log survives a double-click without double-charging because we can see what was
+# generated and when; and before any price is set, the distribution of reports per
+# user IS the number that should decide where the free tier sits. Guessing it is
+# how you end up with a paywall that never fires.
+_REPORTS_TABLE = "report_generations"
+
+
+def record_report_generation(user_email: str, report_kind: str,
+                             subject: str = "") -> bool:
+    """Log one export. `subject` is the ticker or portfolio name, for the trail."""
+    if not _available() or not (user_email or "").strip():
+        return False
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/{_REPORTS_TABLE}",
+            headers={**_headers(), "Prefer": "return=minimal"},
+            json={"user_email": user_email.strip().lower(),
+                  "report_kind": report_kind,
+                  "subject": (subject or None)},
+            timeout=_TIMEOUT,
+        )
+        return r.status_code in (200, 201, 204)
+    except Exception as e:
+        logger.warning(f"record_report_generation: {e}")
+        return False
+
+
+def count_report_generations(user_email: str) -> int:
+    """How many exports this user has generated. -1 when the count is unknown.
+
+    -1 rather than 0 on failure, because a caller that treats "unknown" as "none
+    used" would hand out unlimited free reports every time Supabase hiccups.
+    """
+    if not _available() or not (user_email or "").strip():
+        return -1
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/{_REPORTS_TABLE}",
+            headers={**_headers(), "Prefer": "count=exact", "Range-Unit": "items",
+                     "Range": "0-0"},
+            params={"user_email": f"eq.{user_email.strip().lower()}",
+                    "select": "id"},
+            timeout=_TIMEOUT,
+        )
+        if r.status_code not in (200, 206):
+            return -1
+        # PostgREST returns the total after the slash: "0-0/17", or "*/0" when empty.
+        rng = r.headers.get("Content-Range", "")
+        total = rng.split("/")[-1] if "/" in rng else ""
+        return int(total) if total.isdigit() else -1
+    except Exception as e:
+        logger.warning(f"count_report_generations: {e}")
+        return -1
+
+
+def reports_storage_status() -> str:
+    """Report-metering persistence health — see _table_status for the values."""
+    return _table_status(_REPORTS_TABLE)
