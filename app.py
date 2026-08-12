@@ -229,6 +229,7 @@ import auth
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
 from your_portfolios import render_your_portfolios
+from legal import render_terms, render_privacy, render_legal_links
 from constants import DEV_MODE_FREE, get_risk_free_rate
 from disclaimers import render_inline, render_section, render_footer
 import disclaimers as _disc
@@ -254,6 +255,11 @@ def _b64_img(path):
 
 _MARK_B64  = _b64_img(_MARK_PATH)
 _page_icon = _FAVICON if os.path.exists(_FAVICON) else "◈"
+
+# set_page_config below fixes the tab a crawler never waits for. This fixes the
+# HTML it is actually served — see seo.py. Silent and non-fatal by design.
+import seo as _seo
+_seo.apply()
 st.set_page_config(
     page_title="QuantWizard",
     page_icon=_page_icon,
@@ -324,7 +330,10 @@ elif not DEV_MODE_FREE and not st.session_state.get("is_pro"):
 # Custom sticky navbar (replaces Streamlit's empty built-in header). Uses native
 # buttons in a keyed container so nav clicks are reruns — session state (e.g. a
 # built portfolio) survives — while ?page= keeps the URL shareable.
-_PAGES = ("home", "analysis", "news", "builder", "portfolios")
+# "terms" and "privacy" are routable but deliberately absent from the navbar —
+# they are reached from the footer strip that renders on every page.
+_PAGES = ("home", "analysis", "news", "builder", "portfolios",
+          "terms", "privacy")
 _page  = st.query_params.get("page", "home")
 if _page not in _PAGES:
     _page = "home"
@@ -608,6 +617,15 @@ with st.sidebar:
     st.markdown('<div class="sidebar-group">Stay Updated</div>', unsafe_allow_html=True)
     email_input = st.text_input("", placeholder="your@email.com",
                                 key="waitlist_email", label_visibility="collapsed")
+    # The consent notice sits at the point of collection, not only in the footer —
+    # this form is the first place we ask anyone for personal data.
+    st.markdown(
+        '<div style="font-size:0.68rem;color:#94a3b8;line-height:1.5;'
+        'margin:-0.35rem 0 0.5rem">By joining you agree to our '
+        '<a href="?page=terms" target="_self" style="color:#64748b">Terms</a> and '
+        '<a href="?page=privacy" target="_self" style="color:#64748b">Privacy '
+        'Policy</a>. We will not share your address.</div>',
+        unsafe_allow_html=True)
     if st.button("Join Waitlist", use_container_width=True):
         # Was: append to a local waitlist.csv. Streamlit Community Cloud runs on
         # an ephemeral container that is rebuilt on every push and recycled when
@@ -3459,3 +3477,17 @@ elif _page == "builder":
 # =============================================================================
 elif _page == "portfolios":
     render_your_portfolios(POLYGON_API_KEY, is_pro=st.session_state.get("is_pro", False))
+
+# =============================================================================
+# LEGAL
+# =============================================================================
+elif _page == "terms":
+    render_terms()
+
+elif _page == "privacy":
+    render_privacy()
+
+# ── Footer link strip (every page) ───────────────────────────────────────────
+# Outside the routing chain so there is exactly one place the legal documents are
+# linked from, and no page can be built that forgets them.
+st.markdown(render_legal_links(), unsafe_allow_html=True)

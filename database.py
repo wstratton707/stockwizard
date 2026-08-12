@@ -513,3 +513,72 @@ def delete_tracked_portfolio(portfolio_id: str) -> bool:
 def tracked_storage_status() -> str:
     """Tracked-portfolio persistence health — see _table_status for the values."""
     return _table_status(_TRACKED_TABLE)
+
+
+# ── Terms acceptance (clickwrap record) ────────────────────────────────────────
+# One-time table setup (run in the Supabase SQL editor):
+#
+#   create table if not exists terms_acceptances (
+#     id             uuid primary key default gen_random_uuid(),
+#     user_email     text        not null,
+#     terms_version  text        not null,
+#     accepted_at    timestamptz not null default now(),
+#     unique (user_email, terms_version)
+#   );
+#
+# The point of this table is evidential, not functional. A limitation-of-liability
+# clause is only worth what you can prove the user assented to, and "they must
+# have seen it" is not proof — a dated row naming the version they ticked is.
+# `unique (user_email, terms_version)` makes the upsert idempotent, so re-ticking
+# after a sign-out does not create a second row; the FIRST acceptance timestamp
+# is the one that matters and it is preserved.
+_TERMS_TABLE = "terms_acceptances"
+
+
+def save_terms_acceptance(user_email: str, terms_version: str) -> bool:
+    """Record that this user accepted this version of the terms."""
+    if not _available() or not (user_email or "").strip():
+        return False
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/{_TERMS_TABLE}",
+            headers={**_headers(),
+                     "Prefer": "resolution=ignore-duplicates,return=minimal"},
+            params={"on_conflict": "user_email,terms_version"},
+            json={"user_email": user_email.strip().lower(),
+                  "terms_version": terms_version},
+            timeout=_TIMEOUT,
+        )
+        return r.status_code in (200, 201, 204)
+    except Exception as e:
+        logger.warning(f"save_terms_acceptance: {e}")
+        return False
+
+
+def has_accepted_terms(user_email: str, terms_version: str) -> bool:
+    """Whether this user has already accepted this version. False on any doubt.
+
+    Returning False when the backend is unreachable is the safe direction: the
+    worst case is showing the agreement to someone who already signed it, rather
+    than letting someone through without a record.
+    """
+    if not _available() or not (user_email or "").strip():
+        return False
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/{_TERMS_TABLE}",
+            headers=_headers(),
+            params={"user_email": f"eq.{user_email.strip().lower()}",
+                    "terms_version": f"eq.{terms_version}",
+                    "select": "id", "limit": 1},
+            timeout=_TIMEOUT,
+        )
+        return r.status_code == 200 and bool(r.json())
+    except Exception as e:
+        logger.warning(f"has_accepted_terms: {e}")
+        return False
+
+
+def terms_storage_status() -> str:
+    """Terms-acceptance persistence health — see _table_status for the values."""
+    return _table_status(_TERMS_TABLE)

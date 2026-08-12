@@ -79,7 +79,15 @@ _K_FOUND_PORTS = "found_portfolios"
 _K_RANKINGS    = "port_rankings"   # cached get_sharpe_rankings result
 
 # ── Optimizer / fetch config ──────────────────────────────────────────────────
-_MAX_PORTFOLIO_TICKERS = 18     # hard cap fed to the SLSQP optimizer
+# How many names the user can ask for. This used to be a single hard-coded 18
+# fed straight to the optimiser, which meant the portfolio contained 18 holdings
+# whatever the user chose — the "minimum holdings" slider only ever ran as a
+# post-optimisation pruning floor and never reached selection, so asking for 20
+# silently produced 18. The count is now a preference threaded through candidate
+# pooling, sector budgets, selection and the pruning floor.
+_MIN_HOLDINGS_ALLOWED  = 10     # below this, mean-variance has too little to work with
+_MAX_HOLDINGS_ALLOWED  = 50     # above this, weights fall under a basis point of signal
+_DEFAULT_HOLDINGS      = 18     # the previous hard cap, kept as the default
 _PRICE_HISTORY_YEARS   = 5      # years of OHLCV history fetched per candidate
                                # (yfinance has no depth cap; longer window → more
                                #  stable covariance/betas + real crashes in risk stats)
@@ -89,6 +97,33 @@ _MC_SIMULATIONS        = 1_000  # Monte Carlo paths
 _MIN_WEIGHT            = 0.01   # positions below 1% are dropped post-optimisation
 _FETCH_WORKERS         = 5      # ThreadPoolExecutor pool size for parallel fetches
 _TOP_N_PER_SECTOR      = 2      # candidates kept per sector in fallback universe
+
+
+def _target_holdings(prefs) -> int:
+    """How many names the user asked for, clamped to what the engine supports.
+
+    Reads the old `min_holdings` key as a fallback so a portfolio saved before
+    this control changed still rebuilds instead of silently reverting to 18.
+    """
+    n = prefs.get("target_holdings", prefs.get("min_holdings", _DEFAULT_HOLDINGS))
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = _DEFAULT_HOLDINGS
+    return max(_MIN_HOLDINGS_ALLOWED, min(_MAX_HOLDINGS_ALLOWED, n))
+
+
+def _prune_floor(n: int) -> float:
+    """Weight below which a position is dropped as noise, scaled to portfolio size.
+
+    A flat 1% is right at 18 names (equal weight 5.6%, so 1% is a fifth of a
+    normal position) and wrong at 50, where equal weight is 2% and a flat 1%
+    would prune half the tail the user explicitly asked for — reproducing, at
+    the top of the range, exactly the "I asked for N and got fewer" complaint
+    this change exists to fix. Never looser than the old 1%.
+    """
+    return min(_MIN_WEIGHT, 0.2 / max(n, 1))
+
 
 ALL_SECTORS        = list(SECTOR_UNIVERSE.keys())
 ALL_BOND_CATEGORIES = list(BOND_UNIVERSE.keys())
@@ -315,9 +350,13 @@ def _render_step_1(api_key):
                  "(ETFs) pass.",
         )
     with col2:
-        min_holdings  = st.slider(
-            "Minimum number of holdings", 5, 20, 8, step=1,
-            help="Forces the optimizer to keep at least this many positions in the final portfolio.",
+        target_holdings = st.slider(
+            "Number of holdings", _MIN_HOLDINGS_ALLOWED, _MAX_HOLDINGS_ALLOWED,
+            _DEFAULT_HOLDINGS, step=1,
+            help="How many positions to build. This drives selection, so the "
+                 "portfolio comes back with this many names — if the screen "
+                 "cannot fill them after your sector and market-cap filters, "
+                 "you'll be told how many it found and why.",
         )
         style_tilt = st.radio(
             "Style tilt", ["Balanced", "Value tilt", "Growth tilt"],
@@ -372,7 +411,7 @@ def _render_step_1(api_key):
                 prefs["exclude_tickers"] = excl_tickers
                 prefs["use_etfs"]        = use_etfs
                 prefs["max_per_stock"]   = max_per_stock / 100
-                prefs["min_holdings"]    = min_holdings
+                prefs["target_holdings"] = target_holdings
                 prefs["style_tilt"]      = style_tilt
                 prefs["min_mcap"]        = {"Any": 0, "$2B+": 2e9, "$10B+": 10e9,
                                             "$50B+": 50e9}[min_mcap_label]
@@ -404,6 +443,7 @@ def _render_step_2(api_key):
             incl_sectors   = set(prefs.get("include_sectors", list(SECTOR_UNIVERSE.keys())))
             excl_tickers   = set(t.upper() for t in prefs.get("exclude_tickers", []))
             user_tickers   = [t.upper() for t in prefs.get("user_tickers", [])]
+            target_n       = _target_holdings(prefs)
 
             # ── Try pre-computed multi-factor rankings (considers ALL ~330 tickers) ──
             # Cache in session so back-and-forward navigation doesn't re-fetch.
@@ -528,7 +568,11 @@ def _render_step_2(api_key):
                 # exactly two. Now every sector gets a guaranteed floor (so
                 # diversification is preserved), and the remaining slots go to the
                 # best names anywhere, capped per sector so nothing runs away.
-                _MIN_PER_SECTOR, _MAX_PER_SECTOR = 1, 4
+                # The per-sector ceiling has to scale with the requested size or
+                # it becomes the real cap: 11 sectors x 4 is 44 names, so a
+                # 50-name request could never be filled however deep the pool.
+                _MIN_PER_SECTOR = 1
+                _MAX_PER_SECTOR = max(4, target_n // 4)
                 per_sector = {s: sorted(v, key=lambda x: x[1], reverse=True)
                               for s, v in sector_groups.items()}
 
@@ -541,7 +585,7 @@ def _render_step_2(api_key):
 
                 # Then fill by global score until the candidate pool is deep enough
                 # to give the optimiser real choice (~2.5x the final portfolio).
-                pool_target = _MAX_PORTFOLIO_TICKERS * 2.5
+                pool_target = target_n * 2.5
                 remaining = sorted(
                     ((t, sc, s) for s, v in per_sector.items() for t, sc in v),
                     key=lambda x: x[1], reverse=True)
@@ -581,7 +625,7 @@ def _render_step_2(api_key):
                 candidates, period_years=_PRICE_HISTORY_YEARS, api_key=api_key, log=log)
             progress.progress(40, text="Finalising stock selection...")
 
-            # Trim to 18 for optimizer.
+            # Trim to the requested number of holdings for the optimizer.
             # When precompute was used: rank by precompute score (avoids in-sample bias).
             # Fallback: rank by 5-year Sharpe (only option when precompute unavailable).
             if used_precompute:
@@ -605,9 +649,9 @@ def _render_step_2(api_key):
                 from factor_model import select_holdings as _select
                 best_tickers = _select(
                     available, rankings,
-                    n=_MAX_PORTFOLIO_TICKERS,
+                    n=target_n,
                     always_keep=[t for t in available if t in pinned_set],
-                    max_per_sector=3,
+                    max_per_sector=max(3, target_n // 6),
                     score_key=_sel_score)
                 _spread2 = {}
                 for _t in best_tickers:
@@ -616,8 +660,11 @@ def _render_step_2(api_key):
                 log(f"   Final portfolio: {len(best_tickers)} stocks across "
                     f"{len(_spread2)} sectors {_spread2} — {', '.join(best_tickers)}")
             else:
-                best_tickers = select_by_factors(returns_df, sector_map,
-                                                 max_total=_MAX_PORTFOLIO_TICKERS, top_n_per_sector=_TOP_N_PER_SECTOR)
+                best_tickers = select_by_factors(
+                    returns_df, sector_map, max_total=target_n,
+                    # 11 sectors x 2 caps the fallback at 22 names; scale it so a
+                    # large request is reachable without precompute too.
+                    top_n_per_sector=max(_TOP_N_PER_SECTOR, target_n // 9))
                 log(f"   Final portfolio: {len(best_tickers)} stocks (multi-factor) — {', '.join(best_tickers)}")
             # Floor guard: mean-variance optimisation, the frontier and the
             # correlation matrix all need a real multi-asset set. If a fetch
@@ -839,27 +886,38 @@ def _render_step_2(api_key):
     selected_key     = choice_map[port_choice]
     selected_weights = portfolios[selected_key]
 
-    # Clean weights — remove tiny allocations, but honour the user's
-    # min_holdings preference: never drop so many positions that we end up
-    # below it. If the strict <1% filter would leave too few holdings, keep
-    # the top N positions even if some are <1%.
-    _min_holdings = int(prefs.get("min_holdings", 8))
-    sorted_w = sorted(selected_weights.items(), key=lambda x: x[1], reverse=True)
-    above_threshold = [(k, v) for k, v in sorted_w if v >= _MIN_WEIGHT]
+    # Clean weights — remove allocations too small to be real positions, but
+    # never drop so many that we fall below what the user asked for. The floor
+    # scales with the requested size (see _prune_floor): 1% is a fifth of a
+    # normal position at 18 names and half of one at 50.
+    _target_n = _target_holdings(prefs)
+    _floor    = _prune_floor(_target_n)
+    sorted_w  = sorted(selected_weights.items(), key=lambda x: x[1], reverse=True)
+    above_threshold = [(k, v) for k, v in sorted_w if v >= _floor]
 
-    if len(above_threshold) >= _min_holdings:
+    if len(above_threshold) >= _target_n:
         kept    = dict(above_threshold)
-        dropped = [k for k, v in sorted_w if v < _MIN_WEIGHT]
+        dropped = [k for k, v in sorted_w if v < _floor]
     else:
-        # Keep the top _min_holdings regardless of threshold to satisfy user pref
-        kept    = dict(sorted_w[:_min_holdings])
-        dropped = [k for k, _ in sorted_w[_min_holdings:]]
+        # Keep the top _target_n regardless of threshold to satisfy user pref
+        kept    = dict(sorted_w[:_target_n])
+        dropped = [k for k, _ in sorted_w[_target_n:]]
 
     total = sum(kept.values())
     selected_weights = {k: v / total for k, v in kept.items()} if total > 0 else kept
     if dropped:
-        st.info(f"{len(dropped)} position(s) with weight <1% were removed by the optimizer "
-                f"and excluded from the portfolio: {', '.join(dropped)}")
+        st.info(f"{len(dropped)} position(s) with weight below {_floor:.2%} were removed by "
+                f"the optimizer and excluded from the portfolio: {', '.join(dropped)}")
+
+    # Say so when the screen could not fill the request. Silently returning
+    # fewer names than asked for is the bug this control had for its whole life;
+    # returning fewer *with a reason* is a legitimate outcome of tight filters.
+    if len(selected_weights) < _target_n:
+        st.warning(
+            f"You asked for {_target_n} holdings and this portfolio has "
+            f"{len(selected_weights)}. The screen ran out of names that pass your "
+            f"filters — widen the sector selection, lower the minimum market cap, "
+            f"or reduce the number of holdings.")
 
     # Portfolio metrics
     returns_df = opt["returns_df"]
@@ -1055,7 +1113,9 @@ concentration penalty for any single position above 25%.
         _cw = portfolios.get(_ck, {})
         if not _cw:
             continue
-        _cw = {k: v for k, v in _cw.items() if v >= _MIN_WEIGHT}
+        # Same scaled floor the chosen portfolio was pruned with, so the compare
+        # panel doesn't count positions the portfolio itself keeps.
+        _cw = {k: v for k, v in _cw.items() if v >= _floor}
         _ct = sum(_cw.values())
         _cw = {k: v/_ct for k, v in _cw.items()}
         _ct2 = [t for t in _cw if t in returns_df.columns]
@@ -2305,6 +2365,14 @@ def render_portfolio_builder(api_key, is_pro=False):
         if st.button("Upgrade to Pro", type="primary", key="upgrade_portfolio"):
             st.session_state["show_payment"] = True
             st.rerun()
+        return
+
+    # Sign-in and a recorded acceptance of the terms, before anything is built.
+    # This is the one feature that outputs something shaped like a personal
+    # recommendation, so it is the one that most needs the user to have been
+    # told, in an act they performed, that it isn't one.
+    from legal import require_agreement
+    if not require_agreement("the Portfolio Builder"):
         return
 
     st.markdown("""
