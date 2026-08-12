@@ -67,8 +67,73 @@ FAVICON_URL = f"{SITE_URL}/favicon.png"
 # preview better when the link is shared. It is not used for the search favicon.
 OG_IMAGE_URL = f"{SITE_URL}/app/static/logo.png"
 
-# Bumping this re-applies the patch over an older injection.
-_MARKER = "<!-- quantwizard-seo v1 -->"
+# Bumping this re-applies the patch over an older injection. v2 added the
+# crawlable <noscript> body; without a bump, an instance already carrying v1
+# would skip it forever.
+_MARKER = "<!-- quantwizard-seo v2 -->"
+
+# ── The body a crawler actually reads ─────────────────────────────────────────
+# Streamlit ships an empty shell — the entire <body> is a <div id="root"> and a
+# "you need to enable JavaScript" line — and delivers every pixel of content over
+# a WEBSOCKET. Googlebot executes JavaScript but does not hold websockets open,
+# so its render pass finds an empty root. There is literally no text on this site
+# for a crawler to read, which is why the search snippet was the title repeated
+# back ("Streamlit ... Streamlit") and why assistants reported the domain as
+# resolving to nothing.
+#
+# This replaces Streamlit's noscript line with an honest description of the app.
+# noscript is the correct place for it: it is genuinely what a visitor without
+# JavaScript sees, it is not hidden from anyone, and it describes exactly what
+# the page does — so it is a real fallback, not cloaking. It will not make the
+# app rank; it makes the listing legible. Ranking needs crawlable per-topic
+# pages, which needs the separate static site.
+_NOSCRIPT_BODY = """<noscript>
+      <h1>QuantWizard — equity research reports and portfolio tools</h1>
+      <p>QuantWizard generates a full equity research report on any US-listed
+         stock in about thirty seconds: discounted-cash-flow valuation, Monte
+         Carlo simulation, fundamentals from SEC EDGAR, peer comparison and risk
+         statistics, exported as an Excel workbook, a PowerPoint deck or a Word
+         document.</p>
+      <p>It also builds model portfolios from a ranked universe using published
+         portfolio-construction methods — mean-variance optimisation, a
+         sector-relative multi-factor screen, covariance shrinkage, historical
+         backtesting and crash stress tests — and tracks their value forward
+         against the S&amp;P 500.</p>
+      <p>QuantWizard is a research tool, not a registered investment adviser.
+         Nothing it produces is investment advice. See the
+         <a href="/?page=terms">Terms of Service</a> and
+         <a href="/?page=privacy">Privacy Policy</a>.</p>
+      <p>This application needs JavaScript enabled to run.</p>
+    </noscript>"""
+
+_ROBOTS_TXT = f"""# QuantWizard
+User-agent: *
+Allow: /
+
+Sitemap: {SITE_URL}/sitemap.xml
+"""
+
+
+def _sitemap_xml() -> str:
+    """Just the apex, deliberately.
+
+    Every `?page=` URL returns byte-identical HTML with the same title, so
+    listing them would be submitting duplicates — and the canonical tag points
+    all of them at `/` anyway. Listing URLs a canonical tag disavows is a
+    contradictory signal. This file becomes useful when there are genuinely
+    distinct pages to put in it, which means the static content site.
+    """
+    from datetime import date
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>{SITE_URL}/</loc>
+    <lastmod>{date.today().isoformat()}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>
+"""
 
 
 def _head_block() -> str:
@@ -144,9 +209,32 @@ def _patch_index(static_dir: str, log) -> bool:
     # last icon link wins in some crawlers. Remove it rather than out-order it.
     html = html.replace('<link rel="shortcut icon" href="./favicon.png" />', "")
 
+    # Give the crawler a body to read. Matched loosely because Streamlit has
+    # reworded this line between releases.
+    import re as _re
+    html, n = _re.subn(r"<noscript>.*?</noscript>", _NOSCRIPT_BODY, html,
+                       count=1, flags=_re.DOTALL)
+    if not n:
+        log("seo: no <noscript> to replace — body left empty for crawlers")
+
     open(path, "w", encoding="utf-8").write(html)
     log("seo: index.html patched")
     return True
+
+
+def _write_file(static_dir: str, name: str, content: str, log) -> bool:
+    """Drop a file into Streamlit's static dir, which is served at the site root."""
+    path = os.path.join(static_dir, name)
+    try:
+        if os.path.exists(path) and open(path, encoding="utf-8").read() == content:
+            return True
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        log(f"seo: {name} written")
+        return True
+    except Exception as e:
+        log(f"seo: could not write {name} ({e})")
+        return False
 
 
 def _patch_favicon(static_dir: str, log) -> bool:
@@ -180,9 +268,11 @@ def apply(log=lambda _m: None) -> bool:
         if not static_dir or not os.path.isdir(static_dir):
             log("seo: streamlit static dir not found — skipped")
             return False
-        ok_html = _patch_index(static_dir, log)
-        ok_icon = _patch_favicon(static_dir, log)
-        return ok_html and ok_icon
+        ok_html    = _patch_index(static_dir, log)
+        ok_icon    = _patch_favicon(static_dir, log)
+        ok_robots  = _write_file(static_dir, "robots.txt",  _ROBOTS_TXT,    log)
+        ok_sitemap = _write_file(static_dir, "sitemap.xml", _sitemap_xml(), log)
+        return ok_html and ok_icon and ok_robots and ok_sitemap
     except Exception as e:
         # A read-only filesystem is the expected failure, and it is survivable:
         # the app runs exactly as before, just with Streamlit's listing.
