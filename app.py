@@ -243,8 +243,14 @@ _FAVICON   = os.path.join(_ASSETS, "favicon.png")     # tab icon
 _MARK_PATH = os.path.join(_ASSETS, "mark.png")        # crystal-gem nav mark
 
 
+@st.cache_data(show_spinner=False)
 def _b64_img(path):
-    """Read an image file as a base64 string (for inline data: URIs). '' on miss."""
+    """Read an image file as a base64 string (for inline data: URIs). '' on miss.
+
+    Cached because this runs at module scope, and module scope in Streamlit means
+    once per rerun — so the nav mark was being re-read and re-encoded on every
+    single click. The file cannot change without a redeploy.
+    """
     try:
         import base64
         with open(path, "rb") as _f:
@@ -258,8 +264,14 @@ _page_icon = _FAVICON if os.path.exists(_FAVICON) else "◈"
 
 # set_page_config below fixes the tab a crawler never waits for. This fixes the
 # HTML it is actually served — see seo.py. Silent and non-fatal by design.
+#
+# Guarded to once per session: apply() is idempotent but still opens and compares
+# four files, and at module scope that would repeat on every rerun for a result
+# that cannot change while the process lives.
 import seo as _seo
-_seo.apply()
+if not st.session_state.get("_seo_applied"):
+    _seo.apply()
+    st.session_state["_seo_applied"] = True
 st.set_page_config(
     page_title="QuantWizard",
     page_icon=_page_icon,
@@ -278,10 +290,22 @@ if not POLYGON_API_KEY:
     st.stop()
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
-# Styles live in styles.css — load once, inject into the page as <style>.
+# Styles live in styles.css, injected into the page as <style>.
+#
+# The <style> element itself must be re-emitted every rerun — Streamlit removes
+# elements a run doesn't produce — but READING the 69KB file every time was
+# waste, since it cannot change without a redeploy. The comment here used to say
+# "load once", which is what it should have been doing and wasn't.
 _CSS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "styles.css")
-with open(_CSS_PATH, "r", encoding="utf-8") as _f:
-    st.markdown(f"<style>\n{_f.read()}\n</style>", unsafe_allow_html=True)
+
+
+@st.cache_data(show_spinner=False)
+def _load_css(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return f"<style>\n{f.read()}\n</style>"
+
+
+st.markdown(_load_css(_CSS_PATH), unsafe_allow_html=True)
 
 # ── Plotly defaults ───────────────────────────────────────────────────────────
 # Hide the Plotly modebar (camera/zoom/pan icons) on every chart by default.
@@ -334,13 +358,38 @@ elif not DEV_MODE_FREE and not st.session_state.get("is_pro"):
 # they are reached from the footer strip that renders on every page.
 _PAGES = ("home", "analysis", "news", "builder", "portfolios",
           "terms", "privacy")
-_page  = st.query_params.get("page", "home")
+# The current page lives in session state, seeded from the URL on first load.
+#
+# It used to be read straight from st.query_params here, at the top, while the
+# navbar that CHANGES it renders 120 lines further down — so a nav click could
+# only take effect by calling st.rerun(), executing this ~3,500-line script
+# twice. Worse than the wasted time: the first run rendered the navbar and then
+# aborted, so Streamlit tore down everything below it and the page sat visibly
+# broken until the second run rebuilt it. Measured before the change, a
+# Home -> Analysis click showed a torn-down page on 2 of 3 attempts. That is the
+# "it looks like it crashed" flash.
+#
+# Reading from session state lets the handler below set the page and have the
+# dispatch at the bottom of this file see it in the SAME run: one execution, no
+# teardown. The URL is still written so links stay shareable.
+if "_page" not in st.session_state:
+    st.session_state["_page"] = st.query_params.get("page", "home")
+_page = st.session_state["_page"]
 if _page not in _PAGES:
-    _page = "home"
+    _page = st.session_state["_page"] = "home"
 
-def _goto(pg):
+
+def _goto(pg, rerun=False):
+    """Navigate. `rerun` is needed only by callers below the page dispatch.
+
+    The navbar runs BEFORE the dispatch, so setting the state is enough for this
+    run to render the new page. Buttons inside a page's own body (the Home CTAs)
+    run AFTER their page was chosen, so they still have to restart the script.
+    """
+    st.session_state["_page"] = pg
     st.query_params["page"] = pg
-    st.rerun()
+    if rerun:
+        st.rerun()
 
 
 # ── Analysis windows ──────────────────────────────────────────────────────────
@@ -459,11 +508,27 @@ with st.container(key="topnav"):
     for _i, (_lbl, _pg) in enumerate(
             [("Home", "home"), ("Analysis", "analysis"), ("News", "news"),
              ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=2):
+        # Every tab renders unstyled. Which one is active cannot be known while
+        # this loop runs — the click that decides it happens inside the loop —
+        # so the highlight is applied by CSS immediately afterwards instead.
+        # That is what lets navigation avoid a second script run.
         if _nc[_i].button(_lbl, key=f"nav_{_pg}", use_container_width=True,
-                          type="primary" if _page == _pg else "tertiary"):
+                          type="tertiary"):
             _goto(_pg)
     with _nc[7]:
         auth.render_nav_control()
+
+# Re-read after the navbar: if a tab was just clicked this is the new page, and
+# the dispatch at the bottom of this file renders it in this same run.
+_page = st.session_state["_page"]
+
+# Paint the active tab. Mirrors the `stBaseButton-primary` rule in styles.css,
+# which no longer applies now that every nav button is tertiary.
+st.markdown(
+    f"<style>.st-key-topnav .st-key-nav_{_page} button{{"
+    f"background:rgba(56,189,248,0.16)!important;"
+    f"border:1px solid rgba(56,189,248,0.32)!important}}</style>",
+    unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 _logo_html = (
@@ -733,9 +798,9 @@ if _page == "home":
 
     _hc = st.columns([1.1, 1.1, 2.8])
     if _hc[0].button("Analyze a stock", type="primary", use_container_width=True, key="cta_analyze"):
-        _goto("analysis")
+        _goto("analysis", rerun=True)
     if _hc[1].button("Build a portfolio", use_container_width=True, key="cta_build"):
-        _goto("builder")
+        _goto("builder", rerun=True)
 
     st.markdown("""
     <div class="guide-panel">
@@ -798,7 +863,7 @@ if _page == "home":
             </div>""", unsafe_allow_html=True)
         with _c[1]:
             if st.button(_btn, key=f"card_{_pg}", use_container_width=True):
-                _goto(_pg)
+                _goto(_pg, rerun=True)
         st.markdown('<div class="index-rule"></div>', unsafe_allow_html=True)
 
     # ── Excel-export spotlight (the hero feature) — carousel ──────────────────
@@ -827,7 +892,7 @@ if _page == "home":
         </ul>""", unsafe_allow_html=True)
     with _bc[1]:
         if st.button("Generate one →", type="primary", use_container_width=True, key="cta_report"):
-            _goto("analysis")
+            _goto("analysis", rerun=True)
 
     # ── Pre-built sample, repeated ────────────────────────────────────────────
     # Same static workbook as the hero CTA (metadata already loaded above, so
