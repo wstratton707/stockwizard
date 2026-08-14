@@ -516,7 +516,11 @@ def _render_exports(pid, name, res):
 
     _key = f"rep_{_kind}_{pid}"
     c1, c2, _sp = st.columns([1.35, 1.15, 2.5])
-    if c1.button(f"Build {_label.lower()}", key=f"gen_{_kind}_{pid}"):
+    # Building the report is the primary action on this card and now looks like
+    # it. It previously shared the same outline treatment as Sign out and Delete
+    # portfolio, so the one thing a reader came here to do had the same weight as
+    # the one that destroys their data.
+    if c1.button(f"Build {_label.lower()}", key=f"gen_{_kind}_{pid}", type="primary"):
         with st.spinner(f"Building your {_label.lower()}…"):
             try:
                 tickers = tuple(sorted(h["ticker"] for h in res["holdings"]))
@@ -545,7 +549,10 @@ def _render_exports(pid, name, res):
             f"Download .{_ext}", data=st.session_state[_key],
             file_name=f"QuantWizard {_safe} {date.today().isoformat()}.{_ext}",
             mime=_mime, key=f"dl_{_kind}_{pid}")
-    render_quota_note(_exp_user)
+    # Beside the build button rather than orphaned under the card. A quota is a
+    # constraint on the action, so it belongs where the action is.
+    with _sp:
+        render_quota_note(_exp_user)
 
 
 # ── Per-portfolio card ──────────────────────────────────────────────────────────
@@ -692,10 +699,39 @@ def _render_card(p, api_key):
 
     _render_exports(pid, name, res)
 
-    if st.button("Delete portfolio", key=f"del_{pid}"):
-        delete_tracked_portfolio(pid)
-        st.cache_data.clear()
-        st.rerun()
+    # ── Delete ────────────────────────────────────────────────────────────────
+    # Sat directly beneath the primary action, in the same outline treatment,
+    # and fired on a single click. Three things wrong at once: no separation
+    # from the thing above it, no visual signal that it is destructive, and no
+    # way back from a misclick — a tracked portfolio carries an inception date
+    # that cannot be recreated by re-entering the same holdings tomorrow.
+    #
+    # The confirm is rendered AFTER the trigger rather than before it, so
+    # arming it needs no second script run. See app.py's `_goto` for why that
+    # matters on a page this size.
+    st.markdown('<div class="danger-rule"></div>', unsafe_allow_html=True)
+    _armed = f"_confirm_del_{pid}"
+    with st.container(key=f"dangerzone_{pid}"):
+        if st.button("Delete portfolio", key=f"del_{pid}"):
+            st.session_state[_armed] = True
+
+        if st.session_state.get(_armed):
+            st.markdown(
+                '<div class="danger-confirm">'
+                f'<b>Delete “{_html.escape(str(name))}” permanently?</b><br>'
+                'Its holdings and its tracking history since '
+                f'{res.get("inception_date", "inception")} are removed. '
+                'Re-creating it later starts a new record from today, so the '
+                'performance you have tracked so far cannot be recovered.'
+                '</div>', unsafe_allow_html=True)
+            _dc = st.columns([1.15, 0.9, 3])
+            if _dc[0].button("Delete permanently", key=f"del_yes_{pid}"):
+                delete_tracked_portfolio(pid)
+                st.cache_data.clear()
+                st.session_state.pop(_armed, None)
+                st.rerun()
+            if _dc[1].button("Cancel", key=f"del_no_{pid}", type="primary"):
+                st.session_state.pop(_armed, None)
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────────
@@ -714,11 +750,11 @@ def render_your_portfolios(api_key, is_pro=False):
                   "account — it takes a few seconds and you'll stay signed in.")
         return
 
-    top = st.columns([3, 1])
-    top[0].markdown(f"**Signed in as** `{email}`")
-    if top[1].button("Sign out", key="yp_signout"):
-        auth.sign_out()
-        st.rerun()
+    # No "Signed in as … / Sign out" row here. The navbar's account control
+    # already shows the address and carries Sign out (auth.render_nav_control),
+    # so this was a second, competing copy of the same two controls — and it sat
+    # between the page title and the user's actual data, which is what they came
+    # for. Identity belongs in the chrome, not in the content.
 
     _status = _storage_status()
     if _status != "ok":
