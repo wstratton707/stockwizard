@@ -158,19 +158,37 @@ def track_portfolio(holdings: list, api_key: str = "", benchmark: str = BENCHMAR
     if len(idx) < 2:
         return {"error": "Not enough price history since inception to chart."}
 
-    # Snap each lot's add/remove date FORWARD onto the master calendar. The loop
-    # below matches dates exactly, so a lot dated on a weekend, a holiday, or a
-    # day this particular ticker didn't trade was never bought at all — it just
-    # silently never appeared in the portfolio. dollars_to_lots snaps to a real
-    # bar, but holdings can also arrive hand-edited or from an import.
-    def _snap(ts):
+    # Snap each lot's add/remove date FORWARD onto a session THIS TICKER traded.
+    # The loop below matches dates exactly, so a lot dated on a weekend, a
+    # holiday, or a day this particular ticker didn't trade was never bought at
+    # all — it just silently never appeared in the portfolio. dollars_to_lots
+    # snaps to a real bar, but holdings can also arrive hand-edited or imported.
+    #
+    # It used to snap onto the master calendar, which is the union of every
+    # holding's dates — so a lot could land on a day some other holding traded
+    # and this one did not. Its reindexed price on that day is NaN (ffill has
+    # nothing earlier to carry), and NaN then propagates: cost = shares * NaN,
+    # contrib += NaN, and spy_shares += NaN / price. One holding with a
+    # late-starting series therefore turned contributed capital AND the entire
+    # benchmark column into NaN, surfacing as "vs S&P 500 — N/A" with no warning.
+    #
+    # Observed with FRT, whose history intermittently came back starting three
+    # sessions after this portfolio's inception; the comparison worked or
+    # vanished depending on which the data provider returned that minute.
+    def _snap(ts, ticker=None):
         if ts is None:
             return None
-        return next((d for d in idx if d >= ts), None)
+        avail = None
+        if ticker is not None and ticker in closes:
+            avail = set(closes[ticker].dropna().index)
+        for d in idx:
+            if d >= ts and (avail is None or d in avail):
+                return d
+        return None
 
     for lot in lots:
-        lot["_added"]   = _snap(lot["_added"])
-        lot["_removed"] = _snap(lot["_removed"])
+        lot["_added"]   = _snap(lot["_added"], lot["ticker"])
+        lot["_removed"] = _snap(lot["_removed"], lot["ticker"])
     # An add date with no bar at or after it is dated past the end of the window —
     # a future-dated lot. Exclude it rather than silently buying it on day one.
     _future = [lot["ticker"] for lot in lots if lot["_added"] is None]
@@ -202,20 +220,56 @@ def track_portfolio(holdings: list, api_key: str = "", benchmark: str = BENCHMAR
     # the proceeds stay inside the book as cash so the value curve doesn't cliff
     # and the return stays honest.
     realized = 0.0
+    _nan_price_tickers = set()   # holdings we declined to transact — see the loop
     spy_realized = 0.0
     prev_value = 0.0
     nav = 1.0
     portfolio_vals, contrib_vals, nav_vals, spy_vals = [], [], [], []
 
+    def _mkt_value(d):
+        """Portfolio market value on `d`, NaN-safe.
+
+        `shares[t] * price` is NaN when the price is missing — including when we
+        hold ZERO of that ticker, because 0 * NaN is NaN, not 0. A holding whose
+        history starts after inception therefore turned the whole portfolio's
+        value into NaN on every session before its first bar, on a day it was
+        not even held. A position of zero size is worth zero whether or not a
+        price exists for it.
+        """
+        total = 0.0
+        for t in tickers:
+            q = shares[t]
+            if q == 0:
+                continue
+            p_t = float(px[t].loc[d])
+            if p_t == p_t:                    # not NaN
+                total += q * p_t
+        return total
+
     for d in idx:
         # Cash is carried in value_pre as well, so it correctly reads as a
         # zero-return asset in the time-weighted NAV rather than vanishing.
-        value_pre = sum(shares[t] * float(px[t].loc[d]) for t in tickers) + realized
+        value_pre = _mkt_value(d) + realized
         if prev_value > 0:
             nav *= (1 + (value_pre / prev_value - 1))   # flow happens *after* this
 
         for lot in lots:
             p = float(px[lot["ticker"]].loc[d])
+            # Belt and braces alongside the ticker-aware snap above: a NaN price
+            # must never reach the books. It is not merely this lot that breaks —
+            # `contrib` and `spy_shares` are running totals, so a single NaN
+            # makes every subsequent value NaN and silently voids total return
+            # and the whole benchmark comparison. Skipping the transaction and
+            # saying so is recoverable; poisoning the accumulators is not.
+            if p != p:
+                # Only a skipped TRANSACTION is worth reporting. A holding
+                # simply having no bar on a day it isn't trading is ordinary —
+                # flagging that fired the warning on every portfolio containing
+                # a ticker whose history starts late, even though the buy went
+                # through correctly on its own first session.
+                if lot["_added"] == d or lot["_removed"] == d:
+                    _nan_price_tickers.add(lot["ticker"])
+                continue
             if lot["_added"] == d:                       # buy: cash inflow
                 shares[lot["ticker"]] += lot["shares"]
                 cost = lot["shares"] * p
@@ -233,13 +287,26 @@ def track_portfolio(holdings: list, api_key: str = "", benchmark: str = BENCHMAR
                     spy_shares   = max(0.0, spy_shares - _sold)
                     spy_realized += _sold * float(spy.loc[d])
 
-        value_post = sum(shares[t] * float(px[t].loc[d]) for t in tickers) + realized
+        value_post = _mkt_value(d) + realized
         portfolio_vals.append(value_post)
         contrib_vals.append(contrib)
         nav_vals.append(nav)
         spy_vals.append(spy_shares * float(spy.loc[d]) + spy_realized
                         if has_bench else np.nan)
         prev_value = value_post
+
+    if _nan_price_tickers:
+        warnings.append(
+            "Missing a price on one or more sessions for: "
+            f"{', '.join(sorted(_nan_price_tickers))}. Those transactions were "
+            "skipped, so the figures below understate them.")
+
+    # The benchmark column being present is not the same as it being usable. It
+    # was only ever checked for existence, so an all-NaN column read as a working
+    # comparison right up until it rendered as "N/A" with nothing explaining why.
+    if has_bench and not any(v == v for v in spy_vals):
+        warnings.append(f"No usable {benchmark} prices for this period — "
+                        "benchmark comparison unavailable.")
 
     curve = pd.DataFrame(index=pd.to_datetime(idx))
     curve["Portfolio"] = portfolio_vals
