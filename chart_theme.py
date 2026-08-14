@@ -157,7 +157,9 @@ def legend_inline(position="top-right"):
     if position == "top-left":
         common.update(yanchor="bottom", y=1.02, xanchor="left", x=0)
     elif position == "bottom":
-        common.update(yanchor="top", y=-0.16, xanchor="center", x=0.5)
+        # Left-aligned to the plot's left edge, not centred: a centred legend
+        # floats without an anchor, and the eye reads a chart left-to-right.
+        common.update(yanchor="top", y=-0.18, xanchor="left", x=0)
     else:  # top-right
         common.update(yanchor="bottom", y=1.02, xanchor="right", x=1)
     return common

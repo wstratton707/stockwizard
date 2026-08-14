@@ -1429,7 +1429,12 @@ def _render_step_3():
         (cols[0], "Final Value",      f"${bt_met.get('Final Value',0):,.0f}",    GREEN),
         (cols[1], "Total Return",     f"{bt_met.get('Total Return',0):.1f}%",    GREEN if bt_met.get("Total Return",0)>0 else RED),
         (cols[2], "vs S&P 500",       f"{bt_met.get('vs S&P 500',0):.1f}%" if isinstance(bt_met.get('vs S&P 500'), float) else "N/A", GREEN if isinstance(bt_met.get('vs S&P 500'), float) and bt_met.get('vs S&P 500',0)>0 else RED),
-        (cols[3], "Sharpe Ratio",     f"{bt_met.get('Sharpe Ratio',0):.2f}",     GREEN if bt_met.get("Sharpe Ratio",0)>1 else AMBER),
+        # `Sharpe Ratio` is None when the window is too short to justify one, or
+        # when the value came back implausible — formatting that with :.2f would
+        # raise, and comparing it with > would raise too.
+        (cols[3], "Sharpe Ratio",
+         f"{bt_met['Sharpe Ratio']:.2f}" if isinstance(bt_met.get("Sharpe Ratio"), (int, float)) else "—",
+         GREEN if (bt_met.get("Sharpe Ratio") or 0) > 1 else AMBER),
     ]:
         col, label, value, color = _card[:4]
         sub = _card[4] if len(_card) > 4 else None

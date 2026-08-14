@@ -395,7 +395,10 @@ def build_portfolio_docx(portfolio_name, tracked, profiles):
         ("Portfolio beta", "—" if stats["beta"] is None else f"{stats['beta']:.2f}"),
         ("Annualised volatility", _hold if _thin else _pc(stats.get("vol"))),
         ("Maximum drawdown", _hold if _thin else _pc(m.get("Max Drawdown"))),
-        ("Sharpe ratio", _hold if _thin else m.get("Sharpe Ratio", "—")),
+        # None here means the source refused to quote a Sharpe (window too short
+        # or value implausible), which is the same message as _hold.
+        ("Sharpe ratio", _hold if (_thin or m.get("Sharpe Ratio") is None)
+                         else f"{m['Sharpe Ratio']:.2f}"),
         ("Sortino ratio", _hold if _thin else m.get("Sortino Ratio", "—")),
         ("Concentration (HHI)", f"{stats['hhi']:.3f} — {narr['diversification_band']}"),
         ("Diversification score", f"{narr['diversification_score']} / 10"),

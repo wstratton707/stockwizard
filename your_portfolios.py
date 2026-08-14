@@ -15,7 +15,6 @@ import html as _html
 import json
 from datetime import date
 
-import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -99,6 +98,67 @@ def _cached_track(portfolio_id, holdings_key, _holdings, _api_key):
     # holdings_key (a JSON string) is the cache key; _holdings/_api_key are passed
     # unhashable so they don't bloat the hash. Recomputes when holdings change.
     return track_portfolio(_holdings, api_key=_api_key)
+
+
+def _holdings_table(holdings) -> str:
+    """The holdings grid, as HTML rather than st.dataframe.
+
+    st.dataframe brought three things this table should not have: a floating
+    eye/download/search/fullscreen toolbar that is component chrome rather than
+    product, a fixed-height scroll region that clipped the last row in half, and
+    no way to colour a single column. Gain % is the one column here where colour
+    carries meaning, and it was rendering in black.
+
+    Built to the same rules as the fact panel beside it — hairline row rules, no
+    zebra, no vertical borders, tabular figures everywhere, numbers right, label
+    left. Weight carries an inline bar so concentration is scannable without
+    reading each number.
+    """
+    rows = list(holdings or [])
+    if not rows:
+        return ""
+
+    max_w = max((float(h.get("weight_pct") or 0) for h in rows), default=0) or 1.0
+
+    def _num(v, dp=2, dash="—"):
+        return dash if v is None else f"{float(v):,.{dp}f}"
+
+    body = []
+    for h in sorted(rows, key=lambda r: float(r.get("weight_pct") or 0), reverse=True):
+        g = h.get("gain_pct")
+        g_cls = "" if g is None else ("pos" if float(g) >= 0 else "neg")
+        g_txt = "—" if g is None else f"{float(g):+.2f}%"
+        w = float(h.get("weight_pct") or 0)
+        # Bar is scaled to the largest holding, not to 100 — at 18 positions
+        # every bar would otherwise be a stub too short to compare.
+        body.append(
+            f'<tr>'
+            f'<td class="t">{h.get("ticker","")}</td>'
+            f'<td class="n">{_num(h.get("shares"), 4)}</td>'
+            f'<td class="n">${_num(h.get("last_price"))}</td>'
+            f'<td class="n">${_num(h.get("value"))}</td>'
+            f'<td class="n w">'
+            f'<span class="wbar" style="width:{(w / max_w) * 100:.1f}%"></span>'
+            f'<span class="wnum">{w:.2f}%</span></td>'
+            f'<td class="n {g_cls}">{g_txt}</td>'
+            f'</tr>')
+
+    tot_val = sum(float(h.get("value") or 0) for h in rows)
+    tot_w   = sum(float(h.get("weight_pct") or 0) for h in rows)
+
+    return (
+        '<div class="hold-wrap"><table class="hold">'
+        '<thead><tr>'
+        '<th class="t">Ticker</th><th class="n">Shares</th><th class="n">Price</th>'
+        '<th class="n">Value</th><th class="n">Weight</th><th class="n">Gain</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody>'
+        '<tfoot><tr>'
+        f'<td class="t">{len(rows)} positions</td><td class="n"></td><td class="n"></td>'
+        f'<td class="n">${tot_val:,.2f}</td><td class="n">{tot_w:.2f}%</td>'
+        '<td class="n"></td>'
+        '</tr></tfoot>'
+        '</table></div>')
 
 
 def _ann_return_str(m):
@@ -373,10 +433,15 @@ def _stat_panel(res, profiles):
                      "Needs 1 month" if thin else pct(_vol), "vol",
                      "" if (thin or _vol is None) else
                      ("bad" if _vol > 25 else "good" if _vol < 15 else "warn")))
+    # None from the source means it declined to quote one — too short a window,
+    # or a value outside the plausible range. Both read as "not yet", not as a
+    # dash, because a dash suggests missing data rather than withheld data.
     _sh = m.get("Sharpe Ratio")
-    html.append(_row("Sharpe ratio", "Needs 1 month" if thin else (_sh if _sh is not None else dash),
+    _sh_ok = isinstance(_sh, (int, float))
+    html.append(_row("Sharpe ratio",
+                     "Needs 1 month" if (thin or not _sh_ok) else f"{_sh:.2f}",
                      "sharpe",
-                     "" if (thin or not isinstance(_sh, (int, float))) else
+                     "" if (thin or not _sh_ok) else
                      ("good" if _sh > 1 else "warn" if _sh > 0 else "bad")))
     _dd = m.get("Max Drawdown")
     html.append(_row("Max drawdown", "Needs 1 month" if thin else pct(_dd), "dd",
@@ -540,8 +605,11 @@ def _render_card(p, api_key):
                           ("pos" if vs >= 0 else "neg") if _vs_num else "na"),
         ("Max Drawdown",  f"{dd:.1f}%", "neg" if dd < 0 else ""),
     ])
-    st.caption(f"Tracked since {res['inception_date']}  ·  {_ann_return_str(m)}"
-               f"  ·  Sharpe {m.get('Sharpe Ratio', 'N/A')}")
+    # Sharpe is deliberately absent from this line. It used to print the raw
+    # value here while the risk panel below said "Needs 1 month" for the same
+    # metric — one screen, two answers, and the number on show was 7.157. The
+    # panel is where risk metrics live, gated; this line carries provenance.
+    st.caption(f"Tracked since {res['inception_date']}  ·  {_ann_return_str(m)}")
 
     # Statistics beside the chart. Profiles are fetched here rather than only at
     # export time so the numbers are on screen without a second click; the
@@ -561,18 +629,36 @@ def _render_card(p, api_key):
     # Value vs benchmark vs contributed
     curve = res["curve"]
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=curve.index, y=curve["Portfolio"],
-                             name="Your Portfolio",
-                             line=dict(color=ct.color.brand, width=ct.stroke.value)))
-    if "SP500" in curve.columns and not curve["SP500"].isna().all():
-        fig.add_trace(go.Scatter(x=curve.index, y=curve["SP500"],
-                                 name="S&P 500 (same $)",
-                                 line=dict(color=ct.color.ink_muted, width=ct.stroke.price,
-                                           dash="dot")))
-    fig.add_trace(go.Scatter(x=curve.index, y=curve["Contrib"],
-                             name="Invested",
-                             line=dict(color=ct.color.value_line, width=ct.stroke.price,
-                                       dash="dash")))
+
+    # One list, one loop, one guard. Each series is added only if it actually
+    # carries a point, so the legend can never advertise a line that isn't
+    # drawn — a legend entry with no series is indistinguishable from a
+    # rendering bug to anyone reading the chart.
+    #
+    # Colour follows the data's importance rather than its brand: the portfolio
+    # is ink, because it IS the subject; the benchmark recedes to muted grey;
+    # the invested line is a reference rule, not a third competing series. The
+    # portfolio line was previously brand blue at the heaviest weight in the
+    # token set, which made the loudest thing on the chart the one the reader
+    # already knows.
+    _series = (
+        ("Your Portfolio",   curve.get("Portfolio"),
+         dict(color=ct.color.ink,        width=ct.stroke.value)),
+        ("S&P 500 (same $)", curve.get("SP500"),
+         dict(color=ct.color.ink_muted,  width=ct.stroke.price, dash="dot")),
+        ("Invested",         curve.get("Contrib"),
+         dict(color=ct.color.value_line, width=ct.stroke.price, dash="dash")),
+    )
+    for _name, _y, _line in _series:
+        if _y is None or _y.dropna().empty:
+            continue
+        # mode="lines" explicitly: Plotly's default for a short series is
+        # lines+markers, which put a dot on all fourteen observations and read
+        # as a dashboard. Markers are for events, not for every point.
+        fig.add_trace(go.Scatter(
+            x=curve.index, y=_y, name=_name, mode="lines", line=_line,
+            hovertemplate="%{y:$,.0f}<extra></extra>"))
+
     ct.style(
         fig,
         # Matched to the statistics panel beside it so the two align top and
@@ -583,17 +669,21 @@ def _render_card(p, api_key):
         # Not a filled area, and forcing the base to zero would flatten a curve
         # whose whole story is the move above the invested line.
         y=ct.value_axis(zero=False),
+        # Below the plot, not floating inside it — the legend was covering the
+        # top-right of the plot area, which is where a rising series ends up.
+        legend="bottom",
+        # The default bottom padding (4 + 26) has to seat the date labels AND
+        # the legend beneath them; at the default the labels sat on the
+        # container's edge.
+        margin=dict(l=ct.layout.plot_padding["left"],
+                    r=ct.layout.plot_padding["right"],
+                    t=ct.layout.plot_padding["top"] + 22, b=72),
     )
     _ccol.plotly_chart(fig, use_container_width=True, key=f"curve_{pid}")
 
     # Holdings table
     if res["holdings"]:
-        hdf = pd.DataFrame(res["holdings"])
-        hdf = hdf.rename(columns={
-            "ticker": "Ticker", "shares": "Shares", "last_price": "Price",
-            "value": "Value", "weight_pct": "Weight %", "gain_pct": "Gain %"})
-        show = ["Ticker", "Shares", "Price", "Value", "Weight %", "Gain %"]
-        st.dataframe(hdf[show], use_container_width=True, hide_index=True)
+        st.markdown(_holdings_table(res["holdings"]), unsafe_allow_html=True)
 
     for w in res.get("warnings", []):
         st.caption(f"{w}")

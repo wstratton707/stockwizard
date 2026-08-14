@@ -173,7 +173,9 @@ def _build_cover(wb, preferences, final_weights, backtest_metrics, mc_summary, s
         ("Holdings",            len(final_weights)),
         ("Final Portfolio Value", f"${backtest_metrics.get('Final Value',0):,.2f}"),
         ("Total Return",        f"{backtest_metrics.get('Total Return',0):.2f}%"),
-        ("Sharpe Ratio",        backtest_metrics.get("Sharpe Ratio","N/A")),
+        ("Sharpe Ratio",        (f"{backtest_metrics['Sharpe Ratio']:.2f}"
+                                 if isinstance(backtest_metrics.get("Sharpe Ratio"), (int, float))
+                                 else "N/A")),
     ]
     ws.cell(row=snap_row, column=2, value="Portfolio Snapshot").font = Font(
         bold=True, size=11, color=DARK_BLUE, name="Arial")
@@ -231,7 +233,9 @@ def _build_dashboard(wb, preferences, final_weights, stock_metrics,
         # too short to annualise, and .get would hand that None straight to openpyxl.
         ("Annualised Return %",    backtest_metrics.get("Ann. Return") or 0,       '0.00%',           ("gt",0)),
         ("vs S&P 500",             backtest_metrics.get("vs S&P 500","N/A"),       None,              None),
-        ("Sharpe Ratio",           backtest_metrics.get("Sharpe Ratio",0),         '0.000',           ("gt",1)),
+        # `or 0` for the same reason as Ann. Return above: the key exists and is
+        # None when the window was too short to justify a Sharpe.
+        ("Sharpe Ratio",           backtest_metrics.get("Sharpe Ratio") or 0,      '0.00',            ("gt",1)),
         ("Sortino Ratio",          backtest_metrics.get("Sortino Ratio",0),        '0.000',           ("gt",1)),
         ("Max Drawdown",           backtest_metrics.get("Max Drawdown",0),         '0.00%',           ("gt",-20)),
         ("Ann. Volatility",        backtest_metrics.get("Ann. Volatility",0),      '0.00%',           None),

@@ -1780,3 +1780,63 @@ section[data-testid="stMain"], .stMain { scroll-behavior: smooth; }
 /* The row is 28px and the panel is dense, so a tooltip anchored to the last
    row of a group needs to sit above its trigger and clear the neighbours. */
 .vf-row .tooltip-wrap { position: relative; }
+
+/* ── Tracked-portfolio holdings grid ─────────────────────────────────────────
+   Replaces st.dataframe, which shipped a floating toolbar, a fixed-height
+   scroll region that clipped the final row in half, and no way to colour a
+   single column. Same rules as .val-facts beside it: hairline row rules, no
+   zebra, no vertical borders, tabular figures throughout. */
+.hold-wrap{
+  border:1px solid var(--border); border-radius:var(--r-chart);
+  background:var(--surface); overflow-x:auto; margin-top:0.5rem;
+}
+.hold{
+  width:100%; border-collapse:collapse;
+  font-family:var(--font-chart); font-size:12px;
+  font-variant-numeric:tabular-nums;
+}
+/* Streamlit's base stylesheet puts a 0.67px hairline on every side of every
+   cell. Horizontal rules are wanted; vertical ones turn a data grid into a
+   spreadsheet, so they are cancelled explicitly rather than by hoping. */
+.hold th, .hold td{ border-left:none !important; border-right:none !important; }
+.hold th{
+  font-size:10px; text-transform:uppercase; letter-spacing:0.08em;
+  color:var(--muted); font-weight:600;
+  padding:10px 14px 6px; border-bottom:1px solid var(--border);
+  white-space:nowrap; background:transparent;
+}
+.hold td{
+  padding:0 14px; height:30px; color:var(--text);
+  border-bottom:1px solid var(--border); white-space:nowrap;
+}
+.hold tbody tr:last-child td{ border-bottom:none; }
+/* Ticker reads as a label, so it stays left and gains weight. Every other
+   column is a number and is right-aligned so digits line up down the column. */
+.hold .t{ text-align:left;  font-weight:600; letter-spacing:0.01em; }
+.hold .n{ text-align:right; }
+.hold td.pos{ color:var(--green); }
+.hold td.neg{ color:var(--red); }
+/* Weight cell: the bar sits behind the number rather than in its own column,
+   so concentration is scannable without spending a column on it. */
+.hold td.w{ position:relative; }
+.hold .wbar{
+  position:absolute; right:14px; top:50%; transform:translateY(-50%);
+  height:15px; border-radius:2px; z-index:0;
+  /* A 10% tint of the accent rather than --surface3, which at #eef2f7 on a
+     white card was too close to the page to read as a bar at all. */
+  background:rgba(29,78,216,0.10);
+}
+.hold .wnum{ position:relative; z-index:1; }
+.hold tfoot td{
+  border-top:1px solid var(--border); border-bottom:none;
+  font-weight:600; color:var(--text); height:32px;
+}
+@media (max-width: 640px){
+  .hold{ font-size:11px; }
+  .hold th, .hold td{ padding-left:10px; padding-right:10px; }
+  /* Shares and Price are reference detail; Value, Weight and Gain are the
+     answer. On a phone the table would otherwise scroll Gain — the one column
+     carrying colour and meaning — off the right edge. */
+  .hold th:nth-child(2), .hold td:nth-child(2),
+  .hold th:nth-child(3), .hold td:nth-child(3){ display:none; }
+}

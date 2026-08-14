@@ -664,7 +664,29 @@ def compute_backtest_metrics(backtest_df, starting_capital):
     # Sharpe/Sortino with risk-free rate (excess return basis)
     rf_daily = get_risk_free_rate() / 252
     excess   = daily_ret - rf_daily
-    sharpe   = (excess.mean() * 252) / (excess.std() * np.sqrt(252)) if excess.std() > 0 else 0
+
+    # Sharpe is gated at the source, for the same reason ann_ret is above: a
+    # ratio computed over a fortnight and multiplied by sqrt(252) is not a
+    # Sharpe ratio, it is noise wearing one's clothes. A two-week-old tracked
+    # portfolio reported **7.157** — a number no real portfolio produces, quoted
+    # to three decimals, on the same screen where the risk panel correctly said
+    # "Needs 1 month". The panel was gated and this value was not.
+    #
+    # Gating here rather than at each render is what makes it one source of
+    # truth: the on-screen panel, the summary line, the Word review and the
+    # PowerPoint deck all read this dict, and all of them now get None together.
+    #
+    # Callers must treat None as "not enough data" — see the `or 0` note in
+    # portfolio_excel, which learned this lesson from Ann. Return.
+    _MIN_SHARPE_OBS   = 21     # ~1 month of sessions; matches the UI's gate text
+    _MAX_PLAUSIBLE_SH = 4.0    # above this the input is wrong, not the portfolio
+
+    if excess.std() > 0 and _n_obs >= _MIN_SHARPE_OBS:
+        sharpe = (excess.mean() * 252) / (excess.std() * np.sqrt(252))
+        if not np.isfinite(sharpe) or abs(sharpe) > _MAX_PLAUSIBLE_SH:
+            sharpe = None
+    else:
+        sharpe = None
     # Downside deviation about zero over the whole series, not the std of the
     # losing days. Still gated on ~1 month of down days: below that the estimate
     # is too thin to quote regardless of which formula produced it.
@@ -700,7 +722,9 @@ def compute_backtest_metrics(backtest_df, starting_capital):
         "Total Return":       round(total_ret, 2),
         "Ann. Return":        (round(ann_ret, 2) if ann_ret is not None else None),
         "Ann. Volatility":    round(ann_vol, 2),
-        "Sharpe Ratio":       round(sharpe, 3),
+        # 2dp, not 3: a third decimal on a ratio estimated from a few hundred
+        # daily observations claims precision the estimate does not have.
+        "Sharpe Ratio":       (round(sharpe, 2) if sharpe is not None else None),
         "Sortino Ratio":      round(sortino, 3),
         "Max Drawdown":       round(max_dd, 2),
         "Best Month":         round(best_m, 2),

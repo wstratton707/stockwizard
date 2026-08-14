@@ -313,7 +313,8 @@ def build_portfolio_review_pptx(portfolio_name, tracked, profiles):
          (m.get("vs S&P 500") or 0) >= 0 if isinstance(m.get("vs S&P 500"), (int, float)) else None),
         ("Volatility", _pc(stats.get("vol"))),
         ("Max drawdown", _pc(m.get("Max Drawdown"))),
-        ("Sharpe ratio", m.get("Sharpe Ratio", "—")),
+        ("Sharpe ratio", f"{m['Sharpe Ratio']:.2f}"
+                         if isinstance(m.get("Sharpe Ratio"), (int, float)) else "—"),
         ("Dividend yield", _w(stats.get("div_yield"))),
     ], 7.0, 2.75, 5.85, col_w=2.6, row_h=0.55)
 
@@ -375,7 +376,9 @@ def build_portfolio_review_pptx(portfolio_name, tracked, profiles):
         ("Beta", "—" if stats["beta"] is None else f"{stats['beta']:.2f}"),
         ("Volatility", _hold if _thin else _pc(stats.get("vol"))),
         ("Max drawdown", _hold if _thin else _pc(m.get("Max Drawdown"))),
-        ("Sharpe", _hold if _thin else str(m.get("Sharpe Ratio", "—"))),
+        # None means the source declined to quote one — same message as _hold.
+        ("Sharpe", _hold if (_thin or m.get("Sharpe Ratio") is None)
+                   else f"{m['Sharpe Ratio']:.2f}"),
     ]
     for i, (lbl, val) in enumerate(risk_tiles):
         _stat_tile(s, 0.45 + i * 3.18, 1.5, 3.0, 1.0, lbl, val)
