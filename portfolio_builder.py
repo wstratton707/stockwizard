@@ -1425,7 +1425,7 @@ def _render_step_3():
     _section_header("Backtest Results")
     cols = st.columns(4)
     gain = bt_met.get("Total Gain/Loss", 0)
-    for col, label, value, color in [
+    for _card in [
         (cols[0], "Final Value",      f"${bt_met.get('Final Value',0):,.0f}",    GREEN),
         (cols[1], "Total Return",     f"{bt_met.get('Total Return',0):.1f}%",    GREEN if bt_met.get("Total Return",0)>0 else RED),
         (cols[2], "vs S&P 500",       f"{bt_met.get('vs S&P 500',0):.1f}%" if isinstance(bt_met.get('vs S&P 500'), float) else "N/A", GREEN if isinstance(bt_met.get('vs S&P 500'), float) and bt_met.get('vs S&P 500',0)>0 else RED),
@@ -1476,7 +1476,7 @@ def _render_step_3():
 
     st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
     cols2 = st.columns(4)
-    for col, label, value, color in [
+    for _card in [
         # `Ann. Return` is None under ~3 months of history — compute_backtest_metrics
         # refuses to annualise a window too short to justify it, rather than
         # scaling a few weeks into an impossible yearly figure.
@@ -1975,7 +1975,7 @@ def _render_step_4():
 
     # Probability gauges
     cols = st.columns(3)
-    for col, label, value, color in [
+    for _card in [
         (cols[0], "Prob. of Any Gain",   prob_gain_val,   GREEN),
         (cols[1], "Prob. of Doubling",    prob_double_val, BLUE),
         (cols[2], "Prob. of >20% Loss",   prob_loss_val,   RED),
