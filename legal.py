@@ -34,9 +34,14 @@ import streamlit as st
 _UNSET = ""
 
 ENTITY_NAME     = _UNSET   # e.g. "QuantWizard LLC", or your own name if unincorporated
-CONTACT_EMAIL   = _UNSET   # a real monitored inbox — this becomes public
 GOVERNING_STATE = _UNSET   # e.g. "Indiana" — the state whose law governs disputes
 EFFECTIVE_DATE  = _UNSET   # e.g. "12 August 2026" — the day you publish them
+
+# Role-based on purpose. A privacy-deletion request should not be addressed to
+# an individual: this address has to outlive a name change, a co-founder, or a
+# handover, because it is printed in documents people rely on. Personal mail
+# goes to wyatt@ instead.
+CONTACT_EMAIL   = "service@quantwizard.co"
 
 # Kept in one place so the two documents can never quote different dates.
 LAST_UPDATED = EFFECTIVE_DATE
