@@ -301,8 +301,32 @@ _CSS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "styles.css
 
 @st.cache_data(show_spinner=False)
 def _load_css(path):
+    """Read styles.css and strip its comments before shipping it to the browser.
+
+    styles.css is heavily commented — deliberately, they explain why rules exist
+    — but Streamlit emits this <style> block INSIDE <body>, not <head>, and
+    Google's snippet extractor sampled the prose in those comments. The search
+    result for "quantwizard" read:
+
+        QuantWizard
+        There is one action now ("Generate research package") with format as a
+        secondary radio, so borrowing another product's brand colour …
+
+    which is a note to a developer, presented to the public as a description of
+    the product. The comments belong in the repository, not in the payload: they
+    are ~14KB of English that no browser reads and that a crawler can mistake for
+    content. Stripping them also trims what crosses the wire on every rerun.
+
+    Deliberately conservative — only /* ... */ pairs, which is the only comment
+    syntax CSS has.
+    """
+    import re
     with open(path, "r", encoding="utf-8") as f:
-        return f"<style>\n{f.read()}\n</style>"
+        css = f.read()
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    # Collapse the blank lines the comments left behind.
+    css = re.sub(r"\n\s*\n+", "\n", css).strip()
+    return f"<style>\n{css}\n</style>"
 
 
 st.markdown(_load_css(_CSS_PATH), unsafe_allow_html=True)
