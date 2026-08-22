@@ -247,6 +247,63 @@ def style(fig, *, height=None, x=None, y=None, y2=None, legend="top-right",
     return fig
 
 
+# ── Return since the start of the window ─────────────────────────────────────
+
+def since_start(values, value_fmt="$%{y:,.2f}", name=None):
+    """(customdata, hovertemplate) adding "% since <start>" to a hover.
+
+    Zoom used to be the only way to interrogate a chart, and it was the wrong
+    tool: dragging a box around a region answers "what did this look like
+    magnified", when the question a reader actually has is "how much is this up
+    from where it started". That is one number, and it can simply be shown.
+
+    Pass the same series you passed as `y`. The first finite value is the base;
+    every point carries its percent change from it, so hovering anywhere reads
+    the cumulative return to that date without arithmetic.
+
+    A zero or missing base leaves the cell blank rather than dividing by it —
+    a portfolio can legitimately open at zero before its first contribution.
+    """
+    import math
+
+    base = None
+    for v in values:
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(fv) and fv != 0:
+            base = fv
+            break
+
+    # The percentage is formatted HERE, in Python, and shipped as a finished
+    # string. Plotly ignored the `:+.1f` spec on customdata in x-unified mode and
+    # printed the raw float — "3.8999999999999924% since start". Rather than
+    # discover which combination of hovermode and indexing it does honour,
+    # customdata carries text and the template just prints it.
+    def _pct(v):
+        if base is None:
+            return ""
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            return ""
+        if not math.isfinite(fv):
+            return ""
+        return f"{(fv / base - 1.0) * 100.0:+.1f}% since start"
+
+    custom = [[_pct(v)] for v in values]
+
+    # Built by concatenation, not f-string interpolation: value_fmt already
+    # contains Plotly's own %{...} braces and must pass through untouched.
+    tail = "<extra>" + name + "</extra>" if name else "<extra></extra>"
+    tmpl = (value_fmt
+            + "<span style='color:" + color.ink_muted + "'>"
+            + "  %{customdata[0]}</span>"
+            + tail)
+    return custom, tmpl
+
+
 # ── Region shading ───────────────────────────────────────────────────────────
 # All draw below the data (`layer="below"`) and carry no stroke, so they read as
 # context rather than as another series.

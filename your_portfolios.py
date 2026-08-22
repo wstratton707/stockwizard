@@ -662,9 +662,15 @@ def _render_card(p, api_key):
         # mode="lines" explicitly: Plotly's default for a short series is
         # lines+markers, which put a dot on all fourteen observations and read
         # as a dashboard. Markers are for events, not for every point.
+        # Every series carries its own return since inception, so hovering
+        # anywhere answers "how far is this up from where it started" for the
+        # portfolio, the benchmark and the money put in — side by side, under
+        # one crosshair. That is the question zoom was being misused to ask.
+        _custom, _tmpl = ct.since_start(list(_y), value_fmt="%{y:$,.0f}",
+                                        name=_name)
         fig.add_trace(go.Scatter(
             x=curve.index, y=_y, name=_name, mode="lines", line=_line,
-            hovertemplate="%{y:$,.0f}<extra></extra>"))
+            customdata=_custom, hovertemplate=_tmpl))
 
     ct.style(
         fig,
