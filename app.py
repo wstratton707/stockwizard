@@ -566,12 +566,15 @@ _logo_html = (
 # ── Ticker tape ──────────────────────────────────────────────────────────────
 def _tape_html(items):
     items_html = ""
-    for sym, px, chg, up in items:
+    # `price`, not `px` — plotly.express is imported as px at module scope, and a
+    # loop variable of the same name shadows it inside this function. Harmless
+    # today because nothing here plots, and a silent trap for whoever first does.
+    for sym, price, chg, up in items:
         chg_class = "t-up" if up else "t-dn"
         arrow     = "▲" if up else "▼"
         chg_part  = f'<span class="{chg_class}">{arrow} {chg}</span>' if chg else ""
         items_html += (f'<span class="t-item"><span class="t-sym">{sym}</span>'
-                       f'<span class="t-px">{px}</span>{chg_part}</span>'
+                       f'<span class="t-px">{price}</span>{chg_part}</span>'
                        f'<span class="t-div">●</span>')
     doubled = items_html * 2  # seamless loop
     return f'<div class="ticker-tape-wrap"><div class="ticker-tape">{doubled}</div></div>'
