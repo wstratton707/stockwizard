@@ -173,7 +173,8 @@ def series_color(i):
 # ── The one entry point ──────────────────────────────────────────────────────
 
 def style(fig, *, height=None, x=None, y=None, y2=None, legend="top-right",
-          grid=True, crosshair=True, margin=None, bar_gap=None, **overrides):
+          grid=True, crosshair=True, margin=None, bar_gap=None, zoom=False,
+          **overrides):
     """Apply the house style to `fig`. Mutates and returns it.
 
     Parameters
@@ -184,6 +185,7 @@ def style(fig, *, height=None, x=None, y=None, y2=None, legend="top-right",
     legend     : "top-right" | "top-left" | "bottom" | None
     grid       : False strips horizontal gridlines (heatmaps, pies).
     crosshair  : False disables the hover spike.
+    zoom       : True re-enables drag-to-zoom. Off by default — see below.
     margin     : override the default padding dict.
     **overrides: passed straight to `update_layout`, so any chart can still
                  deviate deliberately — the point is that deviation becomes
@@ -214,10 +216,29 @@ def style(fig, *, height=None, x=None, y=None, y2=None, legend="top-right",
         ax_y["showgrid"] = False
     if crosshair:
         ax_x.update(spike_config())
+    # ── Zoom is off unless a chart asks for it ───────────────────────────────
+    # Plotly enables drag-to-zoom by default, and app.py hides the modebar for a
+    # cleaner look. Together those give you a chart you can zoom INTO but not
+    # OUT of: the only way back is a double-click nobody advertises. A stray
+    # trackpad drag would leave a Free Cash Flow chart showing one bar against a
+    # 90-105 axis, or a price chart with the line pinned to the bottom edge and
+    # most of the panel empty — permanently, from the reader's point of view.
+    #
+    # These are read-only analytical charts over a fixed window. Zoom was never
+    # the interaction anyone wanted here; reading a value off the line is, and
+    # the hover crosshair already does that. setdefault so a chart that sets
+    # `fixedrange` itself still wins.
+    ax_x.setdefault("fixedrange", not zoom)
+    ax_y.setdefault("fixedrange", not zoom)
     lay["xaxis"] = ax_x
     lay["yaxis"] = ax_y
     if y2 is not None:
-        lay["yaxis2"] = dict(y2)
+        ax_y2 = dict(y2)
+        ax_y2.setdefault("fixedrange", not zoom)
+        lay["yaxis2"] = ax_y2
+    if not zoom:
+        # Also stops click-drag starting a selection rectangle at all.
+        lay["dragmode"] = False
     if bar_gap is not None:
         lay["bargap"] = bar_gap
 
