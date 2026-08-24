@@ -477,7 +477,7 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
 
 
 def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=10,
-                  beta=None):
+                  beta=None, sector=None):
     """Two-stage unlevered DCF (FCFF) → fair value per share + upside/downside.
 
     `wacc` resolution order: an explicit rate wins; otherwise it is derived from
@@ -528,14 +528,55 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
 
     # Base FCF: average of up to the last 3 positive annual FCF values (the trend
     # array is oldest→newest); fall back to the single latest FCF.
-    fcf_hist = [x for x in (fundamentals.get("trend", {}).get("fcf") or [])
-                if isinstance(x, (int, float)) and x > 0]
+    _fcf_all  = [x for x in (fundamentals.get("trend", {}).get("fcf") or [])
+                 if isinstance(x, (int, float))]
+    fcf_hist  = [x for x in _fcf_all if x > 0]
+    _n_neg    = sum(1 for x in _fcf_all if x <= 0)
     base_fcf = (sum(fcf_hist[-3:]) / len(fcf_hist[-3:])) if fcf_hist else None
     if base_fcf is None:
         latest = fundamentals.get("fcf", {}).get("fcf")
         base_fcf = latest if (isinstance(latest, (int, float)) and latest > 0) else None
     if not base_fcf or base_fcf <= 0:
         return {"ok": False, "reason": "no positive free cash flow to project"}
+
+    # An unlevered FCF DCF assumes free cash flow means what it means for an
+    # operating company. For a bank or broker-dealer it does not: lending and
+    # trading-inventory swings dominate operating cash flow, so FCF is routinely
+    # and legitimately negative, and "net debt" is funding rather than leverage.
+    #
+    # Goldman Sachs is the case that surfaced this. Its FCF is negative in 6 of
+    # the last 10 filed years and −$47.2B in FY2025, yet the filter above keeps
+    # only the positive years and averages them into a +$10.9B base — discarding
+    # the majority of the record to manufacture something to grow. Net debt came
+    # in at $221.9B, which for a broker is the business model, not gearing.
+    #
+    # The model still runs, because refusing outright would be its own kind of
+    # wrong for a diversified financial. What it must not do is present the
+    # number without saying what it rests on, so the caveats travel with the
+    # result and every renderer can surface them.
+    # compute_fundamentals does not carry a sector, so callers pass one from
+    # company details; the fundamentals lookup is a fallback for callers that do.
+    _sector = " ".join([str(sector or "")]
+                       + [str(fundamentals.get(k) or "")
+                          for k in ("sector", "industry")]).lower()
+    _is_financial = any(t in _sector for t in (
+        "bank", "broker", "dealer", "insurance", "capital market",
+        "financial", "investment banking", "asset management"))
+
+    caveats = []
+    if _is_financial:
+        caveats.append(
+            "This is a financial-sector filer. An unlevered free-cash-flow DCF "
+            "assumes FCF means what it does for an operating company; for a bank "
+            "or broker it is dominated by lending and trading flows, and net debt "
+            "is funding rather than leverage. Treat the fair value as indicative "
+            "and prefer a residual-income or P/B-vs-ROE read.")
+    if _n_neg and fcf_hist:
+        caveats.append(
+            f"Base free cash flow averages the last {len(fcf_hist[-3:])} POSITIVE "
+            f"year(s); {_n_neg} of the {len(_fcf_all)} filed years were negative "
+            f"and were excluded. The base is therefore not representative of the "
+            f"full record.")
 
     net_debt = fundamentals.get("net_debt") or 0.0
     shares   = mcap / price
@@ -622,6 +663,11 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
         "price": price, "fair_value": fv_base,
         "upside": (fv_base / price - 1) if fv_base else None,
         "wacc": wacc, "wacc_basis": wacc_basis,
+        # Travels with the result so every renderer can surface it. A fair value
+        # for a broker-dealer, or one built by discarding the negative years, is
+        # not wrong so much as conditional — and the condition has to ship with
+        # the number rather than living in a methodology sheet two tabs away.
+        "caveats": caveats,
         "terminal_growth": terminal_growth, "years": years,
         "base_fcf": base_fcf, "base_growth": g_base, "net_debt": net_debt,
         "shares": shares, "market_implied_growth": implied_growth,
@@ -742,7 +788,14 @@ def compute_scorecard(fundamentals=None, dcf=None, momentum_score=None,
     if r_score is not None:
         rb = []
         if r.get("sharpe") is not None: rb.append(f"Sharpe {r['sharpe']:.2f}")
-        if r.get("max_dd") is not None: rb.append(f"Max DD {r['max_dd'] * 100:.0f}%")
+        # Named, because a second and shallower drawdown sits a few rows above
+        # it on the same sheet. The metrics block reports the worst 60-DAY
+        # rolling drawdown; this is the true peak-to-trough, which is what the
+        # bands above are calibrated for. Both are right and they disagree by
+        # design — for GS, -45.6% against -49% — so each has to say which it is
+        # at the point a reader meets it.
+        if r.get("max_dd") is not None:
+            rb.append(f"Max DD (peak-to-trough) {r['max_dd'] * 100:.0f}%")
         factors.append(("Risk", r_score, ", ".join(rb), 0.12))
 
     # ── Sentiment (Wall-Street consensus) ─────────────────────────────────────

@@ -106,7 +106,8 @@ def main():
                 break
     print(f"  market beta: {beta if beta is not None else 'unavailable — DCF will use its default rate'}")
     try:
-        dcf = dcf_valuation(fundamentals, price, beta=beta)
+        dcf = dcf_valuation(fundamentals, price, beta=beta,
+                            sector=details.get("Sector"))
     except Exception:
         dcf = None
 
@@ -154,7 +155,17 @@ def main():
     ret = df["Daily_Return"].dropna()
     ann_ret = ret.mean() * 252
     ann_std = ret.std() * np.sqrt(252)
-    downside = ret[ret < 0].std() * np.sqrt(252)
+    # downside_deviation, not ret[ret < 0].std() — the latter is the formula that
+    # module's docstring exists to warn against. It takes the spread of the losing
+    # days rather than the root-mean-square shortfall below zero over ALL days, so
+    # it understates the denominator and flatters the ratio.
+    #
+    # app.py and excel_builder both call downside_deviation; this script did not,
+    # so the sample workbook printed Sortino 1.04 in its metrics block (correct)
+    # and 0.99 in the prose paragraph two screens below (from here). One workbook,
+    # two answers, on the sample report linked from the home page.
+    from analysis import downside_deviation
+    downside = downside_deviation(ret)
     rfr = get_risk_free_rate()
     sharpe = (ann_ret - rfr) / ann_std if ann_std else np.nan
     sortino = (ann_ret - rfr) / downside if downside else np.nan

@@ -848,6 +848,17 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
                  "assumption there and it recalculates. ") + DISCLAIMER_SHORT
         row_cursor = _narrative_box(ws, row_cursor, note, height=70, italic=True, bg="FFF8E1")
         row_cursor += 1
+
+        # Conditions the fair value rests on, next to the fair value rather than
+        # in the Methodology sheet. dcf_valuation raises these when the filer is
+        # a bank or broker (where unlevered FCF is the wrong instrument) or when
+        # the base was built by discarding negative years. On a red ground,
+        # because they qualify the number immediately above them.
+        for _cav in (dcf.get("caveats") or []):
+            row_cursor = _narrative_box(ws, row_cursor, _cav, height=56,
+                                        italic=False, bg="FDECEA")
+        if dcf.get("caveats"):
+            row_cursor += 1
     else:
         sec_hdr(row_cursor, "Valuation — Reverse DCF & Fair Value")
         row_cursor += 1

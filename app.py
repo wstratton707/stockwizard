@@ -1619,9 +1619,12 @@ elif _page == "analysis":
                             if _beta is not None:
                                 break
                     try:
-                        _dcf_report = dcf_valuation(_fund_report,
-                                                    float(df["Close"].iloc[-1]),
-                                                    beta=_beta)
+                        _dcf_report = dcf_valuation(
+                            _fund_report, float(df["Close"].iloc[-1]),
+                            beta=_beta,
+                            # Lets the model say when an unlevered FCF DCF is the
+                            # wrong instrument for the filer — banks and brokers.
+                            sector=(company_details or {}).get("Sector"))
                     except Exception:
                         _dcf_report = {"ok": False}
 
