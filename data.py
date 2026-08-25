@@ -246,8 +246,16 @@ _SEC_CIK_MAP = None
 
 # XBRL us-gaap tag candidates — first one with data wins (tags vary by filer/era).
 _SEC_TAGS = {
+    # Order matters — first tag with data wins, so the operating-company tags stay
+    # first and nothing changes for them. The trailing three are what banks,
+    # brokers and insurers actually file: Goldman Sachs reports none of the four
+    # above, which is why its Revenue row rendered as em-dashes across all ten
+    # years and took Revenue YoY, Revenue CAGR, every margin and P/S down with it.
+    # RevenuesNetOfInterestExpense is GS's "Total net revenues" line.
     "revenues": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
-                 "SalesRevenueNet", "RevenueFromContractWithCustomerIncludingAssessedTax"],
+                 "SalesRevenueNet", "RevenueFromContractWithCustomerIncludingAssessedTax",
+                 "RevenuesNetOfInterestExpense", "InterestAndDividendIncomeOperating",
+                 "NoninterestIncome"],
     "cost_of_revenue": ["CostOfGoodsAndServicesSold", "CostOfRevenue", "CostOfGoodsSold"],
     "gross_profit": ["GrossProfit"],
     "operating_income_loss": ["OperatingIncomeLoss"],

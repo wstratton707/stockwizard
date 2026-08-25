@@ -723,7 +723,13 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
         # months, which is usually the more decision-relevant fact.
         periods = _relative_performance_periods(df)
         if periods:
-            hdr = ["Window", ticker, "S&P 500", "Relative"]
+            # "(pts)" in the header, not only in the cell's number format. The
+            # first two columns hold fractions and the third holds percentage
+            # points, so the values are on different scales even though all three
+            # render correctly on screen. Anyone reading the cells rather than
+            # the sheet — a script, or a reviewer — sees 0.0338 beside 5.08 and
+            # reasonably concludes the units are mixed and unmarked.
+            hdr = ["Window", ticker, "S&P 500", "Relative (pts)"]
             for ci, htxt in enumerate(hdr, 1):
                 c = ws.cell(row=row_cursor, column=ci, value=htxt)
                 c.font   = Font(name="Calibri", size=9, bold=True, color=WHITE)
@@ -1062,7 +1068,9 @@ def _build_price_sheet(wb, df, bar_size="day"):
     # Info banner when data is capped
     if truncated:
         ws_p.insert_rows(1)
-        note = (f"Note: Showing most recent {ROW_CAP} bars ({bar_size} data). "
+        note = (f"Note: Showing most recent {ROW_CAP} bars ({bar_size} data) to keep "
+                f"the workbook a readable size — this is a deliberate display cap, "
+                f"not a spreadsheet row limit. "
                 f"Full {len(full_df)}-bar history used for all calculations & charts. "
                 f"See Annual_Summary sheet for full year-by-year breakdown.")
         ws_p.merge_cells(f"A1:{get_column_letter(len(export_df.columns))}1")
@@ -1977,6 +1985,31 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
             operator="lessThan", formula=[f"$B${R_P}"],
             fill=PatternFill("solid", bgColor=BAD_FILL),
             font=Font(color=BAD_TEXT)))
+        # A static grid sitting beside live formulas is a trap: edit B22 or B23 —
+        # the exact thing "every shaded cell is editable" invites — and every
+        # other number on the sheet moves while these 25 stay put. Recomputing
+        # the full ten-year growth fade inside one array formula per cell would
+        # make it live, but it is fragile across Excel versions for what it buys.
+        #
+        # Instead the sheet notices. This cell is a formula over the same input
+        # cells the grid was built from, so the moment they no longer match the
+        # axis it was generated at, it says so in the sheet itself rather than
+        # leaving the reader to spot it.
+        _w_mid  = w_axis[len(w_axis) // 2]
+        _tg_mid = tg_axis[len(tg_axis) // 2]
+        _stale = ws.cell(
+            row=R_SENS0 + len(w_axis),
+            column=1,
+            value=(f'=IF(AND(ROUND($B${R_W},4)={round(_w_mid, 4)},'
+                   f'ROUND($B${R_TG},4)={round(_tg_mid, 4)}),'
+                   f'"Grid matches the assumptions above.",'
+                   f'"Assumptions changed — this grid was computed at '
+                   f'{_w_mid*100:.1f}% WACC / {_tg_mid*100:.1f}% terminal growth '
+                   f'and no longer matches the inputs. Regenerate to refresh it.")'))
+        _stale.font      = Font(name="Calibri", size=9, italic=True)
+        _stale.alignment = Alignment(wrap_text=True, vertical="center")
+        ws.merge_cells(start_row=_stale.row, start_column=1,
+                       end_row=_stale.row, end_column=1 + len(tg_axis))
         row_after = R_SENS0 + len(w_axis) + 1
     else:
         row_after = R_SENS_HDR + 1
