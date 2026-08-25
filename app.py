@@ -1737,6 +1737,21 @@ elif _page == "analysis":
                         _rdf = df
                     _rlabel = _rp.replace(" year", "Y").replace("s", "")
 
+                # The narrative must describe the window the workbook describes.
+                # `summary_text` above is built from `df` — the full 10-year pull
+                # — with Sharpe and Sortino from `dfm`, the 3-year risk window.
+                # That is right for the on-screen panel, which analyses the whole
+                # history, and wrong for a 5-year report: the Dashboard paragraph
+                # quoted a ten-year return beside five-year metric cells.
+                # Rebuild it here, where the report period is finally known, from
+                # one set of statistics measured on that period.
+                from analysis import window_stats as _win_stats
+                _rstats = _win_stats(_rdf)
+                _summary_win = generate_summary_paragraph(
+                    ticker_input, _rdf, company_details, mc_summary,
+                    _rstats["sharpe"], _rstats["sortino"],
+                    forecast_method=forecast_method, stats=_rstats)
+
                 _id_key, _buf_key = f"_{_kind}_id", f"_{_kind}_buf"
                 _report_id = f"{ticker_input}|{_rlabel}|{bar_size}"
                 _ready = st.session_state.get(_id_key) == _report_id
@@ -1758,7 +1773,7 @@ elif _page == "analysis":
                                         news_list=news_list, peer_df=peer_df,
                                         corr_matrix=corr_matrix,
                                         resistance_levels=resistance, support_levels=support,
-                                        summary_text=summary_text,
+                                        summary_text=_summary_win,
                                         bar_size=bar_size, fundamentals=_fund_report,
                                         analyst_data=_analyst_report, dcf=_dcf_report,
                                     )
@@ -1771,7 +1786,7 @@ elif _page == "analysis":
                                         ticker_input, _rdf, _rlabel,
                                         company_details=company_details,
                                         mc_sim_df=mc_sim_df, mc_summary=mc_summary,
-                                        news_list=news_list, summary_text=summary_text,
+                                        news_list=news_list, summary_text=_summary_win,
                                         fundamentals=_fund_report, dcf=_dcf_report,
                                     )
                                 else:
@@ -1780,7 +1795,7 @@ elif _page == "analysis":
                                         ticker_input, _rdf, _rlabel,
                                         company_details=company_details,
                                         mc_summary=mc_summary, news_list=news_list,
-                                        summary_text=summary_text,
+                                        summary_text=_summary_win,
                                         fundamentals=_fund_report,
                                         analyst_data=_analyst_report, dcf=_dcf_report,
                                         sector_df=sector_df, peer_df=peer_df,

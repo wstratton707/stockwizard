@@ -1140,9 +1140,31 @@ def _build_news_sheet(wb, news_list):
     style_header_row(ws_n)
     sent_fill = {"Positive": ("C6EFCE", "006100"), "Negative": ("FFC7CE", "9C0006"),
                  "Neutral":  ("FFF2CC", "7F6000")}
+
+    # Newest first. The feed arrives as whatever order the sources came back in,
+    # which produced a sheet with 07-30 above 08-25 and the sequence restarting
+    # partway down — two result sets appended without a merge. Unparseable dates
+    # sort last rather than crashing the sort.
+    def _news_dt(item):
+        try:
+            v = pd.to_datetime(item.get("Date"))
+            return None if pd.isna(v) else v.to_pydatetime()
+        except Exception:
+            return None
+    news_list = sorted(news_list, key=lambda it: (_news_dt(it) or datetime.min),
+                       reverse=True)
+
     for ni, item in enumerate(news_list, 2):
         for ci, key in enumerate(cols, 1):
             c = ws_n.cell(row=ni, column=ci, value=item.get(key, ""))
+            # A real datetime with a date format, not text. As a string the
+            # column will not sort, filter or feed a date axis — and the first
+            # thing anyone does with a news table is sort it by date.
+            if key == "Date":
+                _d = _news_dt(item)
+                if _d is not None:
+                    c.value = _d
+                    c.number_format = "yyyy-mm-dd"
             c.font   = Font(name="Calibri", size=10)
             c.border = _border()
             if ni % 2 == 0:
@@ -1252,13 +1274,25 @@ def _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary):
     ws_mc["B2"] = "Value"
     for cell in ws_mc[2]:
         _hdr_cell(cell, bg=MID_BLUE)
+    # _coerce_metric types the value but cannot know what it MEANS, so a price
+    # came out as a bare 327.37 and the simulation count as a bare 1000, on a
+    # sheet where every other price cell carries a currency format. The key says
+    # which is which, and the key is only in scope here.
+    _MC_PRICE_KEYS = {"Last Price", "Mean Forecast", "Median (P50)",
+                      "Bear Case (P5)", "Low Case (P25)",
+                      "Bull Case (P75)", "Best Case (P95)"}
+    _MC_COUNT_KEYS = {"Simulations", "Forecast Horizon (days)"}
     for i, (k, v) in enumerate(mc_summary.items(), 3):
         ws_mc.cell(row=i, column=1, value=k).font = Font(name="Calibri", size=10)
         val, vfmt = _coerce_metric(v)
         cv = ws_mc.cell(row=i, column=2, value=val)
         cv.font      = Font(name="Calibri", size=10, bold=True)
         cv.alignment = Alignment(horizontal="right")
-        if vfmt:
+        if k in _MC_PRICE_KEYS and isinstance(val, (int, float)):
+            cv.number_format = '"$"#,##0.00'
+        elif k in _MC_COUNT_KEYS and isinstance(val, (int, float)):
+            cv.number_format = '#,##0'
+        elif vfmt:
             cv.number_format = vfmt
     summary_end = 3 + len(mc_summary)
 

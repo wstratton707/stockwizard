@@ -347,9 +347,68 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
             return round(((cur / old) ** (1 / n) - 1) * 100, 1)
         return None
 
+    def _split_factor_to_oldest():
+        """Cumulative share-split factor between the oldest period and today.
+
+        EDGAR reports EPS and share counts AS FILED, so a split makes both
+        series discontinuous. Apple's FY2019 EPS is 11.89 on 4.65bn shares and
+        FY2020's is 3.28 on 17.53bn, because of the 4:1 in August 2020. A CAGR
+        taken across that boundary measures the split rather than the business:
+        (7.46 / 8.31)^(1/9) - 1 = -1.2% for a company whose net income compounded
+        at +10.4% over the same span, with a shrinking share count.
+
+        Splits are inferred from the diluted-share series itself, because we
+        carry no corporate-actions feed. An adjacent-period jump of more than
+        50% in share count is a split; ordinary issuance and buybacks do not
+        move a share count by half in a year. The raw ratio is rounded to a
+        whole number when it is close to one, since the measured jump also
+        contains a year of buybacks — Apple's is 3.77, which is a 4:1.
+        """
+        rows = len(inc)
+        factor = 1.0
+        for i in range(rows - 1):
+            new_sh = _fin_val(inc, "diluted_shares", i)
+            old_sh = _fin_val(inc, "diluted_shares", i + 1)
+            if not new_sh or not old_sh or old_sh <= 0:
+                continue
+            ratio = new_sh / old_sh
+            if 1 / 1.5 <= ratio <= 1.5:
+                continue
+
+            # A share count can also jump on a large equity raise, and treating
+            # that as a split would understate the old EPS and inflate the CAGR.
+            # The discriminator is that splits are declared in CLEAN ratios —
+            # 2:1, 4:1, 10:1 — while a raise lands wherever the raise lands.
+            # Apple's measured 3.77 is a 4:1 carrying a year of buybacks; a 1.6x
+            # issuance is not near any whole number and is left alone.
+            #
+            # Not an EPS-inverse test, which was the first attempt and was worse:
+            # it assumes earnings hold still across the split. Nvidia's did not,
+            # so its 10:1 showed an EPS ratio of 4 against a share ratio of 10,
+            # the check rejected a real split, and its EPS CAGR collapsed from
+            # 61.9% to 7.4% for a company whose net income went $0.6bn to $72.9bn.
+            fwd = ratio if ratio > 1.0 else 1.0 / ratio
+            whole = round(fwd)
+            if whole < 2 or abs(fwd - whole) / whole > 0.12:
+                continue                                       # not a clean split
+            factor = factor * whole if ratio > 1.0 else factor / whole
+        return factor
+
+    def eps_cagr_adjusted():
+        """EPS CAGR with the oldest endpoint restated onto today's share base."""
+        cur = _fin_val(inc, "diluted_earnings_per_share", 0)
+        n   = len(inc) - 1
+        old = _fin_val(inc, "diluted_earnings_per_share", n)
+        if not (cur and old and n >= 1):
+            return None
+        old_adj = old / _split_factor_to_oldest()
+        if old_adj <= 0:
+            return None
+        return round(((cur / old_adj) ** (1 / n) - 1) * 100, 1)
+
     growth = {"revenue_yoy": yoy("revenues"), "net_income_yoy": yoy("net_income_loss"),
               "eps_yoy": yoy("diluted_earnings_per_share"),
-              "revenue_cagr": cagr("revenues"), "eps_cagr": cagr("diluted_earnings_per_share")}
+              "revenue_cagr": cagr("revenues"), "eps_cagr": eps_cagr_adjusted()}
 
     valuation = {
         "pe": ratio(mcap, ni) if (mcap and ni and ni > 0) else None,
@@ -939,13 +998,58 @@ def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print, seed=4
     return pd.DataFrame(paths), summary
 
 
+def window_stats(df, rf=None):
+    """Every window-dependent headline statistic, computed once, in one place.
+
+    The narrative and the workbook's metric cells used to derive these
+    separately, which was fine until they were handed different frames. On a
+    5-year AAPL report the Dashboard summary quoted +1159.8% (ten years, the
+    full pull), Sharpe 0.69 and Sortino 1.03 (three years, the risk window) and
+    a -37.1% drawdown (ten years again), beside metric cells reading +114.2%,
+    0.55, 0.81 and -30.2% on the five-year report window. Same code, three
+    frames, four wrong numbers in the first paragraph a reader meets.
+
+    Pass the frame the report is actually about; every figure comes back
+    measured over it.
+    """
+    from constants import get_risk_free_rate
+    rf = get_risk_free_rate() if rf is None else rf
+    close = df["Close"]
+    ret = (df["Daily_Return"].dropna() if "Daily_Return" in df.columns
+           else close.pct_change().dropna())
+    ann_ret = float(ret.mean() * 252)
+    ann_vol = float(ret.std() * np.sqrt(252))
+    dsd     = downside_deviation(ret)
+    cum     = (1 + ret).cumprod()
+    return {
+        "period_ret":   float(close.iloc[-1] / close.iloc[0] - 1) * 100,
+        "ann_ret":      ann_ret * 100,
+        "ann_vol":      ann_vol * 100,
+        "sharpe":       ((ann_ret - rf) / ann_vol) if ann_vol else float("nan"),
+        "sortino":      ((ann_ret - rf) / dsd) if dsd else float("nan"),
+        # Both drawdowns, named. They are different measures and the report
+        # shows both; neither may stand unlabelled beside the other.
+        "dd_60d":       (float(df["Drawdown_60d"].min()) * 100
+                         if "Drawdown_60d" in df.columns else float("nan")),
+        "dd_peak_trough": float((cum / cum.cummax() - 1).min()) * 100,
+        "n_obs":        int(len(close)),
+    }
+
+
 def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, sortino,
-                               forecast_method="Monte Carlo"):
+                               forecast_method="Monte Carlo", stats=None):
+    """`stats` from window_stats(df). When given, nothing here is recomputed —
+    the paragraph formats numbers it was handed. Callers that pass a frame but
+    no stats get them derived from that same frame, which is safe; passing a
+    frame from one window and ratios from another is what this exists to stop."""
+    if stats is None:
+        stats = window_stats(df)
+        sharpe = stats["sharpe"] if sharpe is None else sharpe
+        sortino = stats["sortino"] if sortino is None else sortino
     latest       = df.iloc[-1]
-    first        = df.iloc[0]
-    period_ret   = (latest["Close"] / first["Close"] - 1) * 100
+    period_ret   = stats["period_ret"]
     vol_20d      = latest.get("Volatility_20d", np.nan)
-    drawdown_60d = df["Drawdown_60d"].min() * 100
+    drawdown_60d = stats["dd_60d"]
 
     try:
         rsi = float(latest.get("RSI14", np.nan))
