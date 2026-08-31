@@ -57,14 +57,23 @@ def _rgba(hex_color, alpha):
 
 # ── Axes ─────────────────────────────────────────────────────────────────────
 
-def value_axis(prefix="$", tick_format=",.0f", zero=True, **kw):
-    """Labelled currency axis. Left-hand side, in the 44px gutter.
+def value_axis(prefix="$", tick_format=",.0f", zero=True, side="left", **kw):
+    """Labelled currency axis. Left-hand side by default, in the 44px gutter.
 
     `zero=True` pins the base at zero, which is required for any chart with a
     filled area and harmless for most line charts.
+
+    `side="right"` is the convention for a price-over-time chart, and every
+    finance site follows it for the same reason: a price series is read
+    left-to-right, so the eye finishes at the newest bar on the right edge and
+    the axis it needs to read against should be the one it has just arrived at.
+    A left axis makes the reader traverse the whole plot backwards to price the
+    latest point. Use it for price; keep the left default for everything whose
+    x-axis is not time-ordered.
     """
     ax = dict(
         tickprefix=prefix, tickformat=tick_format,
+        side=side,
         nticks=6,
         tickfont=dict(size=font.size.axis, color=color.ink_muted, family=font.data),
         gridcolor=color.grid, griddash="solid", gridwidth=stroke.grid,
@@ -104,6 +113,9 @@ def time_axis(fy_ticks=True, **kw):
         tickfont=dict(size=font.size.axis, color=color.ink_muted, family=font.data),
         showgrid=False, showline=False, zeroline=False,
         ticks="outside", ticklen=3, tickcolor=color.rule,
+        # Belt and braces with MIN_BOTTOM_MARGIN: automargin only ever GROWS the
+        # margin, so a long or rotated label still can't be cut off.
+        automargin=True,
     )
     if fy_ticks:
         ax.update(tickformat="%Y", dtick="M12")
@@ -130,6 +142,7 @@ def category_axis(**kw):
         type="category",
         tickfont=dict(size=font.size.axis, color=color.ink_muted, family=font.data),
         showgrid=False, showline=False, zeroline=False,
+        automargin=True,
     )
     ax.update(kw)
     return ax
@@ -172,6 +185,34 @@ def series_color(i):
 
 # ── The one entry point ──────────────────────────────────────────────────────
 
+# Bottom padding has to clear an OUTSIDE tick (3px), an 11px tick label and its
+# descenders. The default was 30px, which fits the glyphs by about a pixel — and
+# Streamlit sizes the chart iframe to exactly the figure height, so anything that
+# overflows is cut rather than scrolled. Date labels came out visibly clipped on
+# the Analysis page.
+#
+# Raising the default alone would not have fixed it: two dozen charts pass their
+# own `margin=` and most of them said b=30. So the floor is enforced here rather
+# than left to each call site, where the next chart added would miss it again.
+# Charts with no cartesian x-axis (pie, treemap, indicator) are exempt — several
+# deliberately use b=0, and padding under a pie is just dead space.
+MIN_BOTTOM_MARGIN = 44
+
+_NO_XAXIS = {"pie", "sunburst", "treemap", "funnelarea", "indicator"}
+
+
+def _bottom_margin(fig, margin: dict) -> dict:
+    """Return `margin` with `b` raised to the floor where an x-axis is drawn."""
+    try:
+        if fig.data and all(getattr(t, "type", "") in _NO_XAXIS for t in fig.data):
+            return margin
+    except Exception:
+        pass
+    m = dict(margin)
+    m["b"] = max(m.get("b", 0) or 0, MIN_BOTTOM_MARGIN)
+    return m
+
+
 def style(fig, *, height=None, x=None, y=None, y2=None, legend="top-right",
           grid=True, crosshair=True, margin=None, bar_gap=None, zoom=False,
           **overrides):
@@ -197,8 +238,9 @@ def style(fig, *, height=None, x=None, y=None, y2=None, legend="top-right",
         template=None,
         plot_bgcolor=color.paper,
         paper_bgcolor=_TRANSPARENT,
-        margin=margin or dict(l=pad["left"], r=pad["right"],
-                              t=pad["top"] + 22, b=pad["bottom"] + 26),
+        margin=_bottom_margin(fig, margin or dict(
+            l=pad["left"], r=pad["right"],
+            t=pad["top"] + 22, b=pad["bottom"] + 44)),
         font=dict(family=font.data, color=color.ink_muted, size=font.size.grid),
         hovermode="x unified" if crosshair else "closest",
         hoverlabel=hover(),

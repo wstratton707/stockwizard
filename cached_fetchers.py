@@ -191,4 +191,4 @@ def cached_detect_support_resistance(ticker, window_key, _df):
 @st.cache_data(ttl=_TTL_MEDIUM, max_entries=_MAX_ENTRIES, show_spinner=False)
 def cached_build_correlation_matrix(ticker, window_key, benchmarks_tuple, _df):
     benchmarks = list(benchmarks_tuple) if benchmarks_tuple else None
-    return _build_correlation_matrix(_df, benchmarks)
+    return _build_correlation_matrix(_df, benchmarks, label=ticker)

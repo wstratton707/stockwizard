@@ -2913,39 +2913,84 @@ color:var(--muted);background:var(--surface2)}
             with _ctrl7:
                 _show_tag   = st.checkbox("Marker", value=True, key="main_show_tag")
 
+            # ── Range control ────────────────────────────────────────────
+            # This used to be Plotly's in-plot `rangeselector`, which changes the
+            # x-range CLIENT-side and leaves the y-range alone. On a 15-year
+            # series that made every short window unreadable: picking 1Y kept a
+            # y-axis spanning $0-$340 while the year's prices lived between $210
+            # and $340, so two thirds of the panel was empty fill and the actual
+            # movement was squeezed into the top third. (Yahoo's 1Y view spans
+            # 225-350 — fitted to the window, which is the whole point of
+            # choosing a window.)
+            #
+            # Slicing the frame here instead means the y-axis autoranges over
+            # exactly what is on screen, the tick format can suit the span, and
+            # the rendered figure is the whole truth — no client-side state that
+            # a screenshot or an export would miss.
+            _RANGES = [("1M", 31), ("3M", 92), ("6M", 183),
+                       ("1Y", 365), ("3Y", 1095), ("All", None)]
+            _span_days = (pd.to_datetime(df["Date"].iloc[-1])
+                          - pd.to_datetime(df["Date"].iloc[0])).days
+            # A button earns its place only if it shows LESS than the whole
+            # series; otherwise it is "All" under another name.
+            _range_opts = [lbl for lbl, d in _RANGES
+                           if d is None or _span_days > d * 1.15]
+            # The widget key persists across tickers. Analysing a 15-year name
+            # and then a recent listing would leave "3Y" selected on a control
+            # that no longer offers it, which Streamlit treats as an error
+            # rather than a fallback — so clear a selection this ticker can't
+            # honour before the widget is built.
+            if st.session_state.get("main_chart_range") not in _range_opts:
+                st.session_state.pop("main_chart_range", None)
+            st.markdown('<div class="field-label" style="margin-top:0.35rem">Range</div>',
+                        unsafe_allow_html=True)
+            _range_sel = st.radio("Range", _range_opts,
+                                  index=len(_range_opts) - 1, horizontal=True,
+                                  key="main_chart_range", label_visibility="collapsed")
+            _range_days = dict(_RANGES)[_range_sel]
+            if _range_days is None:
+                _cdf = df
+            else:
+                _cutoff = pd.to_datetime(df["Date"].iloc[-1]) - pd.Timedelta(days=_range_days)
+                _cdf = df[pd.to_datetime(df["Date"]) >= _cutoff]
+                if len(_cdf) < 2:
+                    _cdf = df
+            # Tick density and label shape follow the window: "12 Mar" reads
+            # wrong across fifteen years and "'26" reads wrong across one month.
+            _shown_days = (pd.to_datetime(_cdf["Date"].iloc[-1])
+                           - pd.to_datetime(_cdf["Date"].iloc[0])).days
+            _tickfmt = ("%d %b" if _shown_days <= 190 else
+                        "%b '%y" if _shown_days <= 1200 else "%Y")
+
             fig = go.Figure()
 
-            # Compact y-axis padding so the chart breathes
-            _close_min = float(df["Close"].min())
-
             # ── Price — line / area / candle depending on selection ───────────
-            if _chart_type == "Candlestick" and {"Open","High","Low","Close"}.issubset(df.columns):
+            if _chart_type == "Candlestick" and {"Open","High","Low","Close"}.issubset(_cdf.columns):
                 fig.add_trace(go.Candlestick(
-                    x=df["Date"], open=df["Open"], high=df["High"],
-                    low=df["Low"], close=df["Close"],
+                    x=_cdf["Date"], open=_cdf["Open"], high=_cdf["High"],
+                    low=_cdf["Low"], close=_cdf["Close"],
                     name="Price",
                     increasing_line_color=ct.color.positive, decreasing_line_color=ct.color.negative,
                     increasing_fillcolor=ct.color.positive, decreasing_fillcolor=ct.color.negative,
                 ))
             elif _chart_type == "Line":
                 fig.add_trace(go.Scatter(
-                    x=df["Date"], y=df["Close"],
+                    x=_cdf["Date"], y=_cdf["Close"],
                     name="Price",
                     line=dict(color=ct.color.ink, width=ct.stroke.price),
                     hovertemplate="$%{y:,.2f}<extra>Price</extra>",
                 ))
             else:  # Area (default)
-                # Invisible base trace at min price — used for "tonexty" fill
+                # "tozeroy", not an invisible base trace at the series minimum.
+                # That base trace spanned the full width at a constant y, so it
+                # dragged the axis down to the all-time low no matter what was
+                # selected. tozeroy fills to the bottom of the plot and is
+                # clipped there, which looks identical and constrains nothing.
                 fig.add_trace(go.Scatter(
-                    x=df["Date"], y=[_close_min] * len(df),
-                    line=dict(color="rgba(0,0,0,0)", width=0),
-                    showlegend=False, hoverinfo="skip",
-                ))
-                fig.add_trace(go.Scatter(
-                    x=df["Date"], y=df["Close"],
+                    x=_cdf["Date"], y=_cdf["Close"],
                     name="Price",
                     line=dict(color=ct.color.ink, width=ct.stroke.price),
-                    fill="tonexty",
+                    fill="tozeroy",
                     # A brand tint, not an ink tint: ink at 5% on white renders as
                     # flat grey, which is the exact bland look this redesign is
                     # meant to remove.
@@ -2963,9 +3008,9 @@ color:var(--muted);background:var(--surface2)}
                 (200, ct.color.brand,      1.0, "longdash", "MA 200", _show_ma200),
             ]
             for ma, color, width, dash, label, enabled in _ma_cfg:
-                if enabled and f"MA{ma}" in df.columns:
+                if enabled and f"MA{ma}" in _cdf.columns:
                     fig.add_trace(go.Scatter(
-                        x=df["Date"], y=df[f"MA{ma}"],
+                        x=_cdf["Date"], y=_cdf[f"MA{ma}"],
                         name=label,
                         line=dict(color=color, width=width, dash=dash),
                         opacity=0.9,
@@ -2973,28 +3018,43 @@ color:var(--muted);background:var(--surface2)}
                     ))
 
             # ── Volume bars on secondary axis (optional) ──────────────────────
-            if _show_vol and "Volume" in df.columns:
+            if _show_vol and "Volume" in _cdf.columns:
                 _vol_colors = ["#059669" if c >= o else "#dc2626"
-                               for c, o in zip(df["Close"], df["Open"])] \
-                              if "Open" in df.columns else "#94a3b8"
+                               for c, o in zip(_cdf["Close"], _cdf["Open"])] \
+                              if "Open" in _cdf.columns else "#94a3b8"
                 fig.add_trace(go.Bar(
-                    x=df["Date"], y=df["Volume"],
+                    x=_cdf["Date"], y=_cdf["Volume"],
                     name="Volume", marker_color=_vol_colors,
                     opacity=0.35, yaxis="y2",
                     hovertemplate="%{y:,.0f}<extra>Volume</extra>",
                 ))
 
-            # ── S/R lines — clamped to visible y-range so labels don't float ─
-            _y_min = float(df["Close"].min())
-            _y_max = float(df["Close"].max())
-            _y_pad = (_y_max - _y_min) * 0.05
-            _y_floor = _y_min - _y_pad
+            # ── Visible y-range ──────────────────────────────────────────────
+            # Set explicitly rather than left to autorange, for one reason:
+            # "tozeroy" counts the fill's own extent, so an area chart always
+            # autoranges down to $0 however narrow the price band is. That is
+            # what left the 1Y view spanning $0-$340 for a year that traded
+            # between $226 and $340. The range covers every series actually
+            # drawn — the price, whichever moving averages are switched on, and
+            # the candle wicks — so nothing plotted can fall outside it.
+            _y_series = [_cdf["Close"]]
+            if _chart_type == "Candlestick" and {"High", "Low"}.issubset(_cdf.columns):
+                _y_series += [_cdf["High"], _cdf["Low"]]
+            for _ma, _en in ((20, _show_ma20), (50, _show_ma50), (200, _show_ma200)):
+                if _en and f"MA{_ma}" in _cdf.columns:
+                    _y_series.append(_cdf[f"MA{_ma}"].dropna())
+            _y_min = min(float(s.min()) for s in _y_series if len(s))
+            _y_max = max(float(s.max()) for s in _y_series if len(s))
+            _y_pad = max((_y_max - _y_min) * 0.06, _y_max * 0.005)
+            # A price axis never goes below zero, however much padding the band
+            # asks for — a floor of -$8 under a 15-year chart is nonsense.
+            _y_floor = max(0.0, _y_min - _y_pad)
             _y_ceil  = _y_max + _y_pad
 
             if _show_sr and resistance:
                 # Only show resistance levels INSIDE chart range and above current price
                 _res_above = sorted(
-                    [r for r in resistance if _y_min < r < _y_ceil],
+                    [r for r in resistance if _y_floor < r < _y_ceil],
                     reverse=True,
                 )[:2]
                 for _i, r in enumerate(_res_above):
@@ -3003,9 +3063,9 @@ color:var(--muted);background:var(--surface2)}
                                   line=dict(color=ct.color.negative, width=1, dash="dash"),
                                   opacity=0.4, layer="below")
                     fig.add_annotation(
-                        x=1.005, xref="paper", y=r, yref="y",
+                        x=0.006, xref="paper", y=r, yref="y",
                         text=f"Resist ${r:,.0f}",
-                        showarrow=False, xanchor="left",
+                        showarrow=False, xanchor="left", yshift=8,
                         font=dict(color=ct.color.negative, size=10, family=ct.font.data),
                         bgcolor="rgba(255,255,255,0.9)",
                         bordercolor=ct._rgba(ct.color.negative, 0.35), borderwidth=1,
@@ -3014,7 +3074,7 @@ color:var(--muted);background:var(--surface2)}
 
             if _show_sr and support:
                 _sup_below = sorted(
-                    [s for s in support if _y_floor < s < _y_max]
+                    [s for s in support if _y_floor < s < _y_ceil]
                 )[:2]
                 for _i, s in enumerate(_sup_below):
                     fig.add_shape(type="line", x0=0, x1=1, xref="paper",
@@ -3022,9 +3082,9 @@ color:var(--muted);background:var(--surface2)}
                                   line=dict(color=ct.color.positive, width=1, dash="dash"),
                                   opacity=0.4, layer="below")
                     fig.add_annotation(
-                        x=1.005, xref="paper", y=s, yref="y",
+                        x=0.006, xref="paper", y=s, yref="y",
                         text=f"Support ${s:,.0f}",
-                        showarrow=False, xanchor="left",
+                        showarrow=False, xanchor="left", yshift=8,
                         font=dict(color=ct.color.positive, size=10, family=ct.font.data),
                         bgcolor="rgba(255,255,255,0.9)",
                         bordercolor=ct._rgba(ct.color.positive, 0.35), borderwidth=1,
@@ -3033,13 +3093,14 @@ color:var(--muted);background:var(--surface2)}
 
             # ── Current price tag ─────────────────────────────────────────────
             if _show_tag:
-                _last = df["Close"].iloc[-1]
+                _last = _cdf["Close"].iloc[-1]
                 fig.add_shape(type="line", x0=0, x1=1, xref="paper",
                               y0=_last, y1=_last,
                               line=dict(color=ct.color.ink_muted, width=1, dash="dot"),
                               opacity=0.7, layer="above")
                 fig.add_annotation(
-                    x=1.005, xref="paper", y=_last, yref="y",
+                    # Past the right-hand tick labels, not on top of them.
+                    x=1.0, xref="paper", y=_last, yref="y", xshift=56,
                     text=f"<b>${_last:,.2f}</b>",
                     showarrow=False, xanchor="left",
                     font=dict(color=ct.color.paper, size=11, family=ct.font.data),
@@ -3047,55 +3108,33 @@ color:var(--muted);background:var(--surface2)}
                     borderpad=4,
                 )
 
-            # A button earns its place only if it shows LESS than the whole
-            # series; otherwise it is "All" under another name.
-            _span_days = (pd.to_datetime(df["Date"].iloc[-1])
-                          - pd.to_datetime(df["Date"].iloc[0])).days
-            _range_buttons = [
-                dict(count=_c, label=_l, step=_s, stepmode="backward")
-                for _c, _l, _s, _need in ((1, "1M", "month", 45),
-                                          (3, "3M", "month", 130),
-                                          (6, "6M", "month", 250),
-                                          (1, "1Y", "year", 400),
-                                          (3, "3Y", "year", 1150))
-                if _span_days > _need
-            ] + [dict(step="all", label="All")]
-
             ct.style(
                 fig,
                 height=480,
-                # Left gutter carries the value axis. The right margin still holds
-                # the S/R and last-price tags, which are anchored just past the
-                # plot — keep it wide enough that "Resist $000" isn't clipped.
-                margin=dict(l=52, r=112, t=70, b=30),
+                # The price axis is on the RIGHT, so the left gutter is only
+                # breathing room. The right margin carries the axis (~54px) and
+                # the last-price tag beyond it. The range buttons used to live
+                # inside the plot and cost 70px of top margin; they are now a
+                # Streamlit control above the chart, and that height goes to the
+                # plot instead.
+                margin=dict(l=24, r=118, t=28, b=48),
                 x=ct.time_axis(
-                    fy_ticks=False, title=None, tickformat="%b '%y",
+                    fy_ticks=False, title=None, tickformat=_tickfmt,
+                    nticks=8, automargin=True,
                     rangeslider=dict(visible=False),
-                    # Range buttons: square, hairline border, transparent fill;
-                    # the active one fills brand. No pill shapes.
-                    rangeselector=dict(
-                        # Only ranges the fetched window can actually fill. These
-                        # were fixed, so analysing a 1-year window still offered
-                        # 3Y — which set an axis three times wider than the data
-                        # and pushed the whole series into the right third of the
-                        # plot — while "All" silently duplicated 1Y.
-                        buttons=_range_buttons,
-                        bgcolor="rgba(0,0,0,0)", bordercolor=ct.color.rule, borderwidth=1,
-                        font=dict(family=ct.font.data, size=11, color=ct.color.ink_muted),
-                        activecolor=ct.color.brand,
-                        x=0.0, xanchor="left", y=1.02, yanchor="bottom",
-                    ),
                 ),
-                y=ct.value_axis(tick_format=",.2f", zero=False, title=None, nticks=6),
+                y=ct.value_axis(tick_format=",.2f", zero=False, title=None,
+                                nticks=6, side="right", automargin=True,
+                                range=[_y_floor, _y_ceil]),
                 # namelength=-1 keeps long trace names from being truncated in the
                 # unified tooltip.
                 hoverlabel=dict(namelength=-1, **ct.hover()),
             )
-            if _show_vol and "Volume" in df.columns:
+            if _show_vol and "Volume" in _cdf.columns:
                 fig.update_layout(yaxis2=dict(
-                    title=None, overlaying="y", side="left",
+                    title=None, overlaying="y", side="left",   # hidden; keeps off the price axis
                     showgrid=False, showticklabels=False,
-                    range=[0, float(df["Volume"].max() * 5)],
+                    range=[0, float(_cdf["Volume"].max() * 5)],
                 ))
             st.plotly_chart(fig, use_container_width=True, config={
                 "displaylogo": False,
@@ -3311,6 +3350,13 @@ color:var(--muted);background:var(--surface2)}
                 st.markdown(f'<div class="section-header"'
                             f'{_sec_id("sec-correlation", "Correlation")}>Correlation Matrix</div>',
                             unsafe_allow_html=True)
+                # Square cells are kept deliberately (px.imshow's default): a
+                # correlation matrix is read as a grid, and stretching the cells
+                # to the container width turns it into something that scans as a
+                # stacked bar. The problem was never the aspect, it was the
+                # container — a ~300px square was being centred in ~900px of
+                # column, so the matrix looked stranded and its x labels sat on
+                # the bottom edge. Narrower column below, taller margin here.
                 fig_corr = px.imshow(
                     corr_matrix,
                     text_auto=".2f",
@@ -3325,15 +3371,25 @@ color:var(--muted);background:var(--surface2)}
                 )
                 ct.style(
                     fig_corr,
-                    height=320,
-                    margin=dict(l=52, r=20, t=26, b=30),
+                    height=300,
+                    # r=96, not 20. The colorbar and its tick labels live in the
+                    # right margin, and aspect="equal" shrinks the plot area to a
+                    # square — so Plotly places the bar at 1.02 of the SQUARE,
+                    # which lands further right than a naive margin allows for.
+                    # Measured in the browser: the "-1.0" label overflowed the
+                    # 543px figure by 14px at r=72. This leaves ~24px of slack.
+                    margin=dict(l=64, r=96, t=20, b=48),
                     legend=None, grid=False, crosshair=False,
                     x=ct.category_axis(tickfont=dict(size=12, color=ct.color.ink,
-                                                     family=ct.font.data)),
+                                                     family=ct.font.data),
+                                       automargin=True),
                     y=ct.category_axis(tickfont=dict(size=12, color=ct.color.ink,
-                                                     family=ct.font.data)),
+                                                     family=ct.font.data),
+                                       automargin=True),
                     coloraxis_colorbar=dict(
-                        title="Correlation",
+                        # No title: the section header two lines up already says
+                        # "Correlation Matrix", and in the narrower column the
+                        # word clipped to "Correlati…" against the right edge.
                         tickvals=[-1, -0.5, 0, 0.5, 1],
                         ticktext=["-1.0", "-0.5", "0.0", "0.5", "1.0"],
                         tickfont=dict(size=11, color=ct.color.ink_muted,
@@ -3343,7 +3399,9 @@ color:var(--muted);background:var(--surface2)}
                         thickness=14, len=0.8,
                     ),
                 )
-                st.plotly_chart(fig_corr, use_container_width=True)
+                _cm_l, _cm_mid, _cm_r = st.columns([1, 2.2, 1])
+                with _cm_mid:
+                    st.plotly_chart(fig_corr, use_container_width=True)
 
             if not is_crypto:
                 st.markdown(f'<div class="section-header"'

@@ -924,8 +924,16 @@ def detect_support_resistance(df, window=20, num_levels=5, lookback=252,
     return cluster(resistance), cluster(support)
 
 
-def build_correlation_matrix(df, benchmark_tickers=None):
-    cols = {"Stock": df["Daily_Return"]}
+def build_correlation_matrix(df, benchmark_tickers=None, label="Stock"):
+    """Correlation of daily returns against the chosen benchmarks.
+
+    `label` names the subject column. It defaulted to the literal "Stock" while
+    every benchmark got its real symbol, so the on-screen matrix read
+    "Stock / SPY / QQQ" — template residue in the middle of a finished chart.
+    excel_builder patched it back to the ticker at render time; the UI had no
+    such workaround. Naming it at the source fixes both.
+    """
+    cols = {label or "Stock": df["Daily_Return"]}
     if benchmark_tickers:
         for b in benchmark_tickers:
             col = f"{b}_Return"
