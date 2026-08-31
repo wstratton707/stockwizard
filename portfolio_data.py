@@ -166,29 +166,243 @@ def _week_floor(date_str: str) -> str:
     return dt.strftime("%Y-%m-%d")
 
 
-def _fetch_ohlcv(ticker, start, end, api_key, log=print):
-    # Cache key uses the real dates. With yfinance (no 5/min limit) we no longer
-    # week-bucket to conserve Polygon calls, so data refreshes daily instead of
-    # being up to ~6 days stale at week's end (the old _week_floor behaviour).
+# ── Layer 1: the in-process frame cache ───────────────────────────────────────
+# This was write-only. Entries were overwritten when a key repeated and were
+# otherwise never removed, and the key embeds today's dates — so every frame the
+# process touched yesterday is unreachable today and still resident. One 5-year
+# OHLCV frame measures 129 KB, the ranked universe is ~330 names, and a
+# 50-holding build walks the whole eligible universe: about 44 MB per day of
+# uptime, permanently, on a web dyno that stays up for weeks. Render reported
+# the service over its memory limit on 2026-08-26.
+#
+# Bounded, and swept on write. The cap is well above what one build needs
+# (a 124-name candidate pool) so nothing hot gets evicted mid-run.
+_PORT_CACHE_MAX = 300          # frames — roughly 39 MB at 129 KB each
+
+# How many freshly-fetched tickers a USER'S request may write back to Layer 2.
+# Each write is a ~200 KB body, and a cold 124-name build measured 157 seconds
+# of uploads — far worse than the cold fetch it was meant to prevent. Filling
+# the layer belongs to precompute, which runs in a GitHub Action with a 90-minute
+# budget and no one waiting on it. A handful of writes is still worth doing
+# inline, so a ticker precompute happened to miss heals itself on first use.
+_MAX_INLINE_CACHE_WRITES = 12
+
+
+def _port_cache_get(cache_key: str):
+    """A cached frame if present and inside its TTL, else None."""
+    with _PORT_CACHE_LOCK:
+        hit = _PORT_CACHE.get(cache_key)
+    if hit and (time.time() - hit["ts"]) < CACHE_TTL:
+        return hit["df"]
+    return None
+
+
+def _port_cache_put(cache_key: str, df) -> None:
+    """Store a frame, evicting expired entries and then the oldest over the cap."""
+    now = time.time()
+    with _PORT_CACHE_LOCK:
+        _PORT_CACHE[cache_key] = {"ts": now, "df": df}
+        if len(_PORT_CACHE) <= _PORT_CACHE_MAX:
+            return
+        for k in [k for k, v in _PORT_CACHE.items()
+                  if now - v["ts"] >= CACHE_TTL and k != cache_key]:
+            _PORT_CACHE.pop(k, None)
+        over = len(_PORT_CACHE) - _PORT_CACHE_MAX
+        if over > 0:
+            for k, _v in sorted(_PORT_CACHE.items(),
+                                key=lambda kv: kv[1]["ts"])[:over]:
+                if k != cache_key:
+                    _PORT_CACHE.pop(k, None)
+
+
+# ── Layer 2: the persistent per-ticker price cache ────────────────────────────
+# This layer is documented as the thing that makes a large Portfolio Builder run
+# survivable, and until now it did not exist. Two independent defects:
+#
+#   1. The key was f"{ticker}_{start}_{end}" with both endpoints recomputed from
+#      today, so it rotated every calendar day. An entry warmed on Tuesday could
+#      never be read on Wednesday, and nothing warmed at all on a weekend.
+#   2. The batch prewarm in fetch_portfolio_prices seeds the IN-MEMORY cache
+#      first, so _fetch_ohlcv returned at step 1 and the Supabase write at the
+#      end of it never ran. precompute's warm therefore wrote the bundle for its
+#      own 68-ticker set and not one per-ticker row.
+#
+# Measured 2026-08-26: ohlcv_{AAPL,MSFT,SPY,JPM,XOM,NEE,AMT,PG,LIN,CAT,GOOGL,
+# QQQ,GLD,TLT} were all MISS for that day and for each of the three preceding
+# days. Every Portfolio Builder run was going live to the data provider for
+# every candidate, which is fine for a 45-name pool and is what fell over at
+# 124 (a 50-holding request takes the whole eligible universe).
+#
+# The key is now the window LENGTH rather than its endpoints, and a frame that
+# has fallen a few sessions behind is topped up with one small tail fetch
+# instead of being thrown away — the same append-don't-refetch pattern the
+# bundle layer already uses.
+_OHLCV_TTL_HOURS       = 720   # 30 days
+_OHLCV_STALE_TOLERANCE = 5     # calendar days a cached frame may lag before top-up
+_OHLCV_COLS            = ["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]
+
+
+def _ticker_cache_key(ticker: str, period_years) -> str:
+    return f"ohlcv2_{ticker.upper()}_{int(round(float(period_years)))}y"
+
+
+def _read_ticker_cache(ticker, period_years, start_s, end_s):
+    """Cached OHLCV for one ticker, trimmed to the requested window.
+
+    Returns (df, tail_start). `tail_start` is a YYYY-MM-DD string when the frame
+    is usable but behind, so the caller can fetch just the missing days; None
+    when it is current. (None, None) means no usable entry.
+    """
+    try:
+        hit = cache_get(_ticker_cache_key(ticker, period_years))
+    except Exception:
+        return None, None
+    if not hit:
+        return None, None
+    try:
+        if isinstance(hit, dict) and hit.get("fmt") == "cols":
+            df = pd.DataFrame(hit["cols"])
+            df.insert(0, "Date", hit["index"])
+        else:
+            # Row-records entries, written before the columnar format.
+            df = pd.DataFrame(hit["rows"] if isinstance(hit, dict) else hit)
+        if df.empty or "Date" not in df.columns:
+            return None, None
+        df["Date"] = _trading_dates(df["Date"])
+        df = df.dropna(subset=["Date"]).sort_values("Date")
+        want_start, want_end = pd.Timestamp(start_s), pd.Timestamp(end_s)
+        # A frame that starts materially later than the requested window can't
+        # stand in for it — the caller wants the full history, not a stub.
+        if df["Date"].min() > want_start + pd.Timedelta(days=_OHLCV_STALE_TOLERANCE):
+            return None, None
+        df = df[df["Date"] >= want_start].reset_index(drop=True)
+        if len(df) < 60:
+            return None, None
+        df["Ticker"] = ticker
+        df = df[[c for c in _OHLCV_COLS if c in df.columns]]
+        last = df["Date"].max()
+        tail = ((last + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+                if (want_end - last).days > _OHLCV_STALE_TOLERANCE else None)
+        return df, tail
+    except Exception:
+        return None, None
+
+
+def _write_ticker_cache_many(frames: dict, period_years) -> int:
+    """Persist several tickers at once. Returns how many landed.
+
+    The writes are one HTTPS round-trip each and a cold 124-name build produces
+    124 of them; run serially on the request path that is seconds of latency the
+    user waits through for a cache only the NEXT visitor benefits from. They are
+    pure I/O, so a small pool collapses it.
+    """
+    if not frames:
+        return 0
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        results = ex.map(lambda kv: _write_ticker_cache(kv[0], kv[1], period_years),
+                         list(frames.items()))
+        return sum(1 for r in results if r)
+
+
+def _write_ticker_cache(ticker, df, period_years) -> bool:
+    """Persist one ticker's OHLCV under the stable key. Never raises.
+
+    Columnar for the same reason the bundle is: row-records repeat all six field
+    names 1,254 times per ticker, which measured 0.20 MB per row in Supabase and
+    turns into a dict per session when read back. Storing one list per field is
+    about half the bytes and a fraction of the objects — and the whole ranked
+    universe lives in this table, so it is the difference between ~66 MB and
+    ~30 MB of a 500 MB free-tier database.
+    """
+    try:
+        out = df[[c for c in _OHLCV_COLS if c in df.columns and c != "Ticker"]].copy()
+        payload = {
+            "fmt":   "cols",
+            "index": list(_trading_dates(out["Date"]).strftime("%Y-%m-%d")),
+            "cols":  {c: [None if v != v else v
+                          for v in out[c].astype(float).to_numpy().tolist()]
+                      for c in out.columns if c != "Date"},
+        }
+        return bool(cache_set(_ticker_cache_key(ticker, period_years), payload,
+                              ttl_hours=_OHLCV_TTL_HOURS))
+    except Exception:
+        return False
+
+
+def warm_ticker_cache(tickers, period_years=5, log=print, chunk=60) -> int:
+    """Fill Layer 2 for `tickers`. Returns how many were written.
+
+    Called by precompute so the Portfolio Builder reads prices out of Supabase
+    whatever candidate set the user's preferences produce, instead of depending
+    on one live 124-symbol request landing on the request path.
+    """
+    from market_data import get_bars_batch
+    end     = datetime.today()
+    start   = end - timedelta(days=int(period_years * 365))
+    end_s   = end.strftime("%Y-%m-%d")
+    start_s = start.strftime("%Y-%m-%d")
+
+    todo = [t for t in dict.fromkeys(tickers) if t]
+    written = 0
+    for i in range(0, len(todo), chunk):
+        batch = todo[i:i + chunk]
+        try:
+            got = get_bars_batch(batch, start_s, end_s, "day")
+        except Exception as e:
+            log(f"   ⚠ warm batch {i//chunk + 1} failed ({e})")
+            continue
+        written += _write_ticker_cache_many(
+            {t: df for t, df in got.items() if df is not None and len(df) > 60},
+            period_years)
+        log(f"   Warmed {written}/{min(i + chunk, len(todo))} of {len(todo)} tickers")
+    return written
+
+
+def _fetch_ohlcv(ticker, start, end, api_key, log=print, cache_years=None,
+                 persist=False):
+    """One ticker's OHLCV, memory cache → Layer 2 → live fetch.
+
+    `cache_years` opts into READING the persistent layer, and is the window
+    length the entry is keyed by. It is deliberately absent on the bundle-append
+    path, which asks for a one- or two-day window: caching those under a
+    ticker's key would overwrite five years of history with two rows.
+    `persist` additionally opts into writing what was fetched back — see
+    _MAX_INLINE_CACHE_WRITES for why that is not the default.
+    """
     cache_key = f"{ticker}_{start}_{end}"
 
     # 1. In-memory cache (fastest) — lock-protected, Streamlit sessions are concurrent
-    with _PORT_CACHE_LOCK:
-        cached = _PORT_CACHE.get(cache_key)
-    if cached and (time.time() - cached["ts"]) < CACHE_TTL:
-        return cached["df"]
+    cached = _port_cache_get(cache_key)
+    if cached is not None:
+        return cached
 
-    # 2. Supabase persistent cache (survives restarts, shared across users)
-    db_hit = cache_get(f"ohlcv_{cache_key}")
-    if db_hit is not None:
-        try:
-            df = pd.DataFrame(db_hit)
-            df["Date"] = _trading_dates(df["Date"])
-            with _PORT_CACHE_LOCK:
-                _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
-            return df
-        except Exception:
-            pass
+    # 2. Supabase persistent cache (survives restarts, shared across users).
+    #    This is the fallback for whatever the caller's batch request failed to
+    #    return, so a provider outage degrades to slightly-stale prices instead
+    #    of an empty portfolio. An entry a few sessions behind is topped up with
+    #    a small tail fetch; if even that fails, the stale frame is still better
+    #    than nothing and gets returned as-is.
+    if cache_years is not None:
+        db_df, _tail = _read_ticker_cache(ticker, cache_years, start, end)
+        if db_df is not None:
+            if _tail:
+                try:
+                    from market_data import get_bars
+                    _t_df = get_bars(ticker, _tail, end, interval="day",
+                                     polygon_key=api_key)
+                    if _t_df is not None and len(_t_df):
+                        _t_df = _t_df.assign(Ticker=ticker)
+                        db_df = pd.concat(
+                            [db_df, _t_df[[c for c in db_df.columns if c in _t_df.columns]]])
+                        db_df["Date"] = _trading_dates(db_df["Date"])
+                        db_df = (db_df.drop_duplicates("Date", keep="last")
+                                      .sort_values("Date").reset_index(drop=True))
+                        if persist:
+                            _write_ticker_cache(ticker, db_df, cache_years)
+                except Exception:
+                    pass
+            _port_cache_put(cache_key, db_df)
+            return db_df
 
     # 3. Fetch via the multi-source router: yfinance (same-day, deep history) →
     #    Polygon fallback. get_bars returns a complete result or None — no partial
@@ -206,18 +420,14 @@ def _fetch_ohlcv(ticker, start, end, api_key, log=print):
     df["Date"] = _trading_dates(df["Date"])
     df = df.drop_duplicates("Date", keep="last").sort_values("Date").reset_index(drop=True)
 
-    with _PORT_CACHE_LOCK:
-        _PORT_CACHE[cache_key] = {"ts": time.time(), "df": df}
-    try:
-        cache_set(f"ohlcv_{cache_key}",
-                  df.assign(Date=df["Date"].astype(str)).to_dict(orient="records"),
-                  ttl_hours=720)
-    except Exception:
-        pass
+    _port_cache_put(cache_key, df)
+    if persist and cache_years is not None:
+        _write_ticker_cache(ticker, df, cache_years)
     return df
 
 
-def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
+def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print,
+                           persist_cache=False):
     end     = datetime.today()
     start   = end - timedelta(days=period_years*365)
     end_s   = end.strftime("%Y-%m-%d")
@@ -226,35 +436,52 @@ def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
     price_dict, failed = {}, []
     thread_logs = []  # collect logs from threads — Streamlit can't be called from worker threads
 
-    # ── Batch-prewarm (the big speedup) ──────────────────────────────────────
-    # Pull every not-yet-cached ticker in ONE yfinance request and seed the
-    # in-memory cache, so the per-ticker loop below mostly hits cache. Fetching a
-    # ~60-name universe one ticker at a time (and Yahoo throttling the burst)
-    # could take minutes; a single batched request is seconds.
-    _uncached = []
-    for _t in tickers:
-        _ck = f"{_t}_{start_s}_{end_s}"
-        with _PORT_CACHE_LOCK:
-            _hit = _PORT_CACHE.get(_ck)
-        if not (_hit and (time.time() - _hit["ts"]) < CACHE_TTL):
-            _uncached.append(_t)
+    def _seed(ticker, df):
+        _port_cache_put(f"{ticker}_{start_s}_{end_s}", df)
+
+    # ── Batch prewarm: one request for everything not already in memory ──────
+    # Measured on the 124-name candidate pool a 50-holding request produces:
+    # this single batched call returns all of them in ~10s, while consulting the
+    # per-ticker Supabase cache first cost 1.2s PER TICKER — 154s to avoid a 10s
+    # fetch. So the network is the fast path here and the cache is the fallback,
+    # which is the opposite of the usual arrangement and worth stating plainly.
+    # Layer 2 is consulted inside _fetch_ohlcv, for whatever this batch fails to
+    # return; see the note on _MAX_INLINE_CACHE_WRITES.
+    _uncached = [t for t in tickers
+                 if _port_cache_get(f"{t}_{start_s}_{end_s}") is None]
     if len(_uncached) > 3:
         try:
             from market_data import get_bars_batch
             _batch = get_bars_batch(_uncached, start_s, end_s, "day")
+            _fresh = {}
             for _bt, _bdf in _batch.items():
                 _d = _bdf.copy()
                 _d["Ticker"] = _bt
                 _d = _d[["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]]
-                with _PORT_CACHE_LOCK:
-                    _PORT_CACHE[f"{_bt}_{start_s}_{end_s}"] = {"ts": time.time(), "df": _d}
+                _seed(_bt, _d)
+                _fresh[_bt] = _d
+            if persist_cache or len(_fresh) <= _MAX_INLINE_CACHE_WRITES:
+                _write_ticker_cache_many(_fresh, period_years)
             thread_logs.append(f"   ⚡ batch-fetched {len(_batch)}/{len(_uncached)} tickers in one request")
+            if len(_batch) < len(_uncached):
+                # Worth saying out loud: the shortfall is what drops through to
+                # the per-ticker path, and a large shortfall is the data provider
+                # throttling us, not a set of bad symbols.
+                thread_logs.append(
+                    f"   ⚠ {len(_uncached) - len(_batch)} ticker(s) missing from the batch "
+                    f"— falling back to the cached copy or an individual fetch")
         except Exception as _e:
             thread_logs.append(f"   ⚠ batch prewarm failed ({_e}) — falling back to per-ticker")
 
+    # Same budget as the batch path: if the batch came back empty every name
+    # falls through to individual fetches, and writing all of them back would
+    # cost more than the fetch did.
+    _persist_one = persist_cache or len(_uncached) <= _MAX_INLINE_CACHE_WRITES
+
     def fetch_one(ticker):
         msgs = []
-        df = _fetch_ohlcv(ticker, start_s, end_s, api_key, log=lambda m: msgs.append(m))
+        df = _fetch_ohlcv(ticker, start_s, end_s, api_key, log=lambda m: msgs.append(m),
+                          cache_years=period_years, persist=_persist_one)
         return ticker, df, msgs
 
     # yfinance (now the primary bar source) has no per-minute cap, so the few
@@ -278,7 +505,12 @@ def fetch_portfolio_prices(tickers, period_years=2, api_key="", log=print):
     if not price_dict:
         if not api_key:
             raise ValueError("Polygon API key is missing. Check your environment variables.")
-        raise ValueError(f"No valid price data retrieved. All {len(tickers)} tickers failed — check API key and rate limits.")
+        # Named distinctly so the UI can tell "the provider refused us" apart
+        # from "those aren't real symbols" — every ticker here came from our own
+        # ranked universe, so it is never the latter.
+        raise ValueError(
+            f"upstream price fetch failed: no data for any of {len(tickers)} tickers "
+            f"— the market-data provider returned nothing (rate limit or outage)")
 
     closes = {}
     for t, df in price_dict.items():
@@ -566,13 +798,34 @@ def _dedupe_by_date(df: pd.DataFrame, label: str = "", log=None) -> pd.DataFrame
 
 
 def _close_df_to_payload(close_df: pd.DataFrame, failed: list) -> dict:
-    reset = close_df.reset_index()
-    reset["Date"] = reset["Date"].astype(str)
-    return {"close": reset.to_dict(orient="records"), "failed": failed}
+    """Serialise the price matrix column-wise rather than as row records.
+
+    to_dict(orient="records") on a 1254 x 123 matrix materialises 1254 dicts of
+    123 keys each — 154k dict entries, measured at 8 MB of Python objects and a
+    26 MB RSS spike to serialise a frame that occupies 1.2 MB. That ran on the
+    request path of a service Render had just reported over its memory limit.
+    One list per ticker carries the same information for a third fewer objects
+    and ~30% less JSON.
+    """
+    return {
+        "fmt":     "cols",
+        "index":   list(_trading_dates(close_df.index).strftime("%Y-%m-%d")),
+        "columns": [str(c) for c in close_df.columns],
+        "values":  [[None if v != v else v
+                     for v in close_df[c].astype(float).to_numpy().tolist()]
+                    for c in close_df.columns],
+        "failed":  list(failed),
+    }
 
 
 def _payload_to_close_df(cached: dict) -> pd.DataFrame:
-    close_df = pd.DataFrame(cached["close"]).set_index("Date")
+    if isinstance(cached, dict) and cached.get("fmt") == "cols":
+        close_df = pd.DataFrame(dict(zip(cached["columns"], cached["values"])),
+                                index=pd.Index(cached["index"], name="Date"))
+    else:
+        # Row-records bundles written before the columnar format. They stay
+        # readable until their 400-day TTL runs out.
+        close_df = pd.DataFrame(cached["close"]).set_index("Date")
     close_df = close_df.apply(pd.to_numeric, errors="coerce")
     # Bundles written before the normalisation fix carry mixed stamps, so the
     # collapse has to happen on read as well as on write.
@@ -589,7 +842,8 @@ def _close_df_to_price_dict(close_df: pd.DataFrame) -> dict:
     return price_dict
 
 
-def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print):
+def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print,
+                                  persist_cache=False):
     """
     Fetches portfolio price history with a two-layer cache:
 
@@ -598,10 +852,14 @@ def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print
         read returns a pre-assembled close_df. Changes in sidebar preferences
         change the ticker set and miss this layer.
 
-      Layer 2 — Per-ticker cache  (ohlcv_<ticker>_<monday>_<monday>)
-        Hit via `_fetch_ohlcv` inside `fetch_portfolio_prices`. Survives
-        sidebar preference changes because it's keyed per ticker, not per
-        set. Warmed nightly by precompute.py's `warm_portfolio_cache`.
+      Layer 2 — Per-ticker cache  (ohlcv2_<ticker>_<years>y)
+        Read up-front in `fetch_portfolio_prices`, before any network call.
+        Survives sidebar preference changes because it's keyed per ticker,
+        not per set, and survives the calendar because it's keyed by window
+        LENGTH, not by today's dates. Warmed daily by precompute.py over the
+        whole ranked universe, so any candidate set the preferences produce
+        is covered. Entries a few sessions behind are topped up with one
+        small tail fetch rather than refetched.
 
       Layer 3 — Polygon fetch
         Cold-path for any ticker that misses both layers above.
@@ -675,14 +933,15 @@ def fetch_portfolio_prices_cached(tickers, period_years=2, api_key="", log=print
         except Exception as e:
             log(f"   ⚠ Bundle cache parse failed ({e}) — falling back to per-ticker")
 
-    # ── Layers 2+3: per-ticker cache via _fetch_ohlcv, then Polygon for misses ─
-    # fetch_portfolio_prices calls _fetch_ohlcv per ticker, which checks Supabase
-    # per-ticker cache first (warmed nightly by precompute.py). Only tickers
-    # missing from that cache trigger a Polygon fetch.
+    # ── Layers 2+3: per-ticker cache, then a live fetch for what's missing ────
+    # fetch_portfolio_prices reads the Supabase per-ticker cache for every name
+    # before touching the network (warmed daily by precompute.py). Only tickers
+    # missing from that cache trigger a live fetch.
     log(f"   🔍 No matching bundle for this ticker set — checking per-ticker caches "
         f"for {len(tickers)} tickers (warmed tickers return instantly)")
     price_dict, close_df, returns_df, failed = fetch_portfolio_prices(
-        tickers, period_years=period_years, api_key=api_key, log=log
+        tickers, period_years=period_years, api_key=api_key, log=log,
+        persist_cache=persist_cache
     )
 
     # Save the assembled bundle so next call with identical prefs is instant

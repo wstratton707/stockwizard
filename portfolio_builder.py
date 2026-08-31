@@ -623,6 +623,12 @@ def _render_step_2(api_key):
             # Fetch prices — uses Supabase cache if available (instant on repeat runs)
             price_dict, close_df, returns_df, failed = fetch_portfolio_prices_cached(
                 candidates, period_years=_PRICE_HISTORY_YEARS, api_key=api_key, log=log)
+            # price_dict is a per-ticker re-shaping of the closes close_df already
+            # holds, and nothing anywhere reads it back — it used to be filtered
+            # down and parked in session state for the life of every session, a
+            # second copy of the price matrix in a less compact layout. Released
+            # here instead.
+            del price_dict
             progress.progress(40, text="Finalising stock selection...")
 
             # Trim to the requested number of holdings for the optimizer.
@@ -677,7 +683,6 @@ def _render_step_2(api_key):
 
             returns_df = returns_df[best_tickers]
             close_df   = close_df[[t for t in best_tickers if t in close_df.columns]]
-            price_dict = {t: v for t, v in price_dict.items() if t in best_tickers}
             sector_map = {t: sector_map.get(t, "Unknown") for t in best_tickers}
             progress.progress(50, text="Computing stock metrics...")
 
@@ -800,7 +805,6 @@ def _render_step_2(api_key):
                 )
 
             st.session_state[_K_OPTIMISED] = {
-                "price_dict":    price_dict,
                 "close_df":      close_df,
                 "returns_df":    returns_df,
                 "market_returns": market_returns,
@@ -828,6 +832,18 @@ def _render_step_2(api_key):
                 )
             elif "api key" in err_str or "missing" in err_str:
                 st.error("API key error — contact support.")
+            elif "upstream price fetch failed" in err_str:
+                # Not a ticker problem: these names came from our own ranked
+                # universe. It is the data provider refusing a burst, and the
+                # burst scales with Number of holdings — a 50-holding request
+                # takes the whole eligible universe as its candidate pool.
+                st.error(
+                    "**Market data is unavailable right now.** The price provider "
+                    "returned nothing for any of the selected stocks — this is a "
+                    "rate limit or an outage on their side, not a problem with your "
+                    "settings. Wait a minute and try again, or lower **Number of "
+                    "holdings**, which fetches fewer names."
+                )
             elif "no valid price" in err_str or "all" in err_str and "failed" in err_str:
                 st.error(
                     "Could not fetch price data for the selected tickers. "

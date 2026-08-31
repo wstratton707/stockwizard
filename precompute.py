@@ -595,19 +595,39 @@ def main():
 
 def warm_portfolio_cache(rankings: dict):
     """
-    Pre-fetch price history for the default top-18 portfolio so the portfolio
-    builder is instant even on the very first user run of the day. The window
-    must match portfolio_builder._PRICE_HISTORY_YEARS (5 years) or the warmed
-    bundle doesn't satisfy the builder's request and it cold-fetches anyway.
+    Pre-fetch price history so the Portfolio Builder is instant even on the very
+    first user run of the day, in two passes: the per-ticker cache for every
+    ranked name (covers ANY candidate set the user's preferences produce), then
+    the bundle for the default portfolio (covers the common case in one read).
+
+    The window must match portfolio_builder._PRICE_HISTORY_YEARS (5 years) or
+    neither warmed artefact satisfies the builder's request and it cold-fetches
+    anyway.
     """
     from collections import defaultdict
-    from portfolio_data import fetch_portfolio_prices_cached
+    from portfolio_data import fetch_portfolio_prices_cached, warm_ticker_cache
 
     print("\nUpdating portfolio price cache (bootstrap once, append daily)...")
 
-    # Top 6 per sector covers every sidebar preference combo (risk tolerance 10
-    # asks for 6/sector; lower tolerances ask for fewer). Warming all 6 means
-    # the Portfolio Builder gets per-ticker cache hits regardless of user prefs.
+    # Per-ticker cache for the WHOLE ranked universe, not just the default
+    # portfolio's candidates. The bundle warmed below only ever hits when a
+    # user's preferences reproduce this exact ticker set, so it does nothing
+    # for a non-default run -- and a 50-holding request takes the entire
+    # eligible universe as its candidate pool. Warming per ticker is what
+    # lets those runs read prices out of Supabase instead of firing ~124 live
+    # requests from the web dyno, which is how the builder fell over on
+    # 2026-08-26.
+    _all = [t for t in rankings if not str(t).startswith('_')]
+    print(f'Warming per-ticker price cache for {len(_all)} ranked tickers...')
+    try:
+        _n = warm_ticker_cache(_all, period_years=5, log=print)
+        print(f'Per-ticker cache warmed -- {_n}/{len(_all)} tickers written')
+    except Exception as e:
+        print(f'Per-ticker cache warm failed: {e}')
+
+    # The bundle pass: top 6 per sector covers every sidebar preference combo
+    # (risk tolerance 10 asks for 6/sector; lower tolerances ask for fewer), so
+    # a default-ish run resolves in a single cache read rather than 45 of them.
     # 11 sectors × 6 + SPY + QQQ ≈ 68 tickers.
     sector_groups: dict = defaultdict(list)
     for ticker, data in rankings.items():
@@ -632,7 +652,8 @@ def warm_portfolio_cache(rankings: dict):
         # Must match portfolio_builder._PRICE_HISTORY_YEARS so the warmed bundle
         # actually satisfies the builder's request (else cold 5yr fetches).
         _, close_df, _, failed = fetch_portfolio_prices_cached(
-            candidates, period_years=5, api_key=POLYGON_API_KEY, log=print
+            candidates, period_years=5, api_key=POLYGON_API_KEY, log=print,
+            persist_cache=True      # this job is the one that pays for writes
         )
         print(f"Portfolio cache warmed — {len(close_df.columns)} tickers ready")
         if failed:
