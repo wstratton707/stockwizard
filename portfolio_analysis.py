@@ -755,6 +755,29 @@ def compute_monthly_heatmap(backtest_df):
 
 # ── Portfolio Monte Carlo ─────────────────────────────────────────────────────
 
+MC_PCT_LEVELS = [5, 25, 50, 75, 95]
+MC_PCT_COLS   = ["p5", "p25", "p50", "p75", "p95"]
+
+
+def mc_percentiles(sim_df):
+    """Collapse a Monte Carlo path matrix to the five percentile series.
+
+    Every consumer of the raw matrix - the on-screen fan chart, the Excel sheet
+    and the PowerPoint chart - immediately reduced it to exactly these five
+    series. Keeping the matrix instead cost 20.2 MB per session for a 2,521 x
+    1,000 forecast; the percentile frame is about 0.1 MB and carries everything
+    any of them actually draws.
+
+    Accepts a frame that has already been reduced, so a caller can pass either.
+    """
+    if sim_df is None:
+        return None
+    if list(getattr(sim_df, "columns", [])) == MC_PCT_COLS:
+        return sim_df
+    arr = np.percentile(sim_df.values, MC_PCT_LEVELS, axis=1)   # (5, days)
+    return pd.DataFrame(dict(zip(MC_PCT_COLS, arr)))
+
+
 def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
                                monthly_contribution, forecast_years=10,
                                n_simulations=1000, target_value=None, log=print,
@@ -826,18 +849,37 @@ def run_portfolio_monte_carlo(returns_df, weights, starting_capital,
     drift_vec = mu_vec - 0.5 * sigma_vec ** 2            # shape (n_assets,)
     contrib_days = np.arange(monthly_days, forecast_days + 1, monthly_days)
 
-    # Batch simulations to cap memory. One batch of B sims holds
-    # B * forecast_days * n_assets floats ≈ 200 * 2520 * 18 * 8 bytes ≈ 72 MB.
-    BATCH = 200
+    # Batch simulations to cap memory — by BUDGET, not by a fixed count.
+    #
+    # This was `BATCH = 200`, with a comment budgeting "200 * 2520 * 18 * 8
+    # bytes ~= 72 MB". The 18 was the old hard-coded holding count, so the
+    # budget silently scaled with the portfolio: measured peak was +405 MB at
+    # 18 holdings and +937 MB at 50, which is what crashed the Monte Carlo step
+    # for a 50-name portfolio on a memory-limited dyno.
+    #
+    # Deriving the batch size from the array size instead keeps the working set
+    # flat whatever the user asks for. Determinism is unaffected: standard_normal
+    # fills C-order, so simulation i always consumes stream positions
+    # [i*days*assets, (i+1)*days*assets) no matter how the draws are chunked.
+    _MC_WORKING_BYTES = 60_000_000        # the (b, days, assets) working set
+    _bytes_per_sim = forecast_days * n_assets * 8
+    BATCH = max(16, min(n_simulations,
+                        _MC_WORKING_BYTES // (_bytes_per_sim * 2)))
 
     for start in range(0, n_simulations, BATCH):
         b = min(BATCH, n_simulations - start)
-        # Correlated standard normals in one shot: (b, days, n_assets)
-        Z       = rng.standard_normal((b, forecast_days, n_assets))
-        Z_corr  = Z @ L.T
-        log_ret = drift_vec + sigma_vec * Z_corr           # broadcast
+        # Correlated standard normals in one shot: (b, days, n_assets).
+        # Rewritten in place: the original held Z, Z_corr, the sigma product and
+        # log_ret simultaneously — four arrays of this shape at peak. Reusing one
+        # buffer halves the working set, which is what the batch budget above
+        # assumes.
+        Z = rng.standard_normal((b, forecast_days, n_assets))
+        Z = Z @ L.T                        # correlate; the draw buffer is freed
+        Z *= sigma_vec                     # in place
+        Z += drift_vec                     # in place (drift already Ito-adjusted)
         # Portfolio daily log-return per sim: (b, days)
-        port_log_ret  = log_ret @ w_arr
+        port_log_ret  = Z @ w_arr
+        del Z
         daily_factors = np.exp(port_log_ret)
 
         # Cumulative product along time axis, prepend 1.0 to align with day 0

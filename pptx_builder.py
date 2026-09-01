@@ -299,9 +299,13 @@ def _monte_carlo_chart(mc_sim_df, mc_summary, ticker, w=11, h=4.2):
     # Plot the FULL forecast horizon (was capped at 252, which truncated the
     # portfolio's multi-year forecast to just year one). For long horizons show
     # the x-axis in years; for ≤1yr (e.g. the single-stock deck) keep days.
-    n     = len(mc_sim_df)
-    arr   = mc_sim_df.values[:n]
-    pcts  = np.percentile(arr, [5, 25, 50, 75, 95], axis=1)
+    n = len(mc_sim_df)
+    # Either a raw path matrix (the single-stock deck still passes one) or the
+    # five-series percentile frame the portfolio path now keeps instead.
+    if list(getattr(mc_sim_df, "columns", [])) == ["p5", "p25", "p50", "p75", "p95"]:
+        pcts = mc_sim_df.values.T
+    else:
+        pcts = np.percentile(mc_sim_df.values[:n], [5, 25, 50, 75, 95], axis=1)
     years = n / 252.0
     if years > 1.5:
         x_vals, xlabel, horizon = [d / 252.0 for d in range(n)], "Years Forward", f"{round(years)}-Year"

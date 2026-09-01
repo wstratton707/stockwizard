@@ -447,20 +447,24 @@ def _build_mc_sheet(wb, mc_sim_df, mc_summary, milestones):
             for ci in range(1,7):
                 ws_mc.cell(row=ri,column=ci).fill = PatternFill("solid", fgColor=GREY_ROW)
 
-    # Percentile paths
+    # Percentile paths. `mc_sim_df` is the five-series percentile frame the
+    # forecast keeps (columns p5..p95); a raw path matrix is still accepted and
+    # reduced here, so an older caller keeps working.
     pct_col = 10
     pct_start = ms_hdr_row + len(milestones) + 3
     pct_labels = ["P5 (Bear)","P25 (Low)","P50 (Median)","P75 (Bull)","P95 (Best)"]
     ws_mc.cell(row=pct_start, column=pct_col, value="Day")
     for j, lbl in enumerate(pct_labels):
         _hdr(ws_mc.cell(row=pct_start, column=pct_col+j+1, value=lbl), bg=MID_BLUE)
+    _is_pcts = list(getattr(mc_sim_df, "columns", [])) == ["p5","p25","p50","p75","p95"]
     for day_idx in range(0, len(mc_sim_df), 5):  # sample every 5 days
-        row_prices = mc_sim_df.iloc[day_idx].values
+        _row = mc_sim_df.iloc[day_idx].values
+        _vals = _row if _is_pcts else np.percentile(_row, [5,25,50,75,95])
         r = pct_start + 1 + day_idx // 5
         ws_mc.cell(row=r, column=pct_col, value=day_idx)
-        for j, pct in enumerate([5,25,50,75,95]):
+        for j in range(5):
             ws_mc.cell(row=r, column=pct_col+j+1,
-                       value=round(np.percentile(row_prices, pct),2)).number_format = '_($* #,##0.00_)'
+                       value=round(float(_vals[j]), 2)).number_format = '_($* #,##0.00_)'
 
     # Chart
     n_rows   = len(mc_sim_df) // 5 + 1
