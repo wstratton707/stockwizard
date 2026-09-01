@@ -1,0 +1,17 @@
+# Development and CI only — NOT installed on Render.
+#
+# Keep this separate from requirements.txt: the web dyno is memory-constrained
+# and has no reason to carry a linter or a test runner. Install with
+#
+#     .venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+#
+# ruff earned its place immediately. A rename during the Portfolio Builder
+# restructure silently did nothing (the patch matched on a comment banner whose
+# rule length was wrong), and ruff caught the resulting F821 the moment the
+# dispatcher was wired up — the same class of undefined-name bug that once
+# reached production and needed a user report to find.
+#
+#     python -m ruff check --select F821,F811,F841,E9 .
+#     python -m pytest tests/ -q
+ruff==0.16.4
+pytest==9.1.1

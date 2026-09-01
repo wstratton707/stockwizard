@@ -31,7 +31,7 @@ from portfolio_analysis import (
     compute_stock_metrics, compute_correlation_matrix,
     optimise_portfolio, generate_efficient_frontier,
     backtest_portfolio, compute_backtest_metrics,
-    compute_monthly_heatmap, run_portfolio_monte_carlo,
+    compute_monthly_heatmap, run_portfolio_monte_carlo, mc_percentiles,
     compute_diversification_score, get_rebalancing_recommendations,
     compute_betas, capm_expected_returns, portfolio_beta, shrunk_covariance,
     portfolio_capm,
@@ -77,6 +77,7 @@ _K_EXCEL       = "port_excel"
 _K_PPTX        = "port_pptx"
 _K_FOUND_PORTS = "found_portfolios"
 _K_RANKINGS    = "port_rankings"   # cached get_sharpe_rankings result
+_K_SECTION     = "port_section"    # which results section is showing
 
 # ── Optimizer / fetch config ──────────────────────────────────────────────────
 # How many names the user can ask for. This used to be a single hard-coded 18
@@ -294,7 +295,7 @@ def _render_step_0():
     if "Defense" in excl_industries:      excluded_sectors.append("Industrials")
 
     st.markdown("---")
-    if st.button("Next → Build Universe", type="primary", key="step0_next"):
+    if st.button("Next → Portfolio Settings", type="primary", key="step0_next"):
         st.session_state[_K_PREFS] = {
             "risk_tolerance":          risk,
             "horizon":                 horizon,
@@ -374,7 +375,7 @@ def _render_step_1(api_key):
             st.session_state[_K_STEP] = 0
             st.rerun()
     with col2:
-        if st.button("Next → Optimise Portfolio", type="primary", key="step1_next"):
+        if st.button("Build Portfolio", type="primary", key="step1_next"):
             user_tickers = [t.strip().upper() for t in user_tickers_raw.split(",") if t.strip()]
             excl_tickers = [t.strip().upper() for t in exclude_tickers_raw.split(",") if t.strip()]
 
@@ -422,7 +423,12 @@ def _render_step_1(api_key):
 
 # ── Step 2 — Optimise ─────────────────────────────────────────────────────────
 
-def _render_step_2(api_key):
+def _ensure_built(api_key) -> bool:
+    """Fetch prices, select holdings and optimise, once per portfolio.
+
+    Returns False when the build failed and an error has already been shown, so
+    the caller renders no sections over a portfolio that does not exist.
+    """
     prefs = st.session_state.get(_K_PREFS, {})
 
     if _K_OPTIMISED not in st.session_state:
@@ -437,7 +443,6 @@ def _render_step_2(api_key):
         try:
             from collections import defaultdict
 
-            ALWAYS_KEEP    = {"SPY", "QQQ", "GLD", "TLT"}
             risk_tolerance = prefs.get("risk_tolerance", 5)
             excl_sectors   = set(prefs.get("exclude_sectors", []))
             incl_sectors   = set(prefs.get("include_sectors", list(SECTOR_UNIVERSE.keys())))
@@ -860,10 +865,18 @@ def _render_step_2(api_key):
                 import traceback as _tb; print(_tb.format_exc())   # server log, not UI
             if st.button("← Back", key="step2_err_back"):
                 st.session_state[_K_STEP] = 1
-                del st.session_state[_K_OPTIMISED]
+                st.session_state.pop(_K_OPTIMISED, None)
                 st.rerun()
-            return
+            return False
 
+    return True
+
+
+# ── Section: Allocation ──────────────────────────────────────────
+
+def _section_allocation(api_key):
+    """The portfolio itself: model choice, weights, frontier, sector mix, save."""
+    prefs = st.session_state.get(_K_PREFS, {})
     opt = st.session_state[_K_OPTIMISED]
     portfolios    = opt["portfolios"]
     ef_df         = opt["ef_df"]
@@ -1351,24 +1364,27 @@ concentration penalty for any single position above 25%.
     )
     st.plotly_chart(fig_sec, use_container_width=True)
 
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("← Back", key="step2_back"):
-            st.session_state[_K_STEP] = 1
-            if _K_OPTIMISED in st.session_state:
-                del st.session_state[_K_OPTIMISED]
-            st.rerun()
-    with col2:
-        if st.button("Next → Run Backtest", type="primary", key="step2_next"):
-            st.session_state[_K_WEIGHTS] = selected_weights
-            st.session_state[_K_STEP] = 3
-            st.rerun()
+    # The portfolio exists as of here, so it can be kept as of here. Walking the
+    # backtest and the Monte Carlo first was never a requirement of saving — it
+    # was just where the button happened to live.
+    #
+    # Changing the model re-prunes the weights, so this assignment is what keeps
+    # _K_WEIGHTS honest: every other section, the exports and the save all read
+    # it, and it has to describe the allocation currently on screen.
+    st.session_state[_K_WEIGHTS] = selected_weights
+    _render_save_load(selected_weights, prefs, key_prefix="alloc", show_load=True)
 
 
 # ── Step 3 — Backtest ─────────────────────────────────────────────────────────
 
-def _render_step_3():
+def _section_backtest():
+    """How the allocation would have performed.
+
+    Runs on first view rather than behind a button: it is under a second, so
+    asking would be friction without a payoff. The forecast, which is not, asks.
+    """
+    st.caption("How this allocation would have performed over the last five years, "
+               "against an equal-weight portfolio of the same names.")
     prefs   = st.session_state.get(_K_PREFS, {})
     opt     = st.session_state.get(_K_OPTIMISED, {})
     weights = st.session_state.get(_K_WEIGHTS, {})
@@ -1440,7 +1456,6 @@ def _render_step_3():
     # Key metrics
     _section_header("Backtest Results")
     cols = st.columns(4)
-    gain = bt_met.get("Total Gain/Loss", 0)
     for _card in [
         (cols[0], "Final Value",      f"${bt_met.get('Final Value',0):,.0f}",    GREEN),
         (cols[1], "Total Return",     f"{bt_met.get('Total Return',0):.1f}%",    GREEN if bt_met.get("Total Return",0)>0 else RED),
@@ -1884,31 +1899,183 @@ def _render_step_3():
       estimated cost over {_fee_yrs} years
     </div>""", unsafe_allow_html=True)
 
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("← Back", key="step3_back"):
-            st.session_state[_K_STEP] = 2
-            if _K_BACKTEST in st.session_state:
-                del st.session_state[_K_BACKTEST]
-            st.rerun()
-    with col2:
-        if st.button("Next → Monte Carlo Forecast", type="primary", key="step3_next"):
-            st.session_state[_K_STEP] = 4
-            st.rerun()
 
 
-# ── Step 4 — Monte Carlo Forecast ─────────────────────────────────────────────
 
-def _render_step_4():
+# ── Save / Load, as a block that can appear at more than one step ──────────
+
+def _render_save_load(weights, prefs, *, key_prefix, metrics=None,
+                      show_load=True, divider=True):
+    """Render "Save this portfolio" / "Track this forward" (+ optionally Load).
+
+    Saving used to live only at the bottom of step 4, so a user had to walk
+    through the backtest AND the Monte Carlo before they could keep a portfolio
+    they had already been shown. Nothing about a save needs either: it writes
+    the weights and the preferences, and the backtest metrics are an optional
+    extra that is simply absent when saving early.
+
+    `key_prefix` namespaces the widget keys so the block can be rendered at more
+    than one step in the same session without Streamlit key collisions.
+    """
+    if divider:
+        st.markdown("---")
+    _section_header("Save & Load Portfolios" if show_load else "Save This Portfolio")
+
+    if show_load:
+        _sv_col, _ld_col = st.columns(2)
+    else:
+        _sv_col, _ld_col = st.container(), None
+
+    with _sv_col:
+        st.markdown("**Save this portfolio**")
+        # The address comes from the signed-in session, never a text box. A
+        # free-text field here let anyone write a portfolio into someone else's
+        # account just by typing their address - and it made "which email did I
+        # use?" a thing users had to remember.
+        _save_email = auth.current_email() or ""
+        if _save_email:
+            st.caption(f"Saving to **{_save_email}**")
+        else:
+            st.info("Sign in to save or track this portfolio — "
+                    "use the **Sign in** button at the top right.")
+        _save_name = st.text_input("Portfolio name", placeholder="My Growth Portfolio",
+                                   key=f"{key_prefix}_save_port_name",
+                                   disabled=not _save_email)
+        if st.button("Save Portfolio", key=f"{key_prefix}_save_port_btn"):
+            if not weights:
+                st.warning("Build a portfolio first.")
+            elif _save_email.strip() and _save_name.strip():
+                _ok = save_portfolio(
+                    user_email=_save_email,
+                    name=_save_name,
+                    weights=weights,
+                    preferences=prefs,
+                    metrics=metrics or {},
+                )
+                if _ok:
+                    st.success("Portfolio saved!")
+                else:
+                    # Say what actually went wrong. "Check your connection" was
+                    # wrong for every cause except an actual network drop, and it
+                    # sent debugging in the wrong direction for a malformed
+                    # SUPABASE_URL more than once.
+                    from database import last_write_error
+                    st.error(f"Save failed — {last_write_error()}")
+            else:
+                st.warning("Enter both an email and a name.")
+
+        st.markdown("<div style='color:#94a3b8;font-size:0.8rem;margin:0.4rem 0'>— or —</div>",
+                    unsafe_allow_html=True)
+        if st.button("Track this forward", key=f"{key_prefix}_track_port_btn",
+                     help="Save to 'Your Portfolios' and track its real performance from today."):
+            if not weights:
+                st.warning("Build a portfolio first.")
+            elif _save_email.strip() and _save_name.strip():
+                _cap = float(prefs.get("starting_capital", 10000) or 10000)
+                _alloc = {tk: w * _cap for tk, w in weights.items() if w and w > 0}
+                with st.spinner("Pricing holdings…"):
+                    _lots, _skipped = dollars_to_lots(_alloc, datetime.today().strftime("%Y-%m-%d"))
+                if not _lots:
+                    st.error("Couldn't price the holdings.")
+                else:
+                    _pid = save_tracked_portfolio(_save_email, _save_name, _lots,
+                                                  datetime.today().strftime("%Y-%m-%d"))
+                    if _pid:
+                        st.success("Now tracking — open the **Your Portfolios** tab.")
+                    else:
+                        # Report the reason the write itself gave, rather than
+                        # re-probing and guessing. The old version asked
+                        # tracked_storage_status() and announced "the table isn't
+                        # in this project" for any non-200 - including a doubled
+                        # /rest/v1 in the URL, where the table was present and the
+                        # advice was actively misleading.
+                        from database import last_write_error
+                        st.error(f"Couldn't save — {last_write_error()}")
+            else:
+                st.warning("Enter both an email and a name.")
+
+    if not show_load:
+        return
+
+    with _ld_col:
+        st.markdown("**Load a saved portfolio**")
+        # Same rule as saving: your own account only. This used to accept any
+        # address and return that person's portfolios to whoever asked.
+        _load_email = auth.current_email() or ""
+        if not _load_email:
+            st.caption("Sign in to see portfolios you've saved.")
+        elif st.button("Find My Portfolios", key=f"{key_prefix}_load_port_btn"):
+            _saved = load_portfolios(_load_email)
+            if _saved:
+                st.session_state[_K_FOUND_PORTS] = _saved
+            else:
+                st.info("You haven't saved any portfolios yet.")
+
+        if _K_FOUND_PORTS in st.session_state:
+            for _p in st.session_state[_K_FOUND_PORTS]:
+                _pcols = st.columns([3, 1, 1])
+                with _pcols[0]:
+                    _date = _p.get("created_at", "")[:10]
+                    st.markdown(f"**{_p['name']}** <span style='color:#94a3b8;font-size:0.78rem'>"
+                                f"saved {_date}</span>", unsafe_allow_html=True)
+                    st.caption(", ".join(list(_p.get("weights", {}).keys())[:6]))
+                with _pcols[1]:
+                    if st.button("Load", key=f"{key_prefix}_load_{_p['id']}"):
+                        # Restore the saved risk profile and rebuild from current
+                        # market data. Setting only _K_WEIGHTS (the old behaviour)
+                        # left the optimiser frame, backtest, forecast and both
+                        # export buffers in place from the PREVIOUS portfolio - so
+                        # a loaded allocation was displayed next to another
+                        # portfolio's backtest, drawdown and Monte Carlo, and any
+                        # loaded ticker absent from the stale price frame was
+                        # silently dropped.
+                        st.session_state[_K_WEIGHTS] = _p["weights"]
+                        if _p.get("preferences"):
+                            st.session_state[_K_PREFS] = _p["preferences"]
+                        for _k in (_K_OPTIMISED, _K_BACKTEST, _K_MC,
+                                   _K_EXCEL, _K_PPTX):
+                            st.session_state.pop(_k, None)
+                        st.session_state[_K_STEP] = 2
+                        st.info(f"Loaded **{_p['name']}** — its risk profile is "
+                                f"restored and the analysis is being rebuilt on "
+                                f"today's prices, so weights may differ from the "
+                                f"saved copy.")
+                        st.rerun()
+                with _pcols[2]:
+                    if st.button("Delete", key=f"{key_prefix}_del_{_p['id']}"):
+                        delete_portfolio(_p["id"])
+                        del st.session_state[_K_FOUND_PORTS]
+                        st.rerun()
+
+
+# ── Section: Forecast ───────────────────────────────────────────
+
+def _section_forecast():
+    """Monte Carlo projection, behind an explicit Run.
+
+    The backtest computes on sight because it takes under a second. This does
+    not: it is a few seconds of simulation and the heaviest transient memory in
+    the app, so it asks first. A button also makes the cost legible, gives the
+    wait an honest loading state, and stops a user who is only browsing sections
+    from paying for a forecast they never wanted.
+    """
     prefs   = st.session_state.get(_K_PREFS, {})
     opt     = st.session_state.get(_K_OPTIMISED, {})
     weights = st.session_state.get(_K_WEIGHTS, {})
-    bt      = st.session_state.get(_K_BACKTEST, {})
+
+    horizon_map = {"1 year":1,"3 years":3,"5 years":5,"10 years":10,"20+ years":20}
+    forecast_yr = horizon_map.get(prefs.get("horizon","5 years"), 5)
 
     if _K_MC not in st.session_state:
-        horizon_map = {"1 year":1,"3 years":3,"5 years":5,"10 years":10,"20+ years":20}
-        forecast_yr = horizon_map.get(prefs.get("horizon","5 years"), 5)
+        st.caption(
+            f"Projects a range of {forecast_yr}-year outcomes for this allocation by "
+            f"simulating {_MC_SIMULATIONS:,} correlated paths from its own volatility "
+            f"and correlations. Nothing here is a prediction — it is the spread the "
+            f"portfolio's own history implies."
+        )
+        if not st.button(f"Run {forecast_yr}-year forecast", type="primary",
+                         key="run_forecast"):
+            return
 
         with st.spinner(f"Running {forecast_yr}-year Monte Carlo simulation..."):
             try:
@@ -1925,18 +2092,24 @@ def _render_step_4():
                     log=lambda m: None,
                     market_returns=opt.get("market_returns"),
                 )
+                # Percentiles, not the path matrix. The fan chart, the Excel
+                # sheet and the PowerPoint chart all reduce it to exactly these
+                # five series, so keeping 2,521 x 1,000 floats (20.2 MB) alive
+                # for the life of the session bought nothing.
                 st.session_state[_K_MC] = {
-                    "sim_df":     mc_sim_df,
+                    "pcts":       mc_percentiles(mc_sim_df),
                     "summary":    mc_summary,
                     "milestones": milestones,
                 }
+                del mc_sim_df
             except Exception as e:
                 st.error(f"Monte Carlo failed: {e}")
                 import traceback as _tb; print(_tb.format_exc())   # server log, not UI
                 return
+        st.rerun()
 
     mc_data    = st.session_state[_K_MC]
-    mc_sim_df  = mc_data["sim_df"]
+    mc_pcts    = mc_data["pcts"]
     mc_summary = mc_data["summary"]
     milestones = mc_data["milestones"]
     prefs      = st.session_state.get(_K_PREFS, {})
@@ -2071,8 +2244,8 @@ reflects that.
     # All paths, not the first 300: the Outcome Range cards above are computed from
     # the full set, so sampling here made the fan's endpoints disagree with the
     # Bear/Median/Best numbers printed a few inches above it.
-    x_days = list(range(len(mc_sim_df)))
-    pcts   = np.percentile(mc_sim_df.values, [5, 25, 50, 75, 95], axis=1)
+    x_days = list(range(len(mc_pcts)))
+    pcts   = mc_pcts.values.T          # (5, days), same order as before
 
     fig_mc = go.Figure()
     fig_mc.add_trace(go.Scatter(x=x_days,y=pcts[4],name="P95 (Best)",
@@ -2117,7 +2290,41 @@ reflects that.
         })
     st.dataframe(pd.DataFrame(ms_rows), use_container_width=True, hide_index=True)
 
-    # Export downloads
+    if st.button("Re-run forecast", key="rerun_forecast"):
+        st.session_state.pop(_K_MC, None)
+        st.rerun()
+
+
+# ── Section: Export ────────────────────────────────────────────
+
+def _section_export():
+    """Excel / PowerPoint download.
+
+    Reachable without having run the backtest or the forecast, which the old
+    linear flow made impossible. Both builders already treat those as optional,
+    so the report is simply smaller — but the user is told what is missing
+    rather than left to notice an absent sheet.
+    """
+    prefs = st.session_state.get(_K_PREFS, {})
+    weights = st.session_state.get(_K_WEIGHTS, {})
+    bt = st.session_state.get(_K_BACKTEST, {})
+    mc_data = st.session_state.get(_K_MC, {})
+    mc_pcts = mc_data.get("pcts")
+    mc_summary = mc_data.get("summary", {})
+    milestones = mc_data.get("milestones", {})
+
+    _missing = []
+    if not bt:
+        _missing.append("the backtest")
+    if mc_pcts is None:
+        _missing.append("the forecast")
+    if _missing:
+        st.info(
+            f"The report will be built without {' and '.join(_missing)} — open "
+            f"{'those sections' if len(_missing) > 1 else 'that section'} first if "
+            f"you want {'them' if len(_missing) > 1 else 'it'} included."
+        )
+
     _section_header("Download Full Portfolio Report")
 
     # Both formats share one gate: they are the same portfolio in two wrappers.
@@ -2146,7 +2353,7 @@ reflects that.
                         backtest_df           = bt_data.get("df"),
                         backtest_metrics      = bt_data.get("metrics", {}),
                         heatmap_df            = bt_data.get("heatmap"),
-                        mc_sim_df             = mc_sim_df,
+                        mc_sim_df             = mc_pcts,
                         mc_summary            = mc_summary,
                         milestones            = milestones,
                         corr_matrix           = corr_mat,
@@ -2179,7 +2386,7 @@ reflects that.
                         stock_metrics         = stock_mets,
                         backtest_df           = bt_data.get("df"),
                         backtest_metrics      = bt_data.get("metrics", {}),
-                        mc_sim_df             = mc_sim_df,
+                        mc_sim_df             = mc_pcts,
                         mc_summary            = mc_summary,
                         milestones            = milestones,
                         corr_matrix           = corr_mat,
@@ -2216,153 +2423,6 @@ reflects that.
     if _exp_ok:
         render_quota_note(_exp_user)
 
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("← Back to Backtest", key="step4_back"):
-            st.session_state[_K_STEP] = 3
-            if _K_MC in st.session_state:
-                del st.session_state[_K_MC]
-            st.rerun()
-    with col2:
-        if st.button("Start New Portfolio", key="step4_restart"):
-            # _K_PPTX was missing, so a freshly-started portfolio still offered the
-            # previous one's PowerPoint download.
-            for k in [_K_STEP, _K_PREFS, _K_OPTIMISED, _K_WEIGHTS,
-                      _K_BACKTEST, _K_MC, _K_EXCEL, _K_PPTX, _K_RANKINGS]:
-                st.session_state.pop(k, None)
-            st.rerun()
-
-    # ── Save / Load portfolio ──────────────────────────────────────────────
-    st.markdown("---")
-    _section_header("Save & Load Portfolios")
-
-    _sv_col, _ld_col = st.columns(2)
-
-    with _sv_col:
-        st.markdown("**Save this portfolio**")
-        # The address comes from the signed-in session, never a text box. A
-        # free-text field here let anyone write a portfolio into someone else's
-        # account just by typing their address — and it made "which email did I
-        # use?" a thing users had to remember.
-        _save_email = auth.current_email() or ""
-        if _save_email:
-            st.caption(f"Saving to **{_save_email}**")
-        else:
-            st.info("Sign in to save or track this portfolio — "
-                    "use the **Sign in** button at the top right.")
-        _save_name  = st.text_input("Portfolio name", placeholder="My Growth Portfolio",
-                                    key="save_port_name",
-                                    disabled=not _save_email)
-        if st.button("Save Portfolio", key="save_port_btn"):
-            if _save_email.strip() and _save_name.strip():
-                _weights  = st.session_state.get(_K_WEIGHTS, {})
-                _prefs    = st.session_state.get(_K_PREFS, {})
-                _bt       = st.session_state.get(_K_BACKTEST, {})
-                _metrics  = _bt.get("metrics", {}) if isinstance(_bt, dict) else {}
-                _ok = save_portfolio(
-                    user_email=_save_email,
-                    name=_save_name,
-                    weights=_weights,
-                    preferences=_prefs,
-                    metrics=_metrics,
-                )
-                if _ok:
-                    st.success("Portfolio saved!")
-                else:
-                    # Say what actually went wrong. "Check your connection" was
-                    # wrong for every cause except an actual network drop, and it
-                    # sent debugging in the wrong direction for a malformed
-                    # SUPABASE_URL more than once.
-                    from database import last_write_error
-                    st.error(f"Save failed — {last_write_error()}")
-            else:
-                st.warning("Enter both an email and a name.")
-
-        st.markdown("<div style='color:#94a3b8;font-size:0.8rem;margin:0.4rem 0'>— or —</div>",
-                    unsafe_allow_html=True)
-        if st.button("Track this forward", key="track_port_btn",
-                     help="Save to 'Your Portfolios' and track its real performance from today."):
-            if _save_email.strip() and _save_name.strip():
-                _tw  = st.session_state.get(_K_WEIGHTS, {})
-                _cap = float(st.session_state.get(_K_PREFS, {}).get("starting_capital", 10000) or 10000)
-                if not _tw:
-                    st.warning("Build a portfolio first.")
-                else:
-                    _alloc = {tk: w * _cap for tk, w in _tw.items() if w and w > 0}
-                    with st.spinner("Pricing holdings…"):
-                        _lots, _skipped = dollars_to_lots(_alloc, datetime.today().strftime("%Y-%m-%d"))
-                    if not _lots:
-                        st.error("Couldn't price the holdings.")
-                    else:
-                        _pid = save_tracked_portfolio(_save_email, _save_name, _lots,
-                                                      datetime.today().strftime("%Y-%m-%d"))
-                        if _pid:
-                            st.success("Now tracking — open the **Your Portfolios** tab.")
-                        else:
-                            # Report the reason the write itself gave, rather than
-                            # re-probing and guessing. The old version asked
-                            # tracked_storage_status() and announced "the table
-                            # isn't in this project" for any non-200 — including a
-                            # doubled /rest/v1 in the URL, where the table was
-                            # present and the advice was actively misleading.
-                            from database import last_write_error
-                            st.error(f"Couldn't save — {last_write_error()}")
-            else:
-                st.warning("Enter both an email and a name.")
-
-    with _ld_col:
-        st.markdown("**Load a saved portfolio**")
-        # Same rule as saving: your own account only. This used to accept any
-        # address and return that person's portfolios to whoever asked.
-        _load_email = auth.current_email() or ""
-        if not _load_email:
-            st.caption("Sign in to see portfolios you've saved.")
-        elif st.button("Find My Portfolios", key="load_port_btn"):
-            _saved = load_portfolios(_load_email)
-            if _saved:
-                st.session_state[_K_FOUND_PORTS] = _saved
-            else:
-                st.info("You haven't saved any portfolios yet.")
-
-        if _K_FOUND_PORTS in st.session_state:
-            _saved = st.session_state[_K_FOUND_PORTS]
-            for _p in _saved:
-                _pcols = st.columns([3, 1, 1])
-                with _pcols[0]:
-                    _date = _p.get("created_at", "")[:10]
-                    st.markdown(f"**{_p['name']}** <span style='color:#94a3b8;font-size:0.78rem'>"
-                                f"saved {_date}</span>", unsafe_allow_html=True)
-                    _tickers = ", ".join(list(_p.get("weights", {}).keys())[:6])
-                    st.caption(_tickers)
-                with _pcols[1]:
-                    if st.button("Load", key=f"load_{_p['id']}"):
-                        # Restore the saved risk profile and rebuild from current
-                        # market data. Setting only _K_WEIGHTS (the old behaviour)
-                        # left the optimiser frame, backtest, forecast and both
-                        # export buffers in place from the PREVIOUS portfolio — so
-                        # a loaded allocation was displayed next to another
-                        # portfolio's backtest, drawdown and Monte Carlo, and any
-                        # loaded ticker absent from the stale price frame was
-                        # silently dropped.
-                        st.session_state[_K_WEIGHTS] = _p["weights"]
-                        if _p.get("preferences"):
-                            st.session_state[_K_PREFS] = _p["preferences"]
-                        for _k in (_K_OPTIMISED, _K_BACKTEST, _K_MC,
-                                   _K_EXCEL, _K_PPTX):
-                            st.session_state.pop(_k, None)
-                        st.session_state[_K_STEP] = 2
-                        st.info(f"Loaded **{_p['name']}** — its risk profile is "
-                                f"restored and the analysis is being rebuilt on "
-                                f"today's prices, so weights may differ from the "
-                                f"saved copy.")
-                        st.rerun()
-                with _pcols[2]:
-                    if st.button("Delete", key=f"del_{_p['id']}"):
-                        delete_portfolio(_p["id"])
-                        del st.session_state[_K_FOUND_PORTS]
-                        st.rerun()
-
     st.markdown(render_section("Backtesting Methodology", _disc.BACKTEST),
                 unsafe_allow_html=True)
     st.markdown(render_section("Portfolio Optimisation", _disc.OPTIMISATION),
@@ -2370,6 +2430,67 @@ reflects that.
     st.markdown(render_section("Monte Carlo Projections", _disc.MONTE_CARLO),
                 unsafe_allow_html=True)
     st.markdown(render_inline(_disc.FULL_FOOTER), unsafe_allow_html=True)
+
+
+# ── Results ────────────────────────────────────────────────────
+
+_SECTIONS = ["Allocation", "Backtest", "Forecast", "Export"]
+
+
+def _render_results(api_key):
+    """One build, then a section the user picks.
+
+    This replaces steps 3-5 of the old wizard, which forced everyone through
+    Optimise -> Backtest -> Forecast in order even to reach something as cheap
+    as saving the allocation.
+
+    The selector is `st.segmented_control` rather than `st.tabs` on purpose, and
+    the reason is not cosmetic: st.tabs returns containers and the body of EVERY
+    tab executes on EVERY rerun — inactive ones are only hidden client-side, and
+    nothing server-side can ask which tab is showing. Tabs here would have run
+    the backtest, run the Monte Carlo and imported the report builders' ~100 MB
+    of matplotlib/openpyxl/pptx on every interaction on the page. A selector
+    keeps the same shape on screen and lets exactly one section render.
+    """
+    if not _ensure_built(api_key):
+        return
+
+    _current = st.session_state.get(_K_SECTION, _SECTIONS[0])
+    if _current not in _SECTIONS:
+        _current = _SECTIONS[0]
+
+    _picked = st.segmented_control(
+        "Section", _SECTIONS, default=_current, key="port_section_bar",
+        label_visibility="collapsed",
+    )
+    # segmented_control returns None when the user clicks the active option
+    # (deselecting it). Treat that as "stay here" rather than blanking the page.
+    st.session_state[_K_SECTION] = _picked or _current
+    _section = st.session_state[_K_SECTION]
+
+    if _section == "Allocation":
+        _section_allocation(api_key)
+    elif _section == "Backtest":
+        _section_backtest()
+    elif _section == "Forecast":
+        _section_forecast()
+    elif _section == "Export":
+        _section_export()
+
+    st.markdown("---")
+    _nav1, _nav2 = st.columns(2)
+    with _nav1:
+        if st.button("← Change preferences", key="results_back"):
+            st.session_state[_K_STEP] = 1
+            st.rerun()
+    with _nav2:
+        if st.button("Start New Portfolio", key="results_restart"):
+            # _K_PPTX was missing here once, so a freshly-started portfolio still
+            # offered the previous one's PowerPoint download.
+            for k in [_K_STEP, _K_SECTION, _K_PREFS, _K_OPTIMISED, _K_WEIGHTS,
+                      _K_BACKTEST, _K_MC, _K_EXCEL, _K_PPTX, _K_RANKINGS]:
+                st.session_state.pop(k, None)
+            st.rerun()
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -2420,25 +2541,25 @@ def render_portfolio_builder(api_key, is_pro=False):
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Step indicator ─────────────────────────────────────────────────────────
-    steps      = ["① Preferences", "② Universe", "③ Optimise", "④ Backtest", "⑤ Forecast"]
-    curr_step  = st.session_state.get(_K_STEP, 0)
-    step_html  = "".join(
-        f'<div style="flex:1;padding:8px 4px;border-radius:8px;text-align:center;font-size:11px;'
-        f'{"background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;font-weight:500" if i==curr_step else "background:#f8fafc;border:1px solid #e2e8f0;color:#64748b" if i>curr_step else "background:#f0fdf4;border:1px solid #86efac;color:#15803d;font-weight:500"}">'
-        f'{s}</div>'
-        for i, s in enumerate(steps))
-    st.markdown(f'<div style="display:flex;gap:5px;margin-bottom:1.5rem">{step_html}</div>',
-                unsafe_allow_html=True)
+    # ── Step indicator ──────────────────────────────────────────────
+    # Only the guided part is a sequence now: agree, set preferences, build. Once
+    # the portfolio exists the rail would be lying — there is no next step, just
+    # sections — so it disappears and the section bar takes over.
+    curr_step = st.session_state.get(_K_STEP, 0)
+    if curr_step < 2:
+        steps     = ["① Preferences", "② Build"]
+        step_html = "".join(
+            f'<div style="flex:1;padding:8px 4px;border-radius:8px;text-align:center;font-size:11px;'
+            f'{"background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;font-weight:500" if i==curr_step else "background:#f8fafc;border:1px solid #e2e8f0;color:#64748b"}">'
+            f'{s}</div>'
+            for i, s in enumerate(steps))
+        st.markdown(f'<div style="display:flex;gap:5px;margin-bottom:1.5rem">{step_html}</div>',
+                    unsafe_allow_html=True)
 
-    # ── Dispatcher ─────────────────────────────────────────────────────────────
+    # ── Dispatcher ────────────────────────────────────────────────
     if curr_step == 0:
         _render_step_0()
     elif curr_step == 1:
         _render_step_1(api_key)
-    elif curr_step == 2:
-        _render_step_2(api_key)
-    elif curr_step == 3:
-        _render_step_3()
-    elif curr_step == 4:
-        _render_step_4()
+    else:
+        _render_results(api_key)
