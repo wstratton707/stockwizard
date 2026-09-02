@@ -934,6 +934,221 @@ if _page == "home":
             f'<span class="sample-dl-sub">Excel · {_sm["period"]} · {_sm["_size"]} · '
             f'generated {_sm["_date"]}</span></span></a>', unsafe_allow_html=True)
 
+    # ── The product pitch ─────────────────────────────────────────────
+    # Why QuantWizard, What's Included, How It Works, Methodology and Pricing
+    # used to live under the Analysis page's ticker box, in the branch that
+    # renders when nobody has typed anything yet. So the entire case for the
+    # product was shown only to someone who had ALREADY decided to analyse
+    # something, and vanished the moment they typed a ticker - while Home, the
+    # page whose job is to make that case, was a hero and two buttons.
+    #
+    # It also made "How It Works" read as a contradiction: it describes the
+    # Portfolio Builder's flow (risk tolerance, capital, horizon, then rank and
+    # optimise), which is accurate here beside the other products and was
+    # nonsense on a page whose only control is a ticker box.
+
+    # ── Problem section ───────────────────────────────────────────────────
+    st.markdown("""
+    <div class="section-header">Why QuantWizard</div>
+    """, unsafe_allow_html=True)
+
+    p1, p2 = st.columns(2)
+    for col, icon, problem, solution in [
+        (p1, "show_chart", "A price chart isn't risk.",
+         "We give you the numbers that actually matter — volatility, drawdown, Sharpe against the live T-bill, and a 1,000-path forecast."),
+        (p2, "search", "A screener hands you a list.",
+         "They won't build the portfolio. We rank 320+ names daily, then optimise the weights to your risk tolerance."),
+    ]:
+        with col:
+            st.markdown(f"""
+            <div style="border-top:2px solid #0f2747;padding:0.95rem 1.4rem 0.5rem 0;height:100%">
+                <div style="margin-bottom:0.75rem"><span class="material-symbols-outlined"
+                     style="font-size:1.7rem;color:#1d4ed8">{icon}</span></div>
+                <div style="font-weight:600;color:#0f172a;font-size:0.88rem;
+                            margin-bottom:0.5rem">{problem}</div>
+                <div style="color:#64748b;font-size:0.82rem;line-height:1.6">{solution}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ── Feature cards ─────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="section-header">What's Included</div>
+    """, unsafe_allow_html=True)
+
+    fc1, fc2 = st.columns(2)
+    fc3, fc4 = st.columns(2)
+
+    for col, icon, title, tier, items in [
+        (fc1, "monitoring", "Stock Analysis", "Free",
+         ["Bollinger Bands, RSI, GARCH volatility", "Monte Carlo simulation (1,000 paths)",
+          "Peer comparison vs sector", "10-yr fundamentals + F-Score & Z-Score", "Excel + PowerPoint export"]),
+        (fc2, "account_balance_wallet", "Portfolio Builder", "Pro",
+         ["320+ stocks ranked by multi-factor score", "5-year backtest with quarterly rebalancing",
+          "Mean-variance optimization", "Portfolio Monte Carlo with milestone projections",
+          "Diversification score + correlation heatmap"]),
+        (fc3, "local_fire_department", "Stress Test", "Pro",
+         ["5 historical crashes: 2008, COVID, 2022, dot-com, 2018", "Beta-based shock from your holdings' sensitivity",
+          "Portfolio return vs S&P 500 per crash", "Dollar impact calculator",
+          "Correlation culprit detection"]),
+        (fc4, "account_balance", "Bond & Portfolio Autopsy", "Pro",
+         ["Bond ETF analysis across 6 categories", "Upload your holdings CSV — see what broke",
+          "P&L attribution per position", "Rolling volatility + drawdown charts",
+          "Benchmark comparison"]),
+    ]:
+        with col:
+            tier_color = "#1d4ed8" if tier == "Pro" else "#059669"
+            tier_bg    = "rgba(29,78,216,0.08)" if tier == "Pro" else "rgba(5,150,105,0.08)"
+            items_html = "".join(f"<li style='margin-bottom:0.3rem'>{i}</li>" for i in items)
+            st.markdown(f"""
+            <div style="border-top:2px solid {tier_color};padding:0.95rem 1.4rem 1.1rem 0;margin-bottom:1.1rem">
+                <div style="display:flex;align-items:center;justify-content:space-between;
+                            margin-bottom:0.75rem">
+                    <div style="display:flex;align-items:center;gap:0.5rem">
+                        <span class="material-symbols-outlined"
+                              style="font-size:1.45rem;color:{tier_color}">{icon}</span>
+                        <span style="font-weight:700;color:#0f172a;font-size:0.95rem">{title}</span>
+                    </div>
+                    <div style="background:{tier_bg};color:{tier_color};font-size:0.68rem;
+                                font-weight:700;letter-spacing:0.5px;text-transform:uppercase;
+                                padding:0.2rem 0.6rem;border-radius:20px">{tier}</div>
+                </div>
+                <ul style="color:#64748b;font-size:0.82rem;line-height:1.6;
+                           padding-left:1.1rem;margin:0">
+                    {items_html}
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ── How it works ──────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="section-header">How It Works</div>
+    """, unsafe_allow_html=True)
+
+    h1, h2, h3 = st.columns(3)
+    for col, num, title, desc in [
+        (h1, "1", "Set your constraints",
+         "Risk tolerance, capital, horizon, sectors. Two minutes."),
+        (h2, "2", "We rank and optimise",
+         "320+ names scored daily on Sharpe and momentum, best-in-sector selected, weights solved by mean-variance."),
+        (h3, "3", "Take the report",
+         "Five-year backtest, Monte Carlo with milestone probabilities, and a formatted Excel and PowerPoint pack."),
+    ]:
+        with col:
+            st.markdown(f"""
+            <div style="border-top:2px solid #0f2747;padding:0.95rem 1.4rem 0.5rem 0">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:0.76rem;font-weight:600;color:#3b82f6;letter-spacing:0.6px;margin-bottom:0.5rem">0{num}</div>
+                <div style="font-weight:700;color:#0f172a;font-size:0.9rem;
+                            margin-bottom:0.4rem">{title}</div>
+                <div style="color:#64748b;font-size:0.81rem;line-height:1.6">{desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ── Methodology & Data ────────────────────────────────────────────────
+    st.markdown("""
+    <div class="section-header">Methodology &amp; Data</div>
+    <div style="color:#64748b;font-size:0.84rem;line-height:1.6;margin-bottom:1.25rem;max-width:680px">
+        We show our work. Every number below is computed with standard, citable formulas —
+        and we're upfront about the data and its limits.
+    </div>
+    """, unsafe_allow_html=True)
+
+    _METHOD = [
+        ("dataset", "Data &amp; Freshness",
+         "Live quotes are <b>real-time</b> via <b>Finnhub</b>; daily price history comes from "
+         "<b>Yahoo Finance</b> (same-day close) with <b>Polygon</b> as a fallback. "
+         "Fundamentals come straight from <b>SEC EDGAR</b> filings (10-K/10-Q), updated each filing. "
+         "Intraday charts are delayed on the free data tier."),
+        ("balance", "Risk-Adjusted Returns",
+         "Sharpe and Sortino use <b>excess return over the live 3-month T-bill</b> (FRED), not raw return. "
+         "Volatility is the annualized standard deviation of daily returns (σ·√252)."),
+        ("query_stats", "Backtesting",
+         "Portfolio backtests use a <b>time-weighted NAV</b> that separates your contributions from market "
+         "performance, benchmark SPY on the <b>same contribution schedule</b>, and charge realistic "
+         "rebalancing cost on traded value only."),
+        ("casino", "Monte Carlo",
+         "Correlated multi-asset simulation via <b>Cholesky decomposition</b> of the historical return "
+         "correlation matrix. Per-asset drift is <b>CAPM</b> — risk-free rate + beta × a 5% equity risk "
+         "premium — so the projection is driven by how much market risk a holding carries, not by which "
+         "names recently ran up. Log-normal paths with an Itô correction; a fixed seed, so the same "
+         "inputs give the same answer."),
+        ("account_balance", "Fundamental Quality",
+         "From EDGAR statements: <b>Piotroski F-Score</b> (9-point profitability/leverage/efficiency test), "
+         "<b>Altman Z-Score</b> (distress risk), free cash flow (operating cash flow − capex), and standard "
+         "valuation multiples."),
+        ("local_fire_department", "Stress Test",
+         "<b>Real historical performance</b> through each crash (2008, COVID, 2022, dot-com, 2018); a "
+         "position too new to have existed then falls back to a beta estimate. Correlations rise in real "
+         "crises, so future losses can differ."),
+    ]
+    _mcards = "".join(
+        f'<div style="border-top:1px solid #e2e8f0;padding:0.9rem 1.3rem 0.9rem 0">'
+        f'<div style="margin-bottom:0.5rem;display:flex;align-items:center;gap:0.5rem">'
+        f'<span class="material-symbols-outlined" style="color:#1d4ed8;font-size:1.4rem">{ic}</span>'
+        f'<span style="font-weight:700;color:#0f172a;font-size:0.9rem">{ti}</span></div>'
+        f'<div style="color:#64748b;font-size:0.8rem;line-height:1.6">{tx}</div></div>'
+        for ic, ti, tx in _METHOD
+    )
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));'
+        f'gap:0 1.9rem">{_mcards}</div>'
+        f'<div style="color:#94a3b8;font-size:0.76rem;line-height:1.6;margin-top:1rem;max-width:680px">'
+        f'These tools are for research and education, not investment advice. Estimates and forecasts are '
+        f'not predictions — past performance and modeled scenarios do not guarantee future results.</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Pricing ───────────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="section-header">Pricing</div>
+    """, unsafe_allow_html=True)
+
+    pr1, pr2 = st.columns(2)
+    with pr1:
+        st.markdown("""
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:1.75rem;
+                    background:#ffffff">
+            <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.5px;
+                        text-transform:uppercase;color:#64748b;margin-bottom:0.5rem">Free</div>
+            <div style="font-size:2rem;font-weight:700;color:#0f172a;
+                        font-family:'JetBrains Mono',monospace;margin-bottom:0.25rem">$0</div>
+            <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">No credit card required</div>
+            <ul style="color:#64748b;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0">
+                <li>Full stock analysis on any ticker</li>
+                <li>Bollinger Bands, RSI, Monte Carlo</li>
+                <li>Peer comparison charts</li>
+                <li>Excel + PowerPoint export</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    with pr2:
+        st.markdown("""
+        <div style="border:2px solid #1d4ed8;border-radius:12px;padding:1.75rem;
+                    background:linear-gradient(135deg,#eff6ff,#ffffff)">
+            <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.5px;
+                        text-transform:uppercase;color:#1d4ed8;margin-bottom:0.5rem">Pro</div>
+            <div style="font-size:2rem;font-weight:700;color:#0f172a;
+                        font-family:'JetBrains Mono',monospace;margin-bottom:0.25rem">$9.99
+                <span style="font-size:0.9rem;font-weight:400;color:#64748b">/month</span>
+            </div>
+            <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">Cancel anytime</div>
+            <ul style="color:#0f172a;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0 0 1.25rem">
+                <li>Everything in Free</li>
+                <li><strong>Portfolio Builder</strong> — 320+ stocks, 5-year backtest</li>
+                <li><strong>Stress Test</strong> — 5 historical crash scenarios</li>
+                <li><strong>Bond Analysis</strong> — 60+ ETFs</li>
+                <li><strong>Portfolio Autopsy</strong> — CSV upload + P&L attribution</li>
+                <li>Save &amp; load portfolios</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+    if SHOW_PRICING:
+        render_pricing_section()
+
+    # (The founder card moved to the bottom of the Home page — it was only
+    # ever visible here to someone who opened Analysis and typed nothing.)
+
+
     # ── Built by ──────────────────────────────────────────────────────────────
     # Lives at the bottom of the front page, above the footer. It used to sit on
     # the Analysis page's empty state, which meant it only appeared to someone
@@ -1195,209 +1410,6 @@ elif _page == "analysis":
                     </div>""", unsafe_allow_html=True)
             else:
                 st.markdown('<span style="color:#38bdf8;font-size:0.85rem">Market data unavailable right now.</span>', unsafe_allow_html=True)
-
-        # ── Problem section ───────────────────────────────────────────────────
-        st.markdown("""
-        <div class="section-header">Why QuantWizard</div>
-        """, unsafe_allow_html=True)
-
-        p1, p2, p3 = st.columns(3)
-        for col, icon, problem, solution in [
-            (p1, "show_chart", "A price chart isn't risk.",
-             "We give you the numbers that actually matter — volatility, drawdown, Sharpe against the live T-bill, and a 1,000-path forecast."),
-            (p2, "search", "Screeners hand you a list.",
-             "They won't build the portfolio. We rank 320+ names daily, then optimise the weights to your risk tolerance."),
-            (p3, "payments", "Advisors charge thousands.",
-             "Monte Carlo, efficient frontier, GARCH — the models a quant desk runs, for $9.99 a month."),
-        ]:
-            with col:
-                st.markdown(f"""
-                <div style="border-top:2px solid #0f2747;padding:0.95rem 1.4rem 0.5rem 0;height:100%">
-                    <div style="margin-bottom:0.75rem"><span class="material-symbols-outlined"
-                         style="font-size:1.7rem;color:#1d4ed8">{icon}</span></div>
-                    <div style="font-weight:600;color:#0f172a;font-size:0.88rem;
-                                margin-bottom:0.5rem">{problem}</div>
-                    <div style="color:#64748b;font-size:0.82rem;line-height:1.6">{solution}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        # ── Feature cards ─────────────────────────────────────────────────────
-        st.markdown("""
-        <div class="section-header">What's Included</div>
-        """, unsafe_allow_html=True)
-
-        fc1, fc2 = st.columns(2)
-        fc3, fc4 = st.columns(2)
-
-        for col, icon, title, tier, items in [
-            (fc1, "monitoring", "Stock Analysis", "Free",
-             ["Bollinger Bands, RSI, GARCH volatility", "Monte Carlo simulation (1,000 paths)",
-              "Peer comparison vs sector", "10-yr fundamentals + F-Score & Z-Score", "Excel + PowerPoint export"]),
-            (fc2, "account_balance_wallet", "Portfolio Builder", "Pro",
-             ["320+ stocks ranked by multi-factor score", "5-year backtest with quarterly rebalancing",
-              "Mean-variance optimization", "Portfolio Monte Carlo with milestone projections",
-              "Diversification score + correlation heatmap"]),
-            (fc3, "local_fire_department", "Stress Test", "Pro",
-             ["5 historical crashes: 2008, COVID, 2022, dot-com, 2018", "Beta-based shock from your holdings' sensitivity",
-              "Portfolio return vs S&P 500 per crash", "Dollar impact calculator",
-              "Correlation culprit detection"]),
-            (fc4, "account_balance", "Bond & Portfolio Autopsy", "Pro",
-             ["Bond ETF analysis across 6 categories", "Upload your holdings CSV — see what broke",
-              "P&L attribution per position", "Rolling volatility + drawdown charts",
-              "Benchmark comparison"]),
-        ]:
-            with col:
-                tier_color = "#1d4ed8" if tier == "Pro" else "#059669"
-                tier_bg    = "rgba(29,78,216,0.08)" if tier == "Pro" else "rgba(5,150,105,0.08)"
-                items_html = "".join(f"<li style='margin-bottom:0.3rem'>{i}</li>" for i in items)
-                st.markdown(f"""
-                <div style="border-top:2px solid {tier_color};padding:0.95rem 1.4rem 1.1rem 0;margin-bottom:1.1rem">
-                    <div style="display:flex;align-items:center;justify-content:space-between;
-                                margin-bottom:0.75rem">
-                        <div style="display:flex;align-items:center;gap:0.5rem">
-                            <span class="material-symbols-outlined"
-                                  style="font-size:1.45rem;color:{tier_color}">{icon}</span>
-                            <span style="font-weight:700;color:#0f172a;font-size:0.95rem">{title}</span>
-                        </div>
-                        <div style="background:{tier_bg};color:{tier_color};font-size:0.68rem;
-                                    font-weight:700;letter-spacing:0.5px;text-transform:uppercase;
-                                    padding:0.2rem 0.6rem;border-radius:20px">{tier}</div>
-                    </div>
-                    <ul style="color:#64748b;font-size:0.82rem;line-height:1.6;
-                               padding-left:1.1rem;margin:0">
-                        {items_html}
-                    </ul>
-                </div>
-                """, unsafe_allow_html=True)
-
-        # ── How it works ──────────────────────────────────────────────────────
-        st.markdown("""
-        <div class="section-header">How It Works</div>
-        """, unsafe_allow_html=True)
-
-        h1, h2, h3 = st.columns(3)
-        for col, num, title, desc in [
-            (h1, "1", "Set your constraints",
-             "Risk tolerance, capital, horizon, sectors. Two minutes."),
-            (h2, "2", "We rank and optimise",
-             "320+ names scored daily on Sharpe and momentum, best-in-sector selected, weights solved by mean-variance."),
-            (h3, "3", "Take the report",
-             "Five-year backtest, Monte Carlo with milestone probabilities, and a formatted Excel and PowerPoint pack."),
-        ]:
-            with col:
-                st.markdown(f"""
-                <div style="border-top:2px solid #0f2747;padding:0.95rem 1.4rem 0.5rem 0">
-                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.76rem;font-weight:600;color:#3b82f6;letter-spacing:0.6px;margin-bottom:0.5rem">0{num}</div>
-                    <div style="font-weight:700;color:#0f172a;font-size:0.9rem;
-                                margin-bottom:0.4rem">{title}</div>
-                    <div style="color:#64748b;font-size:0.81rem;line-height:1.6">{desc}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        # ── Methodology & Data ────────────────────────────────────────────────
-        st.markdown("""
-        <div class="section-header">Methodology &amp; Data</div>
-        <div style="color:#64748b;font-size:0.84rem;line-height:1.6;margin-bottom:1.25rem;max-width:680px">
-            We show our work. Every number below is computed with standard, citable formulas —
-            and we're upfront about the data and its limits.
-        </div>
-        """, unsafe_allow_html=True)
-
-        _METHOD = [
-            ("dataset", "Data &amp; Freshness",
-             "Live quotes are <b>real-time</b> via <b>Finnhub</b>; daily price history comes from "
-             "<b>Yahoo Finance</b> (same-day close) with <b>Polygon</b> as a fallback. "
-             "Fundamentals come straight from <b>SEC EDGAR</b> filings (10-K/10-Q), updated each filing. "
-             "Intraday charts are delayed on the free data tier."),
-            ("balance", "Risk-Adjusted Returns",
-             "Sharpe and Sortino use <b>excess return over the live 3-month T-bill</b> (FRED), not raw return. "
-             "Volatility is the annualized standard deviation of daily returns (σ·√252)."),
-            ("query_stats", "Backtesting",
-             "Portfolio backtests use a <b>time-weighted NAV</b> that separates your contributions from market "
-             "performance, benchmark SPY on the <b>same contribution schedule</b>, and charge realistic "
-             "rebalancing cost on traded value only."),
-            ("casino", "Monte Carlo",
-             "Correlated multi-asset simulation via <b>Cholesky decomposition</b> of the historical return "
-             "correlation matrix. Per-asset drift is <b>CAPM</b> — risk-free rate + beta × a 5% equity risk "
-             "premium — so the projection is driven by how much market risk a holding carries, not by which "
-             "names recently ran up. Log-normal paths with an Itô correction; a fixed seed, so the same "
-             "inputs give the same answer."),
-            ("account_balance", "Fundamental Quality",
-             "From EDGAR statements: <b>Piotroski F-Score</b> (9-point profitability/leverage/efficiency test), "
-             "<b>Altman Z-Score</b> (distress risk), free cash flow (operating cash flow − capex), and standard "
-             "valuation multiples."),
-            ("local_fire_department", "Stress Test",
-             "<b>Real historical performance</b> through each crash (2008, COVID, 2022, dot-com, 2018); a "
-             "position too new to have existed then falls back to a beta estimate. Correlations rise in real "
-             "crises, so future losses can differ."),
-        ]
-        _mcards = "".join(
-            f'<div style="border-top:1px solid #e2e8f0;padding:0.9rem 1.3rem 0.9rem 0">'
-            f'<div style="margin-bottom:0.5rem;display:flex;align-items:center;gap:0.5rem">'
-            f'<span class="material-symbols-outlined" style="color:#1d4ed8;font-size:1.4rem">{ic}</span>'
-            f'<span style="font-weight:700;color:#0f172a;font-size:0.9rem">{ti}</span></div>'
-            f'<div style="color:#64748b;font-size:0.8rem;line-height:1.6">{tx}</div></div>'
-            for ic, ti, tx in _METHOD
-        )
-        st.markdown(
-            f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));'
-            f'gap:0 1.9rem">{_mcards}</div>'
-            f'<div style="color:#94a3b8;font-size:0.76rem;line-height:1.6;margin-top:1rem;max-width:680px">'
-            f'These tools are for research and education, not investment advice. Estimates and forecasts are '
-            f'not predictions — past performance and modeled scenarios do not guarantee future results.</div>',
-            unsafe_allow_html=True,
-        )
-
-        # ── Pricing ───────────────────────────────────────────────────────────
-        st.markdown("""
-        <div class="section-header">Pricing</div>
-        """, unsafe_allow_html=True)
-
-        pr1, pr2 = st.columns(2)
-        with pr1:
-            st.markdown("""
-            <div style="border:1px solid #e2e8f0;border-radius:12px;padding:1.75rem;
-                        background:#ffffff">
-                <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.5px;
-                            text-transform:uppercase;color:#64748b;margin-bottom:0.5rem">Free</div>
-                <div style="font-size:2rem;font-weight:700;color:#0f172a;
-                            font-family:'JetBrains Mono',monospace;margin-bottom:0.25rem">$0</div>
-                <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">No credit card required</div>
-                <ul style="color:#64748b;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0">
-                    <li>Full stock analysis on any ticker</li>
-                    <li>Bollinger Bands, RSI, Monte Carlo</li>
-                    <li>Peer comparison charts</li>
-                    <li>Excel + PowerPoint export</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        with pr2:
-            st.markdown("""
-            <div style="border:2px solid #1d4ed8;border-radius:12px;padding:1.75rem;
-                        background:linear-gradient(135deg,#eff6ff,#ffffff)">
-                <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.5px;
-                            text-transform:uppercase;color:#1d4ed8;margin-bottom:0.5rem">Pro</div>
-                <div style="font-size:2rem;font-weight:700;color:#0f172a;
-                            font-family:'JetBrains Mono',monospace;margin-bottom:0.25rem">$9.99
-                    <span style="font-size:0.9rem;font-weight:400;color:#64748b">/month</span>
-                </div>
-                <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">Cancel anytime</div>
-                <ul style="color:#0f172a;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0 0 1.25rem">
-                    <li>Everything in Free</li>
-                    <li><strong>Portfolio Builder</strong> — 320+ stocks, 5-year backtest</li>
-                    <li><strong>Stress Test</strong> — 5 historical crash scenarios</li>
-                    <li><strong>Bond Analysis</strong> — 60+ ETFs</li>
-                    <li><strong>Portfolio Autopsy</strong> — CSV upload + P&L attribution</li>
-                    <li>Save &amp; load portfolios</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-
-        if SHOW_PRICING:
-            render_pricing_section()
-
-        # (The founder card moved to the bottom of the Home page — it was only
-        # ever visible here to someone who opened Analysis and typed nothing.)
 
         # ── Footer ────────────────────────────────────────────────────────────
         st.markdown(render_footer(), unsafe_allow_html=True)
