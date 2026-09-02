@@ -43,7 +43,7 @@ from cached_fetchers import (
     cached_detect_support_resistance, cached_build_correlation_matrix,
     cached_get_analyst_data,
 )
-from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP
+from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP, suggest_peers
 from analysis import (
     detect_support_resistance, build_correlation_matrix,
     run_monte_carlo, generate_summary_paragraph,
@@ -972,21 +972,30 @@ elif _page == "analysis":
     # .st-key-analysis-inputs: the app has seven expanders and the others should
     # keep the quiet default treatment. (`key` on st.expander itself sets widget
     # identity but emits no CSS class — only containers do.)
+    # ── Analysis inputs ────────────────────────────────────────────────
+    # A ticker and a button. Everything else is behind Advanced options.
+    #
+    # This panel used to open with thirteen controls: a ticker, a date-range
+    # checkbox, two benchmark checkboxes, a peers box, six module checkboxes and
+    # two forecast sliders. Every one of them already defaulted to the right
+    # thing, so the settings were not wrong - they were just visible, and they
+    # asked the reader to understand the methodology before seeing any output.
+    #
+    # Four are gone rather than moved:
+    #   Correlation Matrix, Support & Resistance - both compute over data that
+    #     has already been fetched, through memoised wrappers. Switching them off
+    #     saved nothing, so the toggle only ever cost a decision.
+    #   Simulations, Horizon - implementation details of the forecast. Nobody
+    #     writing a research report can weigh 100 paths against 5,000, and the
+    #     single-stock Monte Carlo allocates three unbatched arrays of
+    #     days x sims, so the slider's top end was a memory footgun on a box that
+    #     has hit its ceiling twice this month. Fixed at the defaults they had.
     _inputs_box = st.container(key="analysis-inputs")
-    with _inputs_box.expander("Analysis inputs",
-                     expanded=not st.session_state.get("analysis_ran", False)):
-        # Day Trader Mode removed — Investor Mode is the only experience now.
+    with _inputs_box:
         mode = "Investor Mode"
+        bar_size = "day"
+        _today = datetime.today().date()
 
-        # ── Ticker ────────────────────────────────────────────────────────────────
-        st.markdown('<div class="field-label">Ticker</div>',
-                    unsafe_allow_html=True)
-        # Pressing Enter here runs the analysis just like the Run Analysis button
-        # does (see the `not run_btn and not ticker_input` landing-page test below),
-        # so it has to collapse this panel the same way. Without it the results
-        # rendered underneath a full-height, still-open form and users couldn't tell
-        # anything had happened without scrolling. Clearing the field re-opens the
-        # panel, which matches the landing-page state we fall back to.
         # ?ticker=MSFT prefills and runs the analysis, so a link can point at a
         # specific name. This is what makes the ticker links inside the exported
         # workbooks land on that company's page instead of a blank form.
@@ -994,22 +1003,59 @@ elif _page == "analysis":
         if _qt and not st.session_state.get("analysis_ticker"):
             st.session_state["analysis_ticker"] = _qt
             st.session_state["analysis_ran"] = True
+
+        st.markdown('<div class="field-label">Ticker</div>', unsafe_allow_html=True)
+        # Pressing Enter runs the analysis just like the button does (see the
+        # `not run_btn and not ticker_input` landing-page test below).
         ticker_input = st.text_input(
-            "", placeholder="e.g. AAPL, SPY, BTC, ETH",
+            "", placeholder="Enter a ticker — e.g. AAPL, SPY, BTC",
             key="analysis_ticker",
             on_change=lambda: st.session_state.update(
                 analysis_ran=bool(st.session_state.get("analysis_ticker", "").strip())),
             label_visibility="collapsed"
         ).strip().upper()
 
-        # ── Date range ────────────────────────────────────────────────────────────
-        # Off by default: the standard run fetches HISTORY_YEARS and reports risk
-        # over METRICS_YEARS, so nobody has to pick a lookback to get a sound
-        # answer. Turning it on tailors the whole analysis — chart, risk metrics,
-        # forecast, correlation and the report — to exactly the dates chosen.
-        if mode == "Investor Mode":
-            _today   = datetime.today().date()
-            bar_size = "day"
+        run_btn = st.button(
+            "Run Analysis", type="primary", use_container_width=True,
+            on_click=lambda: st.session_state.update(analysis_ran=True))
+
+        st.caption("Financial analysis, valuation, peer comparison, risk metrics, "
+                   "technicals and a price forecast.")
+
+        # ── Advanced options ─────────────────────────────────────────
+        # Only things that cost a network call or genuinely change the answer.
+        with st.expander("Advanced options", expanded=False):
+            st.markdown('<div class="field-label">Benchmarks</div>',
+                        unsafe_allow_html=True)
+            _b1, _b2 = st.columns(2)
+            include_spy = _b1.checkbox("S&P 500 (SPY)", value=True)
+            include_qqq = _b2.checkbox("NASDAQ (QQQ)", value=True)
+
+            st.markdown('<div class="field-label">Peer Comparison</div>',
+                        unsafe_allow_html=True)
+            peers_input = st.text_input(
+                "", placeholder="Automatic — same sector, closest in size",
+                label_visibility="collapsed",
+                help="Leave empty and QuantWizard picks peers from the same "
+                     "sector, closest to this company in market value.")
+
+            st.markdown('<div class="field-label">Report Modules</div>',
+                        unsafe_allow_html=True)
+            _m1, _m2, _m3 = st.columns(3)
+            do_mc     = _m1.checkbox("Price Forecast",    value=True)
+            do_sector = _m2.checkbox("Sector Comparison", value=True)
+            do_news   = _m3.checkbox("News Headlines",    value=True)
+
+            # Off by default: the standard run fetches HISTORY_YEARS and reports
+            # risk over METRICS_YEARS, so nobody has to pick a lookback to get a
+            # sound answer. Turning it on tailors the whole analysis - chart,
+            # risk metrics, forecast, correlation and the report - to exactly the
+            # dates chosen. Measured on AAPL, 5Y vs 1Y moves annualised
+            # volatility 28.1% -> 25.2% and Sharpe 0.56 -> 1.37, so it is doing
+            # real work even when the page looks similar; the metric cards name
+            # the window they used.
+            st.markdown('<div class="field-label">Analysis Window</div>',
+                        unsafe_allow_html=True)
             custom_range = st.checkbox(
                 "Custom date range", value=False, key="use_custom_range",
                 help=f"Off: {HISTORY_YEARS} years of history, with risk measured "
@@ -1037,51 +1083,12 @@ elif _page == "analysis":
                                 ).strftime("%Y-%m-%d")
                 period_label = f"{HISTORY_YEARS}Y"
 
-        # ── Benchmarks ────────────────────────────────────────────────────────────
-        st.markdown('<div class="field-label">Benchmarks</div>',
-                    unsafe_allow_html=True)
-        include_spy = st.checkbox("S&P 500 (SPY)", value=True)
-        include_qqq = st.checkbox("NASDAQ (QQQ)", value=True)
-
-        if mode == "Investor Mode":
-            # ── Peer comparison ───────────────────────────────────────────────────
-            st.markdown('<div class="field-label">Peer Comparison</div>',
-                        unsafe_allow_html=True)
-            peers_input = st.text_input("", placeholder="e.g. GOOGL, AMZN",
-                                        label_visibility="collapsed")
-
-            # ── Report modules ────────────────────────────────────────────────────
-            st.markdown('<div class="field-label">Report Modules</div>',
-                        unsafe_allow_html=True)
-            do_mc     = st.checkbox("Price Forecast", value=True)
-            do_sector = st.checkbox("Sector Comparison",    value=True)
-            do_corr   = st.checkbox("Correlation Matrix",   value=True)
-            do_sr     = st.checkbox("Support & Resistance", value=True)
-            do_news   = st.checkbox("News Headlines",       value=True)
-            do_peers  = st.checkbox("Peer Comparison",      value=True)
-
-            if do_mc:
-                st.markdown('<div class="field-label">Forecast Settings</div>',
-                            unsafe_allow_html=True)
-                forecast_method = "Monte Carlo"
-                n_sims    = st.slider("Simulations",    100, 5000, 1000, step=100)
-                n_horizon = st.slider("Horizon (days)",  21,  504,  252, step=21)
-            else:
-                forecast_method = "Monte Carlo"
-                n_sims = 1000; n_horizon = 252
-        else:
-            peers_input = ""
-            do_mc = do_sector = do_corr = do_sr = do_news = do_peers = False
-            forecast_method = "Monte Carlo"
-            n_sims = 1000; n_horizon = 252
-
-        st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
-        # Collapse this form once an analysis has run so results aren't buried
-        # below a full-height input panel (the flag is set before the rerun, so
-        # the form is already collapsed when results render). Re-open to re-run.
-        run_btn = st.button(
-            "Run Analysis", type="primary", use_container_width=True,
-            on_click=lambda: st.session_state.update(analysis_ran=True))
+        # Always included, and no longer switchable: see the note above.
+        do_corr = True
+        do_sr   = True
+        do_peers = True
+        forecast_method = "Monte Carlo"
+        n_sims, n_horizon = 1000, 252
 
 
     # ── Landing page (no ticker entered) ─────────────────────────────────────
@@ -1466,6 +1473,20 @@ elif _page == "analysis":
                     sector          = company_details.get("Sector", "Unknown")
 
                 etf_details = cached_fetch_etf_details(ticker_input, FMP_API_KEY) if is_etf else {}
+
+                # Peers, when the user hasn't named any. The checkbox above has
+                # always defaulted to on, but the fetch was gated on a manually
+                # typed list, so for anyone who didn't fill that box in, "Peer
+                # Comparison: on" produced no peer section whatsoever. Same
+                # sector, closest in size, from the ranked universe precompute
+                # already refreshes daily.
+                peers_auto = False
+                if do_peers and not peers_list and not is_crypto:
+                    peers_list = suggest_peers(
+                        ticker_input, sector=sector,
+                        market_cap=float(company_details.get("Market Cap") or 0),
+                        api_key=POLYGON_API_KEY)
+                    peers_auto = bool(peers_list)
 
                 news_list = []
                 if do_news:
@@ -3430,6 +3451,18 @@ color:var(--muted);background:var(--surface2)}
                 st.markdown(f'<div class="section-header"'
                             f'{_sec_id("sec-peers", "Peer Comparison")}>Peer Comparison</div>',
                             unsafe_allow_html=True)
+                # Say where the comparison set came from. A reader who does not
+                # know these were picked by sector and size has no way to judge
+                # whether they are the right companies to be compared against.
+                if peers_auto:
+                    # Deliberately does not name the sector. `sector` here is
+                    # Polygon's SIC description ("Electronic Computers" for
+                    # AAPL), not a GICS sector, and the peers were matched on the
+                    # ranked universe's sector instead - so printing this string
+                    # would caption the right companies with the wrong reason.
+                    st.caption(f"Peers chosen automatically — companies in the same "
+                               f"sector, closest to {ticker_input} in market value. "
+                               f"Name your own under **Advanced options** to override.")
 
                 # `_chart_layout` used to be defined here and was never applied to
                 # anything — every peer chart below re-specified its layout inline.

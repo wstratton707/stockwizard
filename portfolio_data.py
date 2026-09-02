@@ -976,6 +976,85 @@ def get_sharpe_rankings(api_key: str = "") -> dict:
     return {}
 
 
+def suggest_peers(ticker: str, sector: str = "", n: int = 4, api_key: str = "",
+                  market_cap: float = 0) -> list:
+    """Same-sector companies closest in size to `ticker`.
+
+    The Analysis page shipped a "Peer Comparison" checkbox that was ticked by
+    default and did nothing: the fetch was gated on `do_peers and peers_list`,
+    and peers_list came only from a text box the user had to fill in by hand. So
+    for everyone who did not type peer tickers themselves, a control that said it
+    was on produced no peer section at all.
+
+    Peers are derived rather than fetched. There is no FMP key configured, and
+    Polygon has no peers endpoint, but precompute already publishes a sector and
+    a market-cap estimate for the whole ranked universe every weekday - so the
+    data to pick sensible peers is already sitting in the cache that the
+    Portfolio Builder reads.
+
+    Three sources, in order, because the first one is not always there: the
+    rankings read is a Supabase round-trip that intermittently comes back empty
+    (measured: one attempt in four), and a peer list that vanishes on a flaky
+    read is worse than one that is merely approximate.
+
+      1. Rankings - same sector, ranked by closeness in market cap on a log
+         scale, so a mega-cap gets mega-cap peers rather than whatever is
+         alphabetically near it.
+      2. SECTOR_UNIVERSE - the static in-repo sector map. No size matching, but
+         it cannot fail.
+      3. Nothing - returns [], and the caller renders no peer section, which is
+         exactly the old behaviour.
+    """
+    import math
+
+    t = (ticker or "").strip().upper()
+    if not t:
+        return []
+
+    try:
+        rankings = get_sharpe_rankings(api_key) or {}
+    except Exception:
+        rankings = {}
+
+    entry = rankings.get(t) or {}
+    sec = entry.get("sector") or (sector or "")
+    if not sec or str(sec).lower() in ("unknown", "cryptocurrency", ""):
+        return []
+
+    # 1. Ranked universe: same sector, nearest in size.
+    pool = [(k, v) for k, v in rankings.items()
+            if not str(k).startswith("_")
+            and k != t
+            and isinstance(v, dict)
+            and str(v.get("sector", "")).lower() == str(sec).lower()
+            and v.get("is_operating", True)]
+    if pool:
+        # The subject's own size can be missing even when its peers' are not
+        # (measured: XOM has no mcap_est while 25 of the 28 Energy names do), so
+        # the caller may supply what it already knows from the company details.
+        mc = market_cap or entry.get("mcap_est") or 0
+        if mc > 0:
+            def _distance(kv):
+                other = kv[1].get("mcap_est")
+                if not other or other <= 0:
+                    return float("inf")     # unsized names sort last, not first
+                return abs(math.log(other / mc))
+            pool.sort(key=_distance)
+        else:
+            # No anchor to be close to. Largest-first beats dictionary order:
+            # unsorted, XOM came back against HP, PR, SM and APA - four small
+            # caps - where the sector's majors are the obvious comparables.
+            pool.sort(key=lambda kv: -(kv[1].get("mcap_est") or 0))
+        return [k for k, _ in pool[:n]]
+
+    # 2. Static sector map - always available, no size matching.
+    for name, tickers in SECTOR_UNIVERSE.items():
+        if str(name).lower() == str(sec).lower():
+            return [x for x in tickers if x != t][:n]
+
+    return []
+
+
 # ── Dynamic, rules-based universe ─────────────────────────────────────────────
 # SECTOR_UNIVERSE above is a hand-typed list, and it rots: as of 2026-07-28, 10 of
 # its 328 names no longer trade (ANSS, HES, K, SEE, IPG, PARA, FI, CTRA, MPW, and
