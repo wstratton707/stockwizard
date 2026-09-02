@@ -136,6 +136,26 @@ def _cached_report_news(ticker, company):
         return []
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_dense_bars(ticker, start, end, interval):
+    """Intraday bars for DRAWING the price chart. Never for computing anything.
+
+    Cached 15 minutes: intraday rolls constantly, so a long TTL would draw a
+    stale last hour beside a live quote. Returns None on any failure, and the
+    caller falls back to the daily series it already has - this is a live
+    provider call that cannot be served from the Supabase price cache (that
+    stores daily bars), and the provider throttles the web host, so failing
+    to a slightly chunkier chart is the correct degradation.
+    """
+    try:
+        from market_data import get_bars
+        df = get_bars(ticker, start, end, interval=interval,
+                      polygon_key=POLYGON_API_KEY)
+        return df if df is not None and len(df) > 0 else None
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _cached_sec_filings(ticker):
     """EDGAR's filing index for a ticker. Cached an hour: an 8-K can land any
@@ -3077,20 +3097,50 @@ color:var(--muted);background:var(--surface2)}
             _tickfmt = ("%d %b" if _shown_days <= 190 else
                         "%b '%y" if _shown_days <= 1200 else "%Y")
 
+            # ── Drawing frame ────────────────────────────────────────────────
+            # `_cdf` is daily and stays that way: every statistic on this page is
+            # computed from daily bars and hard-codes it, from Close.rolling(200)
+            # to ret.std() * sqrt(252). Handing those hourly bars would silently
+            # turn MA 200 into 200 HOURS - about 29 trading days - understate
+            # annualised volatility by roughly sqrt(7), and carry that error into
+            # Sharpe, Sortino, beta and the forecast. Every number would change
+            # and every one would still look plausible.
+            #
+            # So the denser series is for the LINE ONLY. `_pdf` is what gets
+            # drawn; `_cdf` remains what everything else measures. Moving
+            # averages below are deliberately still plotted from `_cdf`, so
+            # "MA 50" keeps meaning fifty days on a chart drawn hourly.
+            #
+            # Measured on AAPL: a month goes from 23 points to 154. Hourly is
+            # capped at 6M because the provider only serves ~730 days of it, and
+            # beyond a year the daily series is already 250+ points - dense
+            # enough that more would cost payload for no visible gain. 5-minute
+            # bars were rejected outright: 1,716 points for one month is 75x the
+            # payload for a curve indistinguishable at this width.
+            _DENSE_FOR = {"1M": "1hour", "3M": "1hour", "6M": "1hour"}
+            _pdf = _cdf
+            _dense_iv = _DENSE_FOR.get(_range_sel)
+            if _dense_iv:
+                _d0 = pd.to_datetime(_cdf["Date"].iloc[0]).strftime("%Y-%m-%d")
+                _d1 = pd.to_datetime(_cdf["Date"].iloc[-1]).strftime("%Y-%m-%d")
+                _dense = _cached_dense_bars(ticker_input, _d0, _d1, _dense_iv)
+                if _dense is not None and len(_dense) > len(_cdf):
+                    _pdf = _dense
+
             fig = go.Figure()
 
             # ── Price — line / area / candle depending on selection ───────────
-            if _chart_type == "Candlestick" and {"Open","High","Low","Close"}.issubset(_cdf.columns):
+            if _chart_type == "Candlestick" and {"Open","High","Low","Close"}.issubset(_pdf.columns):
                 fig.add_trace(go.Candlestick(
-                    x=_cdf["Date"], open=_cdf["Open"], high=_cdf["High"],
-                    low=_cdf["Low"], close=_cdf["Close"],
+                    x=_pdf["Date"], open=_pdf["Open"], high=_pdf["High"],
+                    low=_pdf["Low"], close=_pdf["Close"],
                     name="Price",
                     increasing_line_color=ct.color.positive, decreasing_line_color=ct.color.negative,
                     increasing_fillcolor=ct.color.positive, decreasing_fillcolor=ct.color.negative,
                 ))
             elif _chart_type == "Line":
                 fig.add_trace(go.Scatter(
-                    x=_cdf["Date"], y=_cdf["Close"],
+                    x=_pdf["Date"], y=_pdf["Close"],
                     name="Price",
                     line=dict(color=ct.color.ink, width=ct.stroke.price),
                     hovertemplate="$%{y:,.2f}<extra>Price</extra>",
@@ -3102,7 +3152,7 @@ color:var(--muted);background:var(--surface2)}
                 # selected. tozeroy fills to the bottom of the plot and is
                 # clipped there, which looks identical and constrains nothing.
                 fig.add_trace(go.Scatter(
-                    x=_cdf["Date"], y=_cdf["Close"],
+                    x=_pdf["Date"], y=_pdf["Close"],
                     name="Price",
                     line=dict(color=ct.color.ink, width=ct.stroke.price),
                     fill="tozeroy",
@@ -3135,10 +3185,10 @@ color:var(--muted);background:var(--surface2)}
             # ── Volume bars on secondary axis (optional) ──────────────────────
             if _show_vol and "Volume" in _cdf.columns:
                 _vol_colors = ["#059669" if c >= o else "#dc2626"
-                               for c, o in zip(_cdf["Close"], _cdf["Open"])] \
-                              if "Open" in _cdf.columns else "#94a3b8"
+                               for c, o in zip(_pdf["Close"], _pdf["Open"])] \
+                              if "Open" in _pdf.columns else "#94a3b8"
                 fig.add_trace(go.Bar(
-                    x=_cdf["Date"], y=_cdf["Volume"],
+                    x=_pdf["Date"], y=_pdf["Volume"],
                     name="Volume", marker_color=_vol_colors,
                     opacity=0.35, yaxis="y2",
                     hovertemplate="%{y:,.0f}<extra>Volume</extra>",
@@ -3152,9 +3202,9 @@ color:var(--muted);background:var(--surface2)}
             # between $226 and $340. The range covers every series actually
             # drawn — the price, whichever moving averages are switched on, and
             # the candle wicks — so nothing plotted can fall outside it.
-            _y_series = [_cdf["Close"]]
-            if _chart_type == "Candlestick" and {"High", "Low"}.issubset(_cdf.columns):
-                _y_series += [_cdf["High"], _cdf["Low"]]
+            _y_series = [_pdf["Close"]]
+            if _chart_type == "Candlestick" and {"High", "Low"}.issubset(_pdf.columns):
+                _y_series += [_pdf["High"], _pdf["Low"]]
             for _ma, _en in ((20, _show_ma20), (50, _show_ma50), (200, _show_ma200)):
                 if _en and f"MA{_ma}" in _cdf.columns:
                     _y_series.append(_cdf[f"MA{_ma}"].dropna())
@@ -3208,7 +3258,7 @@ color:var(--muted);background:var(--surface2)}
 
             # ── Current price tag ─────────────────────────────────────────────
             if _show_tag:
-                _last = _cdf["Close"].iloc[-1]
+                _last = _pdf["Close"].iloc[-1]
                 fig.add_shape(type="line", x0=0, x1=1, xref="paper",
                               y0=_last, y1=_last,
                               line=dict(color=ct.color.ink_muted, width=1, dash="dot"),
