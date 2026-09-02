@@ -2513,8 +2513,6 @@ def render_portfolio_builder(api_key, is_pro=False):
                 Build custom portfolios with backtesting, efficient frontier optimisation,
                 Monte Carlo simulation, Sharpe-ranked stock selection, and full Excel report export.
             </div>
-            <div style="color:#38bdf8;font-size:1.1rem;font-weight:600">$9.99 / month</div>
-            <div style="color:#64748b;font-size:0.8rem;margin-top:4px">Cancel anytime</div>
         </div>
         """, unsafe_allow_html=True)
         if st.button("Upgrade to Pro", type="primary", key="upgrade_portfolio"):

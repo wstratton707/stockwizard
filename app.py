@@ -826,7 +826,7 @@ with st.sidebar:
             </div>
             """, unsafe_allow_html=True)
         else:
-            if st.button("Upgrade to Pro — $9.99/mo", use_container_width=True):
+            if st.button("Upgrade to Pro", use_container_width=True):
                 st.session_state["show_payment"] = True
                 st.rerun()
     else:
@@ -1226,57 +1226,10 @@ if _page == "home":
         unsafe_allow_html=True,
     )
 
-    # ── Pricing ───────────────────────────────────────────────────────────
-    st.markdown("""
-    <div class="section-header">Pricing</div>
-    """, unsafe_allow_html=True)
-
-    pr1, pr2 = st.columns(2)
-    with pr1:
-        st.markdown("""
-        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:1.75rem;
-                    background:#ffffff">
-            <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.5px;
-                        text-transform:uppercase;color:#64748b;margin-bottom:0.5rem">Free</div>
-            <div style="font-size:2rem;font-weight:700;color:#0f172a;
-                        font-family:'JetBrains Mono',monospace;margin-bottom:0.25rem">$0</div>
-            <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">No credit card required</div>
-            <ul style="color:#64748b;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0">
-                <li>Full stock analysis on any ticker</li>
-                <li>Bollinger Bands, RSI, Monte Carlo</li>
-                <li>Peer comparison charts</li>
-                <li>Excel + PowerPoint export</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    with pr2:
-        st.markdown("""
-        <div style="border:2px solid #1d4ed8;border-radius:12px;padding:1.75rem;
-                    background:linear-gradient(135deg,#eff6ff,#ffffff)">
-            <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.5px;
-                        text-transform:uppercase;color:#1d4ed8;margin-bottom:0.5rem">Pro</div>
-            <div style="font-size:2rem;font-weight:700;color:#0f172a;
-                        font-family:'JetBrains Mono',monospace;margin-bottom:0.25rem">$9.99
-                <span style="font-size:0.9rem;font-weight:400;color:#64748b">/month</span>
-            </div>
-            <div style="color:#64748b;font-size:0.82rem;margin-bottom:1.25rem">Cancel anytime</div>
-            <ul style="color:#0f172a;font-size:0.83rem;line-height:1.8;padding-left:1.1rem;margin:0 0 1.25rem">
-                <li>Everything in Free</li>
-                <li><strong>Portfolio Builder</strong> — 320+ stocks, 5-year backtest</li>
-                <li><strong>Stress Test</strong> — 5 historical crash scenarios</li>
-                <li><strong>Bond Analysis</strong> — 60+ ETFs</li>
-                <li><strong>Portfolio Autopsy</strong> — CSV upload + P&L attribution</li>
-                <li>Save &amp; load portfolios</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-
-    if SHOW_PRICING:
-        render_pricing_section()
-
-    # (The founder card moved to the bottom of the Home page — it was only
-    # ever visible here to someone who opened Analysis and typed nothing.)
-
+    # The Pricing section lived here: a Free / Pro $9.99 comparison. Removed
+    # while the pricing model is still undecided - publishing a price is a
+    # commitment, and the tier badges on the cards above already say which
+    # tools are paid without naming a number.
 
     # ── Built by ──────────────────────────────────────────────────────────────
     # Lives at the bottom of the front page, above the footer. It used to sit on
