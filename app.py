@@ -3790,6 +3790,29 @@ color:var(--muted);background:var(--surface2)}
 # NEWS — market-wide pulse + per-ticker research
 # ═════════════════════════════════════════════════════════════════════════════
 elif _page == "news":
+    # The ticker search leads. It was underneath a twenty-story market feed, so
+    # the page's primary action - look up one company - sat below a screen and a
+    # half of something else. Market news still follows, and is what the page
+    # shows when nobody has asked about anything in particular.
+    st.markdown('<div class="section-header">Research a ticker '
+                '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                'text-transform:none;font-size:0.7rem">· filings, statements '
+                'and news</span></div>', unsafe_allow_html=True)
+    _nt = st.text_input("Ticker", key="news_ticker",
+                        placeholder="e.g. AAPL, MSFT, NVDA",
+                        label_visibility="collapsed")
+    if _nt and _nt.strip():
+        _nt_clean = _nt.strip().upper()
+        # Filings and statements first: what the company published, before what
+        # was written about it.
+        _render_filings(_nt_clean)
+        _render_statements(_nt_clean)
+        _render_stock_news(_nt_clean)
+        st.markdown("---")
+    else:
+        st.caption("Enter a ticker for its SEC filings and financial statements, "
+                   "then its news tone, catalysts and sourced brief.")
+
     st.markdown('<div class="section-header">Market News '
                 '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
                 'text-transform:none;font-size:0.7rem">· across the market, '
@@ -3801,36 +3824,21 @@ elif _page == "news":
     _trend   = _pulse.get("trending") or []
 
     if not _m_arts:
-        st.info("Market news is unavailable right now — the news provider did not "
-                "return any stories. Per-ticker research below still works.")
+        st.info("Market news is unavailable right now \u2014 the news provider did not "
+                "return any stories. Per-ticker research above still works.")
     else:
         if _trend:
             st.caption("Most-mentioned tickers in recent market coverage")
             st.markdown(
                 '<div class="news-chips">' +
-                "".join(f'<span class="news-chip">{_html_mod.escape(str(_tk))} · {_n}</span>'
+                "".join(f'<span class="news-chip">{_html_mod.escape(str(_tk))} \u00b7 {_n}</span>'
                         for _tk, _n in _trend) +
                 '</div>', unsafe_allow_html=True)
         st.markdown(_news_feed_html(_m_arts, 20), unsafe_allow_html=True)
 
-    st.markdown('<div class="section-header">Research a ticker</div>',
-                unsafe_allow_html=True)
-    _nt = st.text_input("Ticker", key="news_ticker",
-                        placeholder="e.g. AAPL, MSFT, NVDA",
-                        label_visibility="collapsed")
-    if _nt and _nt.strip():
-        _nt_clean = _nt.strip().upper()
-        # Filings and statements first: what the company published, before what
-        # was written about it.
-        _render_filings(_nt_clean)
-        _render_statements(_nt_clean)
-        _render_stock_news(_nt_clean)
-    else:
-        st.caption("Enter a ticker for its SEC filings and financial statements, "
-                   "then its news tone, catalysts and sourced brief.")
-
     # No news-specific disclaimer exists in `disclaimers`; the dividends one would
     # be plainly wrong here, so use the short general disclaimer only.
+
     st.markdown(render_inline(_disc.SHORT), unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
