@@ -222,10 +222,11 @@ def consensus_from_recommendation(rec: dict | None) -> dict | None:
 
 
 _YF_INTERVAL = {"day": "1d", "1day": "1d", "week": "1wk", "month": "1mo",
-                "1min": "1m", "5min": "5m", "15min": "15m", "1hour": "1h",
-                "minute": "1m", "hour": "1h"}
+                "1min": "1m", "5min": "5m", "15min": "15m", "30min": "30m",
+                "1hour": "1h", "minute": "1m", "hour": "1h"}
 _POLY_SPAN   = {"day": (1, "day"), "week": (1, "week"), "month": (1, "month"),
                 "1min": (1, "minute"), "5min": (5, "minute"), "15min": (15, "minute"),
+                "30min": (30, "minute"),
                 "1hour": (1, "hour"), "minute": (1, "minute"), "hour": (1, "hour")}
 
 

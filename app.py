@@ -3062,7 +3062,7 @@ color:var(--muted);background:var(--surface2)}
             # exactly what is on screen, the tick format can suit the span, and
             # the rendered figure is the whole truth — no client-side state that
             # a screenshot or an export would miss.
-            _RANGES = [("1M", 31), ("3M", 92), ("6M", 183),
+            _RANGES = [("1D", 1), ("5D", 5), ("1M", 31), ("3M", 92), ("6M", 183),
                        ("1Y", 365), ("3Y", 1095), ("All", None)]
             _span_days = (pd.to_datetime(df["Date"].iloc[-1])
                           - pd.to_datetime(df["Date"].iloc[0])).days
@@ -3089,13 +3089,20 @@ color:var(--muted);background:var(--surface2)}
                 _cutoff = pd.to_datetime(df["Date"].iloc[-1]) - pd.Timedelta(days=_range_days)
                 _cdf = df[pd.to_datetime(df["Date"]) >= _cutoff]
                 if len(_cdf) < 2:
-                    _cdf = df
+                    # A single-session range legitimately slices to one daily row.
+                    # Falling back to the FULL history here (which is what this
+                    # guard used to do) handed the y-range a 200-day average
+                    # spanning fifteen years, so a day that traded $322-$327 was
+                    # drawn on a $280-$330 axis. Keep just enough daily rows to
+                    # read a previous close from.
+                    _cdf = df.tail(10)
             # Tick density and label shape follow the window: "12 Mar" reads
             # wrong across fifteen years and "'26" reads wrong across one month.
             _shown_days = (pd.to_datetime(_cdf["Date"].iloc[-1])
                            - pd.to_datetime(_cdf["Date"].iloc[0])).days
             _tickfmt = ("%d %b" if _shown_days <= 190 else
                         "%b '%y" if _shown_days <= 1200 else "%Y")
+
 
             # ── Drawing frame ────────────────────────────────────────────────
             # `_cdf` is daily and stays that way: every statistic on this page is
@@ -3117,15 +3124,63 @@ color:var(--muted);background:var(--surface2)}
             # enough that more would cost payload for no visible gain. 5-minute
             # bars were rejected outright: 1,716 points for one month is 75x the
             # payload for a curve indistinguishable at this width.
-            _DENSE_FOR = {"1M": "1hour", "3M": "1hour", "6M": "1hour"}
+            # Interval per range, the ladder every finance site climbs: fine bars
+            # over a short window, coarse bars over a long one. The provider's own
+            # ceilings decide where it stops - 1-minute is 8 days per request,
+            # 5/15/30-minute is the last 60 days, hourly is ~730 - so past a year
+            # there is nothing finer than daily to be had, and daily is already
+            # 250+ points by then.
+            #
+            # `_lookback` is how far back to ASK. A day's chart cannot request a
+            # single day: ask for one and a weekend or a holiday returns nothing,
+            # so it asks for a week and keeps the last session.
+            _DENSE_FOR = {
+                "1D": ("1min",  7),
+                "5D": ("5min",  9),
+                "1M": ("30min", 33),
+                "3M": ("1hour", 95),
+                "6M": ("1hour", 186),
+            }
             _pdf = _cdf
-            _dense_iv = _DENSE_FOR.get(_range_sel)
-            if _dense_iv:
-                _d0 = pd.to_datetime(_cdf["Date"].iloc[0]).strftime("%Y-%m-%d")
-                _d1 = pd.to_datetime(_cdf["Date"].iloc[-1]).strftime("%Y-%m-%d")
+            _sessions = 0          # >0 means "keep only the last N sessions"
+            _dense_iv = None
+            if _range_sel in _DENSE_FOR:
+                _dense_iv, _lookback = _DENSE_FOR[_range_sel]
+                _anchor = pd.to_datetime(df["Date"].iloc[-1])
+                _d0 = (_anchor - pd.Timedelta(days=_lookback)).strftime("%Y-%m-%d")
+                _d1 = (_anchor + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
                 _dense = _cached_dense_bars(ticker_input, _d0, _d1, _dense_iv)
-                if _dense is not None and len(_dense) > len(_cdf):
-                    _pdf = _dense
+                if _dense is not None and len(_dense) > 0:
+                    _sessions = {"1D": 1, "5D": 5}.get(_range_sel, 0)
+                    if _sessions:
+                        # Trim to whole sessions rather than a rolling window, so
+                        # "1D" is a trading day and not the last 24 hours.
+                        _days = pd.to_datetime(_dense["Date"]).dt.normalize()
+                        _keep = sorted(_days.unique())[-_sessions:]
+                        _dense = _dense[_days.isin(_keep)]
+                    if len(_dense) > len(_cdf) or _sessions:
+                        _pdf = _dense
+                else:
+                    _dense_iv = None          # fell back to daily; no rangebreaks
+
+            # Labels follow the window, not the calendar: a single session wants
+            # clock time, a week wants weekday and time, a decade wants years.
+            if _range_sel == "1D":
+                _tickfmt = "%H:%M"
+            elif _range_sel == "5D":
+                _tickfmt = "%a %H:%M"
+
+            # US regular session is 09:30-16:00 Eastern, and the provider returns
+            # bars stamped in that zone.
+            _rangebreaks = []
+            if _dense_iv:
+                _rangebreaks = [
+                    dict(bounds=["sat", "mon"]),
+                    dict(bounds=[16, 9.5], pattern="hour"),
+                ]
+            elif _range_sel in ("1M", "3M", "6M", "1Y"):
+                # Daily bars still leave weekend holes worth closing.
+                _rangebreaks = [dict(bounds=["sat", "mon"])]
 
             fig = go.Figure()
 
@@ -3172,8 +3227,14 @@ color:var(--muted);background:var(--surface2)}
                 (50,  ct.color.value_line, 1.0, "dash",     "MA 50",  _show_ma50),
                 (200, ct.color.brand,      1.0, "longdash", "MA 200", _show_ma200),
             ]
+            # A daily moving average has one value per day, so across a single
+            # session it is a single point and across a week it is five - a
+            # stub, not a trend. Yahoo shows no averages on its intraday chart
+            # either. They return with the ranges that span enough days to draw
+            # one honestly.
+            _ma_ok = _range_sel not in ("1D", "5D") and len(_cdf) >= 10
             for ma, color, width, dash, label, enabled in _ma_cfg:
-                if enabled and f"MA{ma}" in _cdf.columns:
+                if _ma_ok and enabled and f"MA{ma}" in _cdf.columns:
                     fig.add_trace(go.Scatter(
                         x=_cdf["Date"], y=_cdf[f"MA{ma}"],
                         name=label,
@@ -3205,11 +3266,20 @@ color:var(--muted);background:var(--surface2)}
             _y_series = [_pdf["Close"]]
             if _chart_type == "Candlestick" and {"High", "Low"}.issubset(_pdf.columns):
                 _y_series += [_pdf["High"], _pdf["Low"]]
+            # `_ma_ok` gates this too. The axis should describe what is on the
+            # chart and nothing else: including an average that was never plotted
+            # is what zoomed a quiet day out to a fifteen-year price band.
             for _ma, _en in ((20, _show_ma20), (50, _show_ma50), (200, _show_ma200)):
-                if _en and f"MA{_ma}" in _cdf.columns:
+                if _ma_ok and _en and f"MA{_ma}" in _cdf.columns:
                     _y_series.append(_cdf[f"MA{_ma}"].dropna())
             _y_min = min(float(s.min()) for s in _y_series if len(s))
             _y_max = max(float(s.max()) for s in _y_series if len(s))
+            # The reference line is part of the picture: a day that gapped up and
+            # never looked back would otherwise push it off the top of the plot,
+            # leaving the move to be read against nothing.
+            if _range_sel == "1D" and len(_cdf) >= 2:
+                _pc = float(_cdf["Close"].iloc[-2])
+                _y_min, _y_max = min(_y_min, _pc), max(_y_max, _pc)
             _y_pad = max((_y_max - _y_min) * 0.06, _y_max * 0.005)
             # A price axis never goes below zero, however much padding the band
             # asks for — a floor of -$8 under a 15-year chart is nonsense.
@@ -3256,6 +3326,22 @@ color:var(--muted);background:var(--surface2)}
                         borderpad=3,
                     )
 
+            # ── Previous close, on the single-session view ────────────────────
+            # A day's move is meaningless without the level it moved from, which
+            # is why every intraday chart draws this line. The value comes from
+            # the DAILY frame - the close before the session on screen - not from
+            # the intraday bars, which start at the open.
+            if _range_sel == "1D" and len(_cdf) >= 2:
+                _prev_close = float(_cdf["Close"].iloc[-2])
+                fig.add_hline(
+                    y=_prev_close, line_dash="dot", line_width=1,
+                    line_color=ct.color.ink_muted, opacity=0.55,
+                    annotation_text=f"Prev close ${_prev_close:,.2f}",
+                    annotation_position="top left",
+                    annotation_font=dict(size=10, color=ct.color.ink_muted,
+                                         family=ct.font.data),
+                )
+
             # ── Current price tag ─────────────────────────────────────────────
             if _show_tag:
                 _last = _pdf["Close"].iloc[-1]
@@ -3287,6 +3373,14 @@ color:var(--muted);background:var(--surface2)}
                     fy_ticks=False, title=None, tickformat=_tickfmt,
                     nticks=8, automargin=True,
                     rangeslider=dict(visible=False),
+                    # Give no width to time the market was shut. Without this an
+                    # intraday chart spends most of its axis on nights and
+                    # weekends: a 1-minute day is 390 minutes of trading inside a
+                    # 1,440-minute box, so the price action gets a quarter of the
+                    # plot and the line leaps across the gaps. Weekends go for
+                    # every dense range; the overnight bound only applies where
+                    # bars are intraday, since daily bars have no hours to hide.
+                    rangebreaks=_rangebreaks,
                 ),
                 y=ct.value_axis(tick_format=",.2f", zero=False, title=None,
                                 nticks=6, side="right", automargin=True,
