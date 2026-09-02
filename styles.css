@@ -1065,24 +1065,37 @@ button[kind^="primary"]:active,
    bottom radius, no drop shadow. Previously it was an inset, rounded, shadowed
    bar floating in the grey, which is what made the whole page read as a stack
    of cards rather than a designed surface. */
+/* ── Chrome: the navbar and the ticker tape ──
+   Both are pinned to the viewport, edge to edge.
+
+   They used to live in the flow of .block-container, escaping its padding with
+   negative page-gutter margins. That reached the CONTAINER's edges, but the
+   container is capped at max-width:1200px and centred, so on any screen wider
+   than that the bar stopped short: measured at a 1600px viewport, 45px of white
+   to its left and 55px to its right. No negative margin can fix that, because
+   the overhang needed is (mainWidth - 1200) / 2 and CSS has no way to express a
+   grandparent's width from inside a centred child.
+
+   Fixed positioning sidesteps the cap entirely: the bar spans the window,
+   passing above the sidebar rather than starting after it, and the page content
+   is pushed down by --chrome-h to sit clear of it. */
+:root { --chrome-h: 92px; }            /* navbar + tape; verified by measurement */
+
 .st-key-topnav {
-  position: sticky; top: 0; z-index: 1000;
+  /* Above the sidebar, which Streamlit paints at z-index 999991 - at 1001 the
+     bar ran full width but its left 300px, brand and all, sat underneath the
+     sidebar and was invisible. The sidebar is padded clear of the chrome, so
+     ordering the chrome on top is what makes the full-width bar actually read
+     as full width. */
+  position: fixed; top: 0; left: 0; right: 0; z-index: 999995;
   background: var(--brand-grad);
   border-bottom: 1px solid rgba(255,255,255,0.10);
   box-shadow: none;
-  border-radius: var(--r-chrome);
-  margin-top: -1.75rem;                 /* cancel .block-container padding-top */
-  margin-left: calc(-1 * var(--page-gutter));
-  margin-right: calc(-1 * var(--page-gutter));
-  /* Streamlit pins this block to an explicit width AND caps it at max-width:100%
-     of the parent, so the negative margins would slide it left without ever
-     widening it. Both have to go for the margins to size it. */
-  width: auto !important;
+  border-radius: 0;
+  margin: 0 !important;
+  width: 100vw !important;
   max-width: none !important;
   padding: 0.45rem var(--page-gutter);
-  /* No gap: the ticker tape sits directly against the bar and carries the
-     spacing below itself instead. */
-  margin-bottom: 0;
 }
 .st-key-topnav [data-testid="stHorizontalBlock"] { align-items: center; gap: 0.3rem; }
 
@@ -1257,20 +1270,17 @@ button[kind^="primary"]:active,
    as part of the chrome, so the radius, the border and the shadow all go and it
    takes the same negative gutters the navbar uses to reach the window edges. */
 .st-key-tapebar {
-  margin-left: calc(-1 * var(--page-gutter));
-  margin-right: calc(-1 * var(--page-gutter));
-  /* Streamlit pins the block to an explicit width and caps it at max-width:100%
-     of the parent, so the negative margins would slide it left without ever
-     widening it — the same pair the navbar has to override. */
-  width: auto !important;
+  /* Directly under the bar, same full-window width. Pinned for the same reason:
+     in flow it could never pass the 1200px container cap. */
+  position: fixed; top: 55px; left: 0; right: 0; z-index: 999994;
+  margin: 0 !important;
+  width: 100vw !important;
   max-width: none !important;
-  /* Pull it flush against the bar. The navbar and this strip sit in different
-     Streamlit blocks, so an ancestor's flex gap - measured at 32px - opens
-     between them and no margin on the navbar can close it. Same trick the
-     navbar itself uses to cancel .block-container's padding-top. */
-  margin-top: -2rem;
-  margin-bottom: 1.6rem;
 }
+/* Both columns start below the fixed chrome. */
+section.stMain .block-container { padding-top: var(--chrome-h) !important; }
+[data-testid="stSidebar"] > div:first-child { padding-top: var(--chrome-h); }
+
 .ticker-tape-wrap {
   background: #091929; overflow: hidden;
   border-radius: 0;
