@@ -289,6 +289,19 @@ _SEC_TAGS_SHARES = ["WeightedAverageNumberOfDilutedSharesOutstanding",
                     "WeightedAverageNumberOfSharesOutstandingBasic"]
 
 
+def _sec_cik_for(ticker, log=print):
+    """CIK for `ticker`, tolerating the two ways a share class gets written.
+
+    EDGAR writes class shares with a hyphen (BRK-B, BF-B); price feeds and this
+    codebase use a dot (BRK.B, BF.B). Looking up the dotted form returned nothing
+    and the caller quietly rendered no filings at all - the same symbol-format
+    trap that once dropped BF.B from the ranked universe.
+    """
+    m = _sec_load_cik_map(log=log)
+    t = (ticker or "").upper().strip()
+    return m.get(t) or m.get(t.replace(".", "-")) or m.get(t.replace("-", "."))
+
+
 def _sec_load_cik_map(log=print):
     """Lazy-load and cache EDGAR's ticker→CIK map (free, ~10k entries)."""
     global _SEC_CIK_MAP
@@ -341,6 +354,119 @@ def _sec_fy_series(facts, tags, unit="USD"):
     return out
 
 
+# ── EDGAR filings index ───────────────────────────────────────────────────────
+# What a company is legally required to publish, as opposed to what has been
+# written about it. On the News page this is the primary source: an 8-K IS the
+# news, and every headline about an earnings beat is commentary on a 10-Q that
+# is already public and already here.
+#
+# Same free endpoint family as the financials above, same CIK map, no key.
+
+# Forms worth surfacing, in the order a reader cares about them, with what each
+# one actually is. Anything not listed still appears - it is just not explained.
+FILING_FORMS = {
+    "10-K":     "Annual report - audited financials for the full year",
+    "10-Q":     "Quarterly report - unaudited financials for the quarter",
+    "8-K":      "Material event - something the company must disclose promptly",
+    "DEF 14A":  "Proxy statement - executive pay and what shareholders vote on",
+    "S-1":      "Registration - a new offering of securities",
+    "S-3":      "Shelf registration - securities the company may sell later",
+    "4":        "Insider transaction - an officer or director bought or sold",
+    "3":        "Insider's opening position",
+    "5":        "Insider transactions not reported during the year",
+    "SC 13D":   "Activist stake - over 5%, with intent to influence",
+    "SC 13G":   "Passive stake - over 5%, held passively",
+    "20-F":     "Annual report from a foreign private issuer",
+    "6-K":      "Interim report from a foreign private issuer",
+    "11-K":     "Employee stock purchase or savings plan report",
+    "424B2":    "Prospectus supplement - pricing for an offering",
+}
+
+
+def fetch_sec_filings(ticker, limit=0, log=print):
+    """Recent EDGAR filings for `ticker`, newest first.
+
+    Returns a list of dicts: form, description, filed, period, accession, url,
+    primary_doc. Empty list when the ticker has no CIK (ETFs, crypto, most
+    foreign tickers) or EDGAR is unreachable - the caller renders nothing rather
+    than an error, because a missing filings list should never break a page.
+    """
+    cik = _sec_cik_for(ticker, log=log)
+    if not cik:
+        return []
+    try:
+        r = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json",
+                         headers=SEC_HEADERS, timeout=20)
+        if r.status_code != 200:
+            log(f"   EDGAR submissions HTTP {r.status_code} for {ticker}")
+            return []
+        data = r.json()
+    except Exception as e:
+        log(f"   EDGAR submissions failed for {ticker}: {e}")
+        return []
+
+    recent = (data.get("filings") or {}).get("recent") or {}
+    forms  = recent.get("form") or []
+    if not forms:
+        return []
+
+    accs    = recent.get("accessionNumber") or []
+    dates   = recent.get("filingDate") or []
+    periods = recent.get("reportDate") or []
+    docs    = recent.get("primaryDocument") or []
+    cik_int = str(int(cik))          # EDGAR's archive paths drop the zero padding
+
+    # No truncation by default. EDGAR returns its whole recent block in one
+    # response, and cutting it here loses the filings that matter: JPM files
+    # hundreds of 424B2 prospectus supplements, so its 10-K sits well past the
+    # first 250 entries and a truncated list yielded zero key filings for it.
+    # The caller slices for display; selection needs everything.
+    n = len(forms) if not limit else min(len(forms), limit)
+    out = []
+    for i in range(n):
+        acc = accs[i] if i < len(accs) else ""
+        doc = docs[i] if i < len(docs) else ""
+        acc_plain = acc.replace("-", "")
+        base = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_plain}"
+        out.append({
+            "form":        forms[i],
+            "description": FILING_FORMS.get(forms[i], ""),
+            "filed":       dates[i] if i < len(dates) else "",
+            "period":      periods[i] if i < len(periods) else "",
+            "accession":   acc,
+            # The filing itself when EDGAR names a primary document, otherwise
+            # the index page for that accession, which always exists.
+            "url":         f"{base}/{doc}" if doc else f"{base}/{acc}-index.htm",
+        })
+    return out
+
+
+# The reports people mean when they say "the filings". A raw newest-first list is
+# dominated by Form 4s and, for a bank like JPM, by hundreds of 424B2 prospectus
+# supplements - real filings, but not what someone researching the company wants
+# first. These are pulled out and shown above the full list.
+KEY_FORMS = ["10-K", "10-Q", "8-K", "DEF 14A", "20-F", "6-K"]
+
+
+def key_filings(filings, forms=None):
+    """The most recent filing of each key form, in KEY_FORMS order.
+
+    Matches amendments too (a 10-K/A is still the annual report) but prefers the
+    original when both are present, since the amendment alone is rarely what a
+    reader wants to open first.
+    """
+    forms = forms or KEY_FORMS
+    out = []
+    for want in forms:
+        exact = next((f for f in filings if f.get("form") == want), None)
+        amended = next((f for f in filings
+                        if str(f.get("form", "")).startswith(want + "/")), None)
+        best = exact or amended
+        if best:
+            out.append(best)
+    return out
+
+
 def fetch_sec_financials(ticker, years=10, log=print):
     """
     Up to `years` of annual statements from SEC EDGAR's companyfacts API.
@@ -351,7 +477,7 @@ def fetch_sec_financials(ticker, years=10, log=print):
     depreciation_amortization) used for FCF / Piotroski F-Score / Altman Z-Score.
     Returns {} when unavailable (ETF, crypto, or a foreign filer without us-gaap XBRL).
     """
-    cik = _sec_load_cik_map(log=log).get(ticker.upper())
+    cik = _sec_cik_for(ticker, log=log)
     if not cik:
         return {}
     try:

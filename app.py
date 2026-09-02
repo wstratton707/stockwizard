@@ -136,6 +136,17 @@ def _cached_report_news(ticker, company):
         return []
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_sec_filings(ticker):
+    """EDGAR's filing index for a ticker. Cached an hour: an 8-K can land any
+    time, but the list does not change minute to minute."""
+    try:
+        from data import fetch_sec_filings
+        return fetch_sec_filings(ticker, log=lambda m: None)
+    except Exception:
+        return []
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def _cached_fin_supplement(ticker):
     """Capex / FCF / balance-sheet fields Polygon's endpoints don't return.
@@ -161,6 +172,111 @@ def _news_feed_html(articles, n=12):
             f'<div class="news-meta"><span class="news-chip sm">{a["theme"]}</span>'
             f'{_html.escape(a["source"] or "")} · {a["date"]}</div></div></div>')
     return "".join(out)
+
+
+def _render_filings(ticker):
+    """What the company itself has published, above what has been written about it.
+
+    This leads the News page's per-ticker view on purpose. A news feed is
+    commentary; the 8-K is the event being commented on, and the 10-Q is where
+    the earnings number in the headline actually came from. Both are public, free
+    and already reachable through the EDGAR integration the fundamentals use.
+
+    Renders nothing at all when EDGAR has no filings for the symbol - ETFs,
+    crypto and most foreign tickers - rather than an empty shell or an error.
+    """
+    from data import key_filings
+
+    filings = _cached_sec_filings(ticker)
+    if not filings:
+        return
+
+    st.markdown('<div class="section-header">Company Filings '
+                '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                'text-transform:none;font-size:0.7rem">· primary sources, '
+                'straight from SEC EDGAR</span></div>', unsafe_allow_html=True)
+
+    key = key_filings(filings)
+    if key:
+        _kcols = st.columns(len(key))
+        for _c, _f in zip(_kcols, key):
+            with _c:
+                # The card is a div and the link is inline inside it. Wrapping
+                # block-level divs in the anchor made Streamlit's sanitiser split
+                # it into several anchors, and each one drew the 2px rule - so
+                # every card carried a doubled line above its title.
+                st.markdown(f"""
+                <div style="border-top:2px solid #1d4ed8;padding:0.8rem 1rem 0.9rem 0;
+                            height:100%">
+                    <div style="margin-bottom:0.25rem">
+                        <a href="{_f['url']}" target="_blank" rel="noopener"
+                           style="text-decoration:none;font-weight:700;color:#1d4ed8;
+                                  font-size:0.95rem">{_f['form']}</a>
+                    </div>
+                    <div style="color:#64748b;font-size:0.75rem;line-height:1.5;
+                                margin-bottom:0.5rem">{_f['description']}</div>
+                    <div style="color:#94a3b8;font-size:0.72rem;
+                                font-family:'JetBrains Mono',monospace">
+                        Filed {_f['filed']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    # The full index, most recent first. Capped: a large filer's recent block runs
+    # to tens of thousands of entries, nearly all insider forms and prospectus
+    # supplements, and nobody scrolls that.
+    with st.expander(f"All recent filings ({min(len(filings), 40)} of {len(filings):,})"):
+        st.caption("Every document the company has filed with the SEC recently, "
+                   "newest first. Form 4s are insider trades; 424B2s are offering "
+                   "prospectuses.")
+        _rows = []
+        for _f in filings[:40]:
+            _rows.append({
+                "Form":   _f["form"],
+                "Filed":  _f["filed"],
+                "Period": _f["period"] or "—",
+                "What it is": _f["description"] or "—",
+                "Open":   _f["url"],
+            })
+        st.dataframe(
+            pd.DataFrame(_rows), use_container_width=True, hide_index=True,
+            column_config={"Open": st.column_config.LinkColumn("Open", display_text="View")},
+        )
+
+
+def _render_statements(ticker):
+    """Revenue, earnings and cash flow as filed, not as summarised.
+
+    The Analysis page already builds a full fundamentals view; this is the short
+    version, so someone who came to read the news can see the numbers the news is
+    about without changing pages.
+    """
+    try:
+        fin = cached_fetch_sec_financials(ticker)
+    except Exception:
+        fin = {}
+    inc = (fin or {}).get("income_statement")
+    if inc is None or getattr(inc, "empty", True):
+        return
+
+    st.markdown('<div class="section-header">Financial Statements '
+                '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                'text-transform:none;font-size:0.7rem">· as filed with the SEC'
+                '</span></div>', unsafe_allow_html=True)
+
+    _show = inc.head(4).copy()
+    _money = [c for c in ("revenues", "net_income_loss", "operating_income_loss")
+              if c in _show.columns]
+    # The frame's period column is "Period" (the fiscal year end), not
+    # "fiscal_year" - the earlier guess would have printed row numbers.
+    _periods = _show["Period"] if "Period" in _show.columns else _show.index
+    _out = pd.DataFrame({"Fiscal year end": list(_periods)})
+    _label = {"revenues": "Revenue", "net_income_loss": "Net income",
+              "operating_income_loss": "Operating income"}
+    for _c in _money:
+        _out[_label[_c]] = [f"${v/1e9:,.1f}B" if pd.notna(v) else "—" for v in _show[_c]]
+    st.dataframe(_out, use_container_width=True, hide_index=True)
+    st.caption("Annual figures from EDGAR XBRL. Full statements, ratios and "
+               "valuation are on the Analysis page.")
 
 
 def _render_stock_news(ticker, company_name=None):
@@ -3703,9 +3819,15 @@ elif _page == "news":
                         placeholder="e.g. AAPL, MSFT, NVDA",
                         label_visibility="collapsed")
     if _nt and _nt.strip():
-        _render_stock_news(_nt.strip().upper())
+        _nt_clean = _nt.strip().upper()
+        # Filings and statements first: what the company published, before what
+        # was written about it.
+        _render_filings(_nt_clean)
+        _render_statements(_nt_clean)
+        _render_stock_news(_nt_clean)
     else:
-        st.caption("Enter a ticker to see its news tone, catalysts and sourced brief.")
+        st.caption("Enter a ticker for its SEC filings and financial statements, "
+                   "then its news tone, catalysts and sourced brief.")
 
     # No news-specific disclaimer exists in `disclaimers`; the dividends one would
     # be plainly wrong here, so use the short general disclaimer only.
