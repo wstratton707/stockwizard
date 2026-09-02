@@ -299,6 +299,89 @@ def _render_statements(ticker):
                "valuation are on the Analysis page.")
 
 
+# ── Presentation helpers ──────────────────────────────────────────────────────
+# These were defined inline, mid-render, inside whichever conditional happened to
+# need them: `_fv` inside `if fund.get("ok")`, the `_wpi_*` family inside the
+# discounted-cash-flow block, and so on. They are pure formatters - a number in,
+# a string out - and nesting them that way made the sections around them
+# impossible to gate, because a section could not be skipped without also
+# skipping the definition of the function it calls.
+#
+# Lifting them to module scope is the whole of this change. Nothing about their
+# behaviour moves; what moves is the ability to wrap the sections that use them.
+
+def _us_market_open():
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import time as _t
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        return now_et.weekday() < 5 and _t(9, 30) <= now_et.time() <= _t(16, 0)
+    except Exception:
+        return False
+
+
+def _fmt_vol(v):
+    if v >= 1e9: return f"{v/1e9:.2f}B"
+    if v >= 1e6: return f"{v/1e6:.2f}M"
+    if v >= 1e3: return f"{v/1e3:.1f}K"
+    return f"{v:,.0f}"
+
+
+def _fv(v, suffix="", na="N/A"):
+    return f"{v}{suffix}" if v is not None else na
+
+
+def _mv(v, suffix="", na="—"):
+    return f"{v}{suffix}" if v is not None else na
+
+
+def _dir(x):
+    return "" if x is None else ("pos" if x >= 0 else "neg")
+
+
+def _pos0(x):
+    return "pos" if (x or 0) > 0 else ("neg" if (x is not None and x < 0) else "")
+
+
+def _wpi_pct(x, dp=1, sign=False):
+    """Decimal → percent. `—` when the model didn't produce one."""
+    if x is None:
+        return "—"
+    return f"{x * 100:+.{dp}f}%" if sign else f"{x * 100:.{dp}f}%"
+
+
+def _wpi_usd(x, dp=2):
+    return "—" if x is None else f"${x:,.{dp}f}"
+
+
+def _wpi_mag(x):
+    """Compact signed $ magnitude — cash flows, debt, EV."""
+    if x is None:
+        return "—"
+    _a, _sg = abs(x), ("-" if x < 0 else "")
+    if _a >= 1e12: return f"{_sg}${_a / 1e12:,.2f}T"
+    if _a >= 1e9:  return f"{_sg}${_a / 1e9:,.2f}B"
+    if _a >= 1e6:  return f"{_sg}${_a / 1e6:,.1f}M"
+    return f"{_sg}${_a:,.0f}"
+
+
+def _wpi_cnt(x):
+    """Share counts — a count, not a currency."""
+    if x is None:
+        return "—"
+    if abs(x) >= 1e9: return f"{x / 1e9:,.2f}B"
+    if abs(x) >= 1e6: return f"{x / 1e6:,.1f}M"
+    return f"{x:,.0f}"
+
+
+def fmt_large(n):
+    if not n: return "N/A"
+    if n > 1e12: return f"${n/1e12:.2f}T"
+    if n > 1e9:  return f"${n/1e9:.2f}B"
+    if n > 1e6:  return f"${n/1e6:.1f}M"
+    return f"${n:,.0f}"
+
+
 def _render_stock_news(ticker, company_name=None):
     """Full per-stock news research: tone + catalysts + theme chips, a grounded
     AI brief (when a key is configured), then the multi-source article feed."""
@@ -2027,14 +2110,6 @@ elif _page == "analysis":
             # market). After the close, Finnhub returns the last-trade (16:00)
             # price — that's the close, not a live tick, so labelling it "Live"
             # overclaims. Show "At close" instead.
-            def _us_market_open():
-                try:
-                    from zoneinfo import ZoneInfo
-                    from datetime import time as _t
-                    now_et = datetime.now(ZoneInfo("America/New_York"))
-                    return now_et.weekday() < 5 and _t(9, 30) <= now_et.time() <= _t(16, 0)
-                except Exception:
-                    return False
             _mkt_open = bool(is_crypto) or _us_market_open()
             if live:
                 if live.get("source") == "finnhub" and _mkt_open:
@@ -2087,11 +2162,6 @@ elif _page == "analysis":
             # Volume vs 20d average
             _vol       = float(latest.get("Volume", 0))
             _vol_avg   = float(latest.get("Vol_MA20", 0)) if pd.notna(latest.get("Vol_MA20")) else 0
-            def _fmt_vol(v):
-                if v >= 1e9: return f"{v/1e9:.2f}B"
-                if v >= 1e6: return f"{v/1e6:.2f}M"
-                if v >= 1e3: return f"{v/1e3:.1f}K"
-                return f"{v:,.0f}"
             _vol_ratio = (_vol / _vol_avg - 1) * 100 if _vol_avg > 0 else None
             # Below-average volume isn't bad; use neutral muted color, only highlight
             # green when volume is meaningfully above average (>+10%).
@@ -2417,8 +2487,6 @@ elif _page == "analysis":
                     supplement=_cached_fin_supplement(ticker_input),
                 )
                 if fund.get("ok"):
-                    def _fv(v, suffix="", na="N/A"):
-                        return f"{v}{suffix}" if v is not None else na
 
                     _n_yrs = len(_fin_raw["income_statement"]) if isinstance(_fin_raw, dict) and _fin_raw.get("income_statement") is not None else 0
                     _hist  = f"{_n_yrs}-yr history · " if _n_yrs > 1 else ""
@@ -2444,12 +2512,6 @@ elif _page == "analysis":
                         "EV / EBITDA": "Enterprise value ÷ EBITDA — a capital-structure-neutral valuation multiple.",
                     }
 
-                    def _mv(v, suffix="", na="—"):
-                        return f"{v}{suffix}" if v is not None else na
-                    def _dir(x):
-                        return "" if x is None else ("pos" if x >= 0 else "neg")
-                    def _pos0(x):
-                        return "pos" if (x or 0) > 0 else ("neg" if (x is not None and x < 0) else "")
 
                     # Ordered by the question each metric answers — how expensive,
                     # how profitable, how fast-growing, how financially sound.
@@ -2623,32 +2685,9 @@ elif _page == "analysis":
                     # discount rate here would silently misstate the model.
                     _dcfr = _dcf_report if isinstance(_dcf_report, dict) else {"ok": False}
 
-                    def _wpi_pct(x, dp=1, sign=False):
-                        """Decimal → percent. `—` when the model didn't produce one."""
-                        if x is None:
-                            return "—"
-                        return f"{x * 100:+.{dp}f}%" if sign else f"{x * 100:.{dp}f}%"
 
-                    def _wpi_usd(x, dp=2):
-                        return "—" if x is None else f"${x:,.{dp}f}"
 
-                    def _wpi_mag(x):
-                        """Compact signed $ magnitude — cash flows, debt, EV."""
-                        if x is None:
-                            return "—"
-                        _a, _sg = abs(x), ("-" if x < 0 else "")
-                        if _a >= 1e12: return f"{_sg}${_a / 1e12:,.2f}T"
-                        if _a >= 1e9:  return f"{_sg}${_a / 1e9:,.2f}B"
-                        if _a >= 1e6:  return f"{_sg}${_a / 1e6:,.1f}M"
-                        return f"{_sg}${_a:,.0f}"
 
-                    def _wpi_cnt(x):
-                        """Share counts — a count, not a currency."""
-                        if x is None:
-                            return "—"
-                        if abs(x) >= 1e9: return f"{x / 1e9:,.2f}B"
-                        if abs(x) >= 1e6: return f"{x / 1e6:,.1f}M"
-                        return f"{x:,.0f}"
 
                     st.markdown(
                         f'<div class="section-header"'
@@ -3020,12 +3059,6 @@ color:var(--muted);background:var(--surface2)}
                 circ     = crypto_details.get("circulating_supply", 0)
                 max_sup  = crypto_details.get("max_supply", 0)
 
-                def fmt_large(n):
-                    if not n: return "N/A"
-                    if n > 1e12: return f"${n/1e12:.2f}T"
-                    if n > 1e9:  return f"${n/1e9:.2f}B"
-                    if n > 1e6:  return f"${n/1e6:.1f}M"
-                    return f"${n:,.0f}"
 
                 for col, lbl, val, color in [
                     (cc1, "Market Cap",     fmt_large(mc_usd),                            "#0f172a"),
