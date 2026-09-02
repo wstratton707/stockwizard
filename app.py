@@ -973,27 +973,44 @@ if _page == "home":
     # ── Feature cards ─────────────────────────────────────────────────────
     st.markdown("""
     <div class="section-header">What's Included</div>
+    <div style="color:#64748b;font-size:0.85rem;margin:-0.4rem 0 1rem;max-width:62ch">
+        Full stock analysis is free and needs no account. Pro adds the portfolio tools.
+    </div>
     """, unsafe_allow_html=True)
 
-    fc1, fc2 = st.columns(2)
-    fc3, fc4 = st.columns(2)
+    # The free product leads, full width, and the Pro grid follows it.
+    #
+    # These were four equal cards in a 2x2, which gave Stock Analysis — the thing
+    # anyone can use right now, without an account — exactly the same weight as
+    # three products behind a paywall. Home's job is to convert on the free one.
+    #
+    # "Bond & Portfolio Autopsy" was also two unrelated products sharing a title
+    # and a bullet list: ETF analysis across six categories, and a CSV upload
+    # that attributes P&L across your own holdings. Nothing about them is one
+    # feature, and bundling them made both sound vaguer than they are.
+    fc_free = st.container()
+    fp1, fp2 = st.columns(2)
+    fp3, fp4 = st.columns(2)
 
     for col, icon, title, tier, items in [
-        (fc1, "monitoring", "Stock Analysis", "Free",
+        (fc_free, "monitoring", "Stock Analysis", "Free",
          ["Bollinger Bands, RSI, GARCH volatility", "Monte Carlo simulation (1,000 paths)",
-          "Peer comparison vs sector", "10-yr fundamentals + F-Score & Z-Score", "Excel + PowerPoint export"]),
-        (fc2, "account_balance_wallet", "Portfolio Builder", "Pro",
+          "Peer comparison — chosen automatically, same sector and size",
+          "10-yr fundamentals + F-Score & Z-Score", "Excel + PowerPoint export"]),
+        (fp1, "account_balance_wallet", "Portfolio Builder", "Pro",
          ["320+ stocks ranked by multi-factor score", "5-year backtest with quarterly rebalancing",
           "Mean-variance optimization", "Portfolio Monte Carlo with milestone projections",
           "Diversification score + correlation heatmap"]),
-        (fc3, "local_fire_department", "Stress Test", "Pro",
+        (fp2, "local_fire_department", "Stress Test", "Pro",
          ["5 historical crashes: 2008, COVID, 2022, dot-com, 2018", "Beta-based shock from your holdings' sensitivity",
           "Portfolio return vs S&P 500 per crash", "Dollar impact calculator",
           "Correlation culprit detection"]),
-        (fc4, "account_balance", "Bond & Portfolio Autopsy", "Pro",
-         ["Bond ETF analysis across 6 categories", "Upload your holdings CSV — see what broke",
-          "P&L attribution per position", "Rolling volatility + drawdown charts",
-          "Benchmark comparison"]),
+        (fp3, "account_balance", "Bond Analysis", "Pro",
+         ["60+ bond ETFs across 6 categories", "Duration and credit-quality breakdown",
+          "Yield vs interest-rate sensitivity", "Benchmark comparison"]),
+        (fp4, "biotech", "Portfolio Autopsy", "Pro",
+         ["Upload your holdings CSV — see what broke", "P&L attribution per position",
+          "Rolling volatility + drawdown charts", "Benchmark comparison"]),
     ]:
         with col:
             tier_color = "#1d4ed8" if tier == "Pro" else "#059669"
