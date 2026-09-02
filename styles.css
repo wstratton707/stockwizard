@@ -1080,7 +1080,9 @@ button[kind^="primary"]:active,
   width: auto !important;
   max-width: none !important;
   padding: 0.45rem var(--page-gutter);
-  margin-bottom: 1.6rem;
+  /* No gap: the ticker tape sits directly against the bar and carries the
+     spacing below itself instead. */
+  margin-bottom: 0;
 }
 .st-key-topnav [data-testid="stHorizontalBlock"] { align-items: center; gap: 0.3rem; }
 
@@ -1124,8 +1126,12 @@ button[kind^="primary"]:active,
    `[data-testid="stMarkdownContainer"] p` rule paints that slate with
    !important — so colouring the <button> alone does nothing visible. The
    active tab already had this; every tab needs it. */
+/* A nav label never wraps. If a column is a touch tight the label should stay
+   on one line rather than breaking mid-word, which is how "Research" rendered
+   as "Resear / ch" after the rename. */
 .st-key-topnav button p,
 .st-key-topnav button [data-testid="stMarkdownContainer"] p {
+  white-space: nowrap;
   color: #ffffff !important;
 }
 .st-key-topnav [data-testid="stBaseButton-primary"],
@@ -1245,13 +1251,33 @@ button[kind^="primary"]:active,
 ::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
-/* ── Ticker tape ── */
+/* ── Ticker tape ──
+   A full-bleed strip immediately under the navbar, on every page. It used to be
+   a rounded, shadowed card inside the Home page body; against the bar it reads
+   as part of the chrome, so the radius, the border and the shadow all go and it
+   takes the same negative gutters the navbar uses to reach the window edges. */
+.st-key-tapebar {
+  margin-left: calc(-1 * var(--page-gutter));
+  margin-right: calc(-1 * var(--page-gutter));
+  /* Streamlit pins the block to an explicit width and caps it at max-width:100%
+     of the parent, so the negative margins would slide it left without ever
+     widening it — the same pair the navbar has to override. */
+  width: auto !important;
+  max-width: none !important;
+  /* Pull it flush against the bar. The navbar and this strip sit in different
+     Streamlit blocks, so an ancestor's flex gap - measured at 32px - opens
+     between them and no margin on the navbar can close it. Same trick the
+     navbar itself uses to cancel .block-container's padding-top. */
+  margin-top: -2rem;
+  margin-bottom: 1.6rem;
+}
 .ticker-tape-wrap {
   background: #091929; overflow: hidden;
-  border-radius: var(--r-md); margin-bottom: 1.5rem;
-  padding: 0.6rem 0;
-  border: 1px solid rgba(255,255,255,0.05);
-  box-shadow: 0 2px 10px rgba(9,25,41,0.2);
+  border-radius: 0;
+  padding: 0.3rem var(--page-gutter);   /* shorter strip; gutter keeps the text off the edge */
+  border: none;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  box-shadow: none;
 }
 .ticker-tape {
   display: inline-flex; white-space: nowrap;

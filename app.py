@@ -642,7 +642,10 @@ with st.container(key="topnav"):
     # The trailing column is the account control; it sits outside the page-link
     # loop because it isn't a page — it's identity, and it belongs visually
     # separated from navigation.
-    _nc = st.columns([2.4, 0.7, 0.95, 1.25, 0.95, 2.0, 1.85, 1.5],
+    # Column 4 was 0.95, sized for "News". "Research" is as long as "Analysis"
+    # and wrapped to "Resear / ch", so it gets Analysis's width and the slack
+    # comes off the brand column and the spacer.
+    _nc = st.columns([2.2, 0.4, 0.95, 1.25, 1.3, 2.0, 1.85, 1.5],
                      vertical_alignment="center")
     _brand_mark = (
         f'<img class="topnav-mark-img" src="data:image/png;base64,{_MARK_B64}" alt="QuantWizard">'
@@ -709,6 +712,16 @@ def _tape_html(items):
 @st.cache_data(ttl=60, max_entries=1, show_spinner=False)
 def _cached_tape(_api_key):
     return get_tape_prices(_api_key)
+
+# ── Ticker tape ───────────────────────────────────────────────────────────────
+# Directly beneath the navbar, full-bleed, on every page. It used to sit inside
+# the Home page body below the hero, which meant the one element proving the
+# data is live was invisible everywhere else in the app.
+_tape_items = _cached_tape(POLYGON_API_KEY)
+if _tape_items:
+    with st.container(key="tapebar"):
+        st.markdown(_tape_html(_tape_items), unsafe_allow_html=True)
+
 
 @st.cache_data(ttl=300, max_entries=1, show_spinner=False)
 def _cached_movers(_api_key):
@@ -959,10 +972,8 @@ if _page == "home":
     # buttons that actually go there — so the page introduced itself twice
     # before making any case for itself. The version with the CTAs survives.
 
-    # ── Live ticker tape ──────────────────────────────────────────────────────
-    _tape_items = _cached_tape(POLYGON_API_KEY)
-    if _tape_items:
-        st.markdown(_tape_html(_tape_items), unsafe_allow_html=True)
+    # The ticker tape used to render here. It is now under the navbar, so it
+    # appears on every page rather than only this one.
 
     # ── What you can do ───────────────────────────────────────────────────────
     st.markdown('<div class="home-section-title">What you can do</div>', unsafe_allow_html=True)
