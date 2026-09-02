@@ -1392,7 +1392,6 @@ elif _page == "analysis":
     #     has hit its ceiling twice this month. Fixed at the defaults they had.
     _inputs_box = st.container(key="analysis-inputs")
     with _inputs_box:
-        mode = "Investor Mode"
         bar_size = "day"
         _today = datetime.today().date()
 
@@ -1637,8 +1636,16 @@ elif _page == "analysis":
         live = get_live_price(_poly_ticker, POLYGON_API_KEY)
 
 
-        # ── Investor Mode ─────────────────────────────────────────────────────
-        if mode == "Investor Mode":
+        # The analysis body. This was `if mode == "Investor Mode":`, left behind
+        # when Day Trader Mode was removed and `mode` became a constant — the
+        # test could only ever be true, and it sits directly inside
+        # `if run_btn or ticker_input:` which already decided the same thing.
+        #
+        # The condition is now that parent's, restated, rather than a comparison
+        # against a variable that no longer means anything. The block is NOT
+        # unwrapped: dedenting it would re-indent 2,289 lines, 85 of which start
+        # at column 0 inside multi-line HTML strings, for no behavioural gain.
+        if run_btn or ticker_input:
 
             benchmarks = []
             if include_spy: benchmarks.append("SPY")
