@@ -93,18 +93,51 @@ def dollars_to_lots(allocations: dict, inception_date, api_key: str = "") -> lis
     return lots, skipped
 
 
+def _to_close_series(df):
+    """Close indexed by Date, one row per session."""
+    d = df.drop_duplicates("Date")
+    return (d.set_index(pd.to_datetime(d["Date"]))["Close"]
+             .astype(float).sort_index())
+
+
 def _fetch_closes(tickers: list, start: str, end: str, api_key: str = "") -> dict:
-    """{ticker: Series(Close indexed by Date)} via one batch call, per-ticker fallback."""
+    """{ticker: Series(Close indexed by Date)}.
+
+    Three sources, in order, because the first one is not reliable everywhere:
+    a single batch call, then the per-ticker price cache in Supabase, then an
+    individual fetch for anything still missing.
+
+    The middle step is the one that matters in production. get_bars_batch
+    returns {} on ANY exception, so a single bad symbol - or a provider
+    throttling a datacenter IP, which is what the web host looks like from
+    Yahoo's side - drops all of them to the per-ticker path at once. That path
+    then falls to Polygon's free tier at five calls a minute, so a large
+    portfolio priced three of its holdings and silently reported on those.
+    Reading the cache first costs no upstream call at all.
+    """
     out = {}
     batch = get_bars_batch(tickers, start, end, interval="day")
     for tk in tickers:
         df = batch.get(tk)
-        if df is None or len(df) == 0:
-            df = get_bars(tk, start, end, interval="day", polygon_key=api_key)
         if df is not None and len(df) > 0:
-            s = (df.drop_duplicates("Date").set_index(pd.to_datetime(df.drop_duplicates("Date")["Date"]))
-                   ["Close"].astype(float).sort_index())
-            out[tk] = s
+            out[tk] = _to_close_series(df)
+
+    missing = [t for t in tickers if t not in out]
+    if missing:
+        try:
+            from portfolio_data import _read_ticker_cache
+            for tk in missing:
+                # min_rows=2: a return needs two closes, not a history.
+                cached, _tail = _read_ticker_cache(tk, 5, start, end, min_rows=2)
+                if cached is not None and len(cached) > 0:
+                    out[tk] = _to_close_series(cached)
+        except Exception:
+            pass
+
+    for tk in [t for t in tickers if t not in out]:
+        df = get_bars(tk, start, end, interval="day", polygon_key=api_key)
+        if df is not None and len(df) > 0:
+            out[tk] = _to_close_series(df)
     return out
 
 
@@ -146,7 +179,26 @@ def track_portfolio(holdings: list, api_key: str = "", benchmark: str = BENCHMAR
 
     missing = [t for t in tickers if t not in closes]
     if missing:
-        warnings.append(f"No price data for: {', '.join(missing)} (excluded).")
+        # Dropping the unpriced names and carrying on produces a number that
+        # looks like the portfolio's return and is not. A tracked portfolio of
+        # eighteen priced three of them and reported -8.2%: that figure described
+        # CAT, TRV and EIX at reweighted-to-100% stakes, not what the user owns.
+        #
+        # Past a third missing there is no honest way to present a total, so it
+        # refuses rather than rounding the truth off. Below that it still reports
+        # but says exactly what the figures cover.
+        if len(missing) > max(1, len(tickers) // 3):
+            return {"error": (
+                f"Couldn't price {len(missing)} of {len(tickers)} holdings, so the "
+                f"return and value below would describe only part of this "
+                f"portfolio. This is almost always the market-data provider "
+                f"refusing a burst of requests rather than a problem with your "
+                f"holdings — wait a minute and reload. Missing: "
+                f"{', '.join(missing[:12])}"
+                f"{' …' if len(missing) > 12 else ''}")}
+        warnings.append(
+            f"Figures cover {len(tickers) - len(missing)} of {len(tickers)} "
+            f"holdings — no price data for {', '.join(missing)}.")
         lots = [lot for lot in lots if lot["ticker"] in closes]
         tickers = [t for t in tickers if t in closes]
     if not lots:

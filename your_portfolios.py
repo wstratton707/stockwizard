@@ -699,7 +699,13 @@ def _render_card(p, api_key):
         st.markdown(_holdings_table(res["holdings"]), unsafe_allow_html=True)
 
     for w in res.get("warnings", []):
-        st.caption(f"{w}")
+        # st.caption put "no price data for 15 of your 18 holdings" in the
+        # smallest grey text on the page, under a confident-looking return.
+        # Anything that changes what the numbers above MEAN is a warning.
+        if "holdings" in w.lower() or "price data" in w.lower():
+            st.warning(w)
+        else:
+            st.caption(w)
 
     _render_edit(pid, holdings, api_key)
 

@@ -1919,7 +1919,7 @@ def _render_save_load(weights, prefs, *, key_prefix, metrics=None,
     """
     if divider:
         st.markdown("---")
-    _section_header("Save & Load Portfolios" if show_load else "Save This Portfolio")
+    _section_header("Keep This Portfolio")
 
     if show_load:
         _sv_col, _ld_col = st.columns(2)
@@ -1927,7 +1927,20 @@ def _render_save_load(weights, prefs, *, key_prefix, metrics=None,
         _sv_col, _ld_col = st.container(), None
 
     with _sv_col:
-        st.markdown("**Save this portfolio**")
+        # ONE action. There used to be two buttons here, side by side under one
+        # heading, writing to two different tables: "Save Portfolio" into
+        # saved_portfolios, reachable only from a Load list inside this page, and
+        # "Track this forward" into tracked_portfolios, which is what the Your
+        # Portfolios tab reads. A portfolio saved with the first button was not
+        # lost, but it did not appear in the tab named after it, and nothing on
+        # screen explained why. Nobody should have to know which of two similar
+        # buttons writes to the store that has a tab.
+        #
+        # It still writes both records: the tracked one is what the tab shows and
+        # marks to market, the saved one keeps the weights and the risk
+        # preferences so this page's Load list can rebuild the portfolio later.
+        # That is one user action, not two, and the second record costs nothing.
+        st.markdown("**Add this portfolio to Your Portfolios**")
         # The address comes from the signed-in session, never a text box. A
         # free-text field here let anyone write a portfolio into someone else's
         # account just by typing their address - and it made "which email did I
@@ -1936,63 +1949,50 @@ def _render_save_load(weights, prefs, *, key_prefix, metrics=None,
         if _save_email:
             st.caption(f"Saving to **{_save_email}**")
         else:
-            st.info("Sign in to save or track this portfolio — "
+            st.info("Sign in to keep this portfolio \u2014 "
                     "use the **Sign in** button at the top right.")
         _save_name = st.text_input("Portfolio name", placeholder="My Growth Portfolio",
                                    key=f"{key_prefix}_save_port_name",
                                    disabled=not _save_email)
-        if st.button("Save Portfolio", key=f"{key_prefix}_save_port_btn"):
+        if st.button("Add to Your Portfolios", type="primary",
+                     key=f"{key_prefix}_save_port_btn",
+                     help="Tracks its real performance from today, and keeps the "
+                          "allocation so you can rebuild it here later."):
             if not weights:
                 st.warning("Build a portfolio first.")
-            elif _save_email.strip() and _save_name.strip():
-                _ok = save_portfolio(
-                    user_email=_save_email,
-                    name=_save_name,
-                    weights=weights,
-                    preferences=prefs,
-                    metrics=metrics or {},
-                )
-                if _ok:
-                    st.success("Portfolio saved!")
-                else:
-                    # Say what actually went wrong. "Check your connection" was
-                    # wrong for every cause except an actual network drop, and it
-                    # sent debugging in the wrong direction for a malformed
-                    # SUPABASE_URL more than once.
-                    from database import last_write_error
-                    st.error(f"Save failed — {last_write_error()}")
+            elif not (_save_email.strip() and _save_name.strip()):
+                st.warning("Enter a name for this portfolio.")
             else:
-                st.warning("Enter both an email and a name.")
-
-        st.markdown("<div style='color:#94a3b8;font-size:0.8rem;margin:0.4rem 0'>— or —</div>",
-                    unsafe_allow_html=True)
-        if st.button("Track this forward", key=f"{key_prefix}_track_port_btn",
-                     help="Save to 'Your Portfolios' and track its real performance from today."):
-            if not weights:
-                st.warning("Build a portfolio first.")
-            elif _save_email.strip() and _save_name.strip():
                 _cap = float(prefs.get("starting_capital", 10000) or 10000)
                 _alloc = {tk: w * _cap for tk, w in weights.items() if w and w > 0}
-                with st.spinner("Pricing holdings…"):
-                    _lots, _skipped = dollars_to_lots(_alloc, datetime.today().strftime("%Y-%m-%d"))
+                with st.spinner("Pricing holdings\u2026"):
+                    _lots, _skipped = dollars_to_lots(
+                        _alloc, datetime.today().strftime("%Y-%m-%d"))
                 if not _lots:
-                    st.error("Couldn't price the holdings.")
+                    # Same cause as a half-priced tracked portfolio: the market
+                    # data provider refused the burst. Say so, rather than
+                    # "couldn't price the holdings", which reads as bad tickers.
+                    st.error("Couldn't get prices for the holdings just now \u2014 that "
+                             "is usually the market-data provider throttling us "
+                             "rather than a problem with the portfolio. Try again "
+                             "in a minute.")
                 else:
-                    _pid = save_tracked_portfolio(_save_email, _save_name, _lots,
-                                                  datetime.today().strftime("%Y-%m-%d"))
+                    _pid = save_tracked_portfolio(
+                        _save_email, _save_name, _lots,
+                        datetime.today().strftime("%Y-%m-%d"))
                     if _pid:
-                        st.success("Now tracking — open the **Your Portfolios** tab.")
+                        # The weights + preferences copy, so Load below can
+                        # rebuild this portfolio on a later day's prices.
+                        save_portfolio(user_email=_save_email, name=_save_name,
+                                       weights=weights, preferences=prefs,
+                                       metrics=metrics or {})
+                        st.success("Added \u2014 open the **Your Portfolios** tab to "
+                                   "watch it from here.")
                     else:
                         # Report the reason the write itself gave, rather than
-                        # re-probing and guessing. The old version asked
-                        # tracked_storage_status() and announced "the table isn't
-                        # in this project" for any non-200 - including a doubled
-                        # /rest/v1 in the URL, where the table was present and the
-                        # advice was actively misleading.
+                        # re-probing and guessing.
                         from database import last_write_error
-                        st.error(f"Couldn't save — {last_write_error()}")
-            else:
-                st.warning("Enter both an email and a name.")
+                        st.error(f"Couldn't save \u2014 {last_write_error()}")
 
     if not show_load:
         return

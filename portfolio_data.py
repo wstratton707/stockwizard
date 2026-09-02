@@ -246,7 +246,7 @@ def _ticker_cache_key(ticker: str, period_years) -> str:
     return f"ohlcv2_{ticker.upper()}_{int(round(float(period_years)))}y"
 
 
-def _read_ticker_cache(ticker, period_years, start_s, end_s):
+def _read_ticker_cache(ticker, period_years, start_s, end_s, min_rows=60):
     """Cached OHLCV for one ticker, trimmed to the requested window.
 
     Returns (df, tail_start). `tail_start` is a YYYY-MM-DD string when the frame
@@ -276,7 +276,12 @@ def _read_ticker_cache(ticker, period_years, start_s, end_s):
         if df["Date"].min() > want_start + pd.Timedelta(days=_OHLCV_STALE_TOLERANCE):
             return None, None
         df = df[df["Date"] >= want_start].reset_index(drop=True)
-        if len(df) < 60:
+        # `min_rows` guards the Portfolio Builder, which needs real history
+        # before it will trust a covariance. A tracked portfolio asks a different
+        # question - what are these worth today - and its window can legitimately
+        # be a fortnight old, so it passes a small value rather than being told
+        # its own holdings have no data.
+        if len(df) < min_rows:
             return None, None
         df["Ticker"] = ticker
         df = df[[c for c in _OHLCV_COLS if c in df.columns]]
