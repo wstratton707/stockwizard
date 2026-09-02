@@ -1360,7 +1360,11 @@ elif _page == "analysis":
                         unsafe_allow_html=True)
             _m1, _m2, _m3 = st.columns(3)
             do_mc     = _m1.checkbox("Price Forecast",    value=True)
-            do_sector = _m2.checkbox("Sector Comparison", value=True)
+            # Like News, this only reaches the exported report — nothing on the
+            # page renders a sector comparison.
+            do_sector = _m2.checkbox("Sector Comparison", value=True,
+                                     help="Adds a sector-ETF comparison to the "
+                                          "exported report.")
             do_news   = _m3.checkbox("News Headlines",    value=True,
                                      help="Includes recent headlines in the "
                                           "exported report. Read them on the "
@@ -1605,44 +1609,59 @@ elif _page == "analysis":
                         api_key=POLYGON_API_KEY)
                     peers_auto = bool(peers_list)
 
-                news_list = []
-                if do_news:
-                    progress.progress(35, text="Fetching news...")
-                    # The exported report gets the same multi-source feed as the
-                    # on-screen section — cached_fetch_news is Polygon-only, so a
-                    # report showed two publishers while the page beside it showed
-                    # fifteen, with none of the language or solicitation filtering.
-                    news_list = _cached_report_news(ticker_input,
-                                                    company_details.get("Name", ""))
-
-                peer_df       = None
-                peer_price_dfs = {}   # {ticker: df} with Cumulative_Index + Close
-                if do_peers and peers_list and not is_crypto:
-                    progress.progress(45, text="Fetching peer data...")
-                    peer_df = cached_fetch_peer_comparison(ticker_input, tuple(peers_list), POLYGON_API_KEY)
+                # ── Deferred groups ──────────────────────────────────────
+                # Peers, the sector ETF and the news feed used to be fetched
+                # here, before a single pixel rendered. Measured cold on MSFT
+                # they are 2.74s, ~0s and 1.45s of an 8.1s run - and peers alone
+                # is a third of the wait for a section most visitors never
+                # scroll to.
+                #
+                # They are accessors now, not locals. Each one calls the same
+                # `cached_*` wrapper it always did, so the FIRST caller pays and
+                # every later one is free, and no consumer has to know whether
+                # someone else already ran it. That property is what makes the
+                # tabbed layout safe to build on top: a section can be rendered
+                # first, last or not at all without a NameError or a repeated
+                # fetch, which a pre-computed local could not promise.
+                def _load_peers():
+                    """(peer_df, peer_price_dfs). Empty when peers are off."""
+                    if not (do_peers and peers_list and not is_crypto):
+                        return None, {}
+                    _pdf_map = {}
+                    _pdfr = cached_fetch_peer_comparison(
+                        ticker_input, tuple(peers_list), POLYGON_API_KEY)
                     for _pt in [ticker_input] + peers_list[:4]:
                         try:
-                            _pdf = cached_fetch_ohlcv(_pt, "5y", POLYGON_API_KEY,
+                            _one = cached_fetch_ohlcv(_pt, "5y", POLYGON_API_KEY,
                                                       start_override=date_start,
                                                       end_override=date_end,
                                                       bar_size=bar_size)
                             # .copy() — cached_fetch_ohlcv returns a memoised df;
-                            # we add Daily_Return + Cumulative_Index columns below,
-                            # which would mutate the cache without this.
-                            _pdf = _pdf.copy()
-                            _pdf["Daily_Return"]     = _pdf["Close"].pct_change()
-                            _pdf["Cumulative_Index"] = (1 + _pdf["Daily_Return"].fillna(0)).cumprod() * 100
-                            peer_price_dfs[_pt] = _pdf
+                            # the derived columns below would mutate the cache.
+                            _one = _one.copy()
+                            _one["Daily_Return"]     = _one["Close"].pct_change()
+                            _one["Cumulative_Index"] = (
+                                1 + _one["Daily_Return"].fillna(0)).cumprod() * 100
+                            _pdf_map[_pt] = _one
                         except Exception:
                             pass
+                    return _pdfr, _pdf_map
 
-                sector_df = None
-                if do_sector and not is_crypto:
-                    progress.progress(50, text="Fetching sector ETF...")
-                    sector_df = cached_fetch_sector_data(ticker_input, POLYGON_API_KEY, sector,
-                                                         start_override=date_start,
-                                                         end_override=date_end,
-                                                         bar_size=bar_size)
+                def _load_sector():
+                    if not (do_sector and not is_crypto):
+                        return None
+                    return cached_fetch_sector_data(
+                        ticker_input, POLYGON_API_KEY, sector,
+                        start_override=date_start, end_override=date_end,
+                        bar_size=bar_size)
+
+                def _load_news():
+                    """Only the exported report reads this now — see the note
+                    where the on-page news section used to be."""
+                    if not do_news:
+                        return []
+                    return _cached_report_news(ticker_input,
+                                               company_details.get("Name", ""))
 
                 # Proxy key for the heavy-computation caches. It must identify the
                 # WINDOW, not just where it ends: a 1Y and a 5Y pull taken on the
@@ -1901,6 +1920,14 @@ elif _page == "analysis":
                                                 use_container_width=True,
                                                 key=f"gen_{_kind}_{suffix}"):
                         with st.spinner(f"Building your {_name.lower()}…"):
+                            # A report is a standalone document, so it fetches
+                            # everything regardless of what the reader looked at
+                            # on screen. Export is an explicit action and a few
+                            # seconds here is the right trade; a thinner file
+                            # would not be.
+                            peer_df, peer_price_dfs = _load_peers()
+                            sector_df = _load_sector()
+                            news_list = _load_news()
                             try:
                                 if _kind == "excel":
                                     from excel_builder import build_excel
@@ -3674,6 +3701,10 @@ color:var(--muted);background:var(--surface2)}
             # the headlines it was written against, even though the page
             # sends you elsewhere to read them.
 
+            # Fetched here rather than up front. Memoised, so the export path
+            # above may already have paid for it, or may not have run at all -
+            # neither this section nor that one needs to know.
+            peer_df, peer_price_dfs = _load_peers()
             if peer_df is not None and not peer_df.empty:
                 st.markdown(f'<div class="section-header"'
                             f'{_sec_id("sec-peers", "Peer Comparison")}>Peer Comparison</div>',
