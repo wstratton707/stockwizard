@@ -2301,415 +2301,945 @@ elif _page == "analysis":
                     f'font-family:var(--font-sans)">{summary_text}</div></div>',
                     unsafe_allow_html=True)
 
-            # ── Valuation Lens — price vs. earnings-justified fair value ──────
-            if not is_crypto and VALUATION_AVAILABLE:
-                with st.spinner("Building the valuation view…"):
-                    _vdata = _cached_valuation(ticker_input)
-                if _vdata:
-                    st.markdown(
-                        f'<div class="section-header"'
-                        f'{_sec_id("sec-valuation", "Valuation Lens")}>Valuation Lens '
-                        '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
-                        'text-transform:none;font-size:0.7rem">· price vs. earnings-justified fair value</span></div>',
-                        unsafe_allow_html=True)
-                    # ── facts ──
-                    # Prefer the latest trailing-twelve-month EPS so this figure
-                    # matches where the chart's fair-value line actually ends.
-                    # Reading annual core EPS here while the line rode TTM put a
-                    # headline fair value on screen the chart disagreed with.
-                    _core      = _vdata.get("eps_core") or _vdata.get("eps") or [None]
-                    _ttm_e     = _vdata.get("ttm_eps") or []
-                    _core_last = (_ttm_e[-1] if _ttm_e else
-                                  (_core[-1] if _core else None))
-                    _eps_basis = "TTM EPS" if _ttm_e else "core (3-yr median) EPS"
-                    _fair_last = _core_last * _vdata["normal_pe"] if _core_last else None
-                    _cur       = _vdata.get("current_price")
-                    _bpe       = _vdata.get("blended_pe")
-                    _npe       = _vdata["normal_pe"]
-                    # NB: not `_disc` — that name is the `disclaimers` module alias
-                    # (see the import block); rebinding it here is module-scope in a
-                    # Streamlit script and broke the footer's _disc.DIVIDENDS.
-                    _disc_pct  = ((_cur / _fair_last - 1) * 100) if (_fair_last and _cur) else None
-                    _div_last  = next((v for v in reversed(_vdata.get("div") or []) if v), None)
-                    _dyield    = (_div_last / _cur * 100) if (_div_last and _cur) else None
-                    _epsyield  = (100.0 / _bpe) if _bpe else None
-                    # Verdict colour now comes from a CSS class, not inline hex,
-                    # so the badge tracks the chart palette (see .vf-badge).
-                    if _disc_pct is None:
-                        _verd, _vcls = "—", "fair"
-                    elif _disc_pct > 15:
-                        _verd, _vcls = "Above its own history", "over"
-                    elif _disc_pct < -15:
-                        _verd, _vcls = "Below its own history", "under"
-                    else:
-                        _verd, _vcls = "In line with history", "fair"
-                    _mcap   = company_details.get("Market Cap")
-                    _mcap_s = (f"${_mcap/1e12:.2f}T" if _mcap and _mcap >= 1e12 else
-                               f"${_mcap/1e9:.1f}B"  if _mcap and _mcap >= 1e9  else
-                               f"${_mcap/1e6:.0f}M"  if _mcap else "—")
-                    _cur_s  = f"${_cur:,.2f}"      if _cur else "—"
-                    _bpe_s  = f"{_bpe:g}x"         if _bpe else "—"
-                    _eps_s  = f"{_epsyield:.1f}%"  if _epsyield else "—"
-                    _dy_s   = f"{_dyield:.1f}%"    if _dyield else "—"
-                    _fair_s = f"${_fair_last:,.2f}" if _fair_last else "—"
-                    _sector = company_details.get("Sector") or "—"
+            # ── Sections ─────────────────────────────────────────────────────
+            # One report became five views. The page rendered every section on
+            # every run - a cold pass measured 8.1s, of which peers alone was
+            # 2.74s - and asked the reader to scroll fifteen headings to reach
+            # the one they wanted.
+            #
+            # st.segmented_control, not st.tabs: st.tabs executes the body of
+            # EVERY tab on every rerun and only hides the inactive ones, which
+            # here would run all the fetches to show one section. This renders
+            # exactly the group that is selected.
+            _ATABS = ["Overview", "Financials", "Valuation", "Forecast", "Peers"]
+            _atab = st.session_state.get("analysis_tab", _ATABS[0])
+            if _atab not in _ATABS:
+                _atab = _ATABS[0]
+            _picked = st.segmented_control(
+                "Section", _ATABS, default=_atab, key="analysis_tab_bar",
+                label_visibility="collapsed")
+            # Clicking the active option deselects it; treat that as "stay".
+            _atab = st.session_state["analysis_tab"] = _picked or _atab
 
-                    _prem_s = f"{_disc_pct:+.0f}%" if _disc_pct is not None else "—"
-                    _fcol, _mcol = st.columns([1, 3.2])
-                    with _fcol:
-                        st.markdown(f"""<div class="val-facts">
-                          <div class="vf-group">Fast facts</div>
-                          <div class="vf-row"><span>Current price</span><b>{_cur_s}</b></div>
-                          <div class="vf-row"><span>Blended P/E</span><b>{_bpe_s}</b></div>
-                          <div class="vf-row"><span>EPS yield</span><b>{_eps_s}</b></div>
-                          <div class="vf-row"><span>Dividend yield</span><b>{_dy_s}</b></div>
-                          <div class="vf-group">Valuation</div>
-                          <div class="vf-row"><span>Normal P/E</span><span class="vf-pill value">{_npe:g}x</span></div>
-                          <div class="vf-row"><span>Fair value</span><b>{_fair_s}</b></div>
-                          <div class="vf-row"><span>Premium / discount</span><b>{_prem_s}</b></div>
-                          <div class="vf-row"><span>Assessment</span><span class="vf-badge {_vcls}">{_verd}</span></div>
-                          <div class="vf-group">Company</div>
-                          <div class="vf-row"><span>Sector</span><b>{_sector}</b></div>
-                          <div class="vf-row"><span>Market cap</span><b>{_mcap_s}</b></div>
-                        </div>""", unsafe_allow_html=True)
-                    with _mcol:
-                        # Display window. Deliberately does NOT recompute the
-                        # normal P/E — that is the stock's long-run multiple, and
-                        # rebasing it per zoom level would redefine fair value
-                        # every time the user changed the range.
-                        _n_yrs   = len(_vdata["years"])
-                        _ranges  = [("MAX", None), ("15Y", 15), ("10Y", 10),
-                                    ("5Y", 5), ("3Y", 3), ("1Y", 1)]
-                        _ranges  = [r for r in _ranges if r[1] is None or r[1] < _n_yrs]
-                        _labels  = [r[0] for r in _ranges]
-                        try:
-                            _pick = st.segmented_control(
-                                "Range", _labels, default="MAX", key="lens_range",
-                                label_visibility="collapsed")
-                        except Exception:
-                            _pick = st.radio("Range", _labels, index=0, horizontal=True,
-                                             key="lens_range", label_visibility="collapsed")
-                        _yb = dict(_ranges).get(_pick or "MAX")
+            def _show(name):
+                return _atab == name
 
-                        _tab_v, _tab_e, _tab_d = st.tabs(["Valuation", "Earnings", "Dividends"])
-                        with _tab_v:
-                            _vfig = build_valuation_figure(_vdata, years_back=_yb)
-                            if _vfig is not None:
-                                st.plotly_chart(_vfig, use_container_width=True)
-                        with _tab_e:
-                            _efig = build_eps_figure(_vdata)
-                            if _efig is not None:
-                                st.plotly_chart(_efig, use_container_width=True)
-                        with _tab_d:
-                            _dfig = build_dividend_figure(_vdata)
-                            if _dfig is not None:
-                                st.plotly_chart(_dfig, use_container_width=True)
-                            else:
-                                st.caption("This company doesn't pay a dividend.")
-                    st.caption(
-                        f"Fair value = {_eps_basis} × the stock's own historical normal "
-                        f"P/E, from SEC-filed earnings"
-                        + (", updated each quarter." if _ttm_e else ".")
-                        + " A valuation lens, not a price target — always do your "
-                          "own research.")
-                    st.markdown("---")
 
-            # ── Analyst View (Finnhub: consensus + earnings surprises) ────────
-            if not is_crypto:
-                _adata = cached_get_analyst_data(ticker_input)
-                _rec, _earn = _adata.get("recommendation"), _adata.get("earnings")
-                if _rec or _earn:
-                    st.markdown(
-                        f'<div class="section-header"'
-                        f'{_sec_id("sec-analyst", "Analyst View")}>Analyst View '
-                        '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
-                        'text-transform:none;font-size:0.7rem">· Wall Street consensus via Finnhub</span></div>',
-                        unsafe_allow_html=True)
-                    _ac1, _ac2 = st.columns([3, 2])
-                    with _ac1:
-                        from market_data import consensus_from_recommendation
-                        _cons = consensus_from_recommendation(_rec)
-                        if _cons:
-                            _sb, _bb, _hh = _cons["strong_buy"], _cons["buy"], _cons["hold"]
-                            _sl, _ssl     = _cons["sell"], _cons["strong_sell"]
-                            _tot          = _cons["total"]
-                            _verdict, _vcol = _cons["verdict"], _cons["color"]
-                            def _seg(_n, _c):
-                                return f'<div style="width:{_n / _tot * 100:.1f}%;background:{_c}"></div>' if _n else ""
-                            _bar = (_seg(_sb, "#059669") + _seg(_bb, "#34d399") + _seg(_hh, "#cbd5e1")
-                                    + _seg(_sl, "#f59e0b") + _seg(_ssl, "#dc2626"))
-                            st.markdown(
-                                f'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;'
-                                f'padding:1.1rem 1.25rem">'
-                                f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
-                                f'margin-bottom:0.6rem"><span style="font-size:1.35rem;font-weight:700;'
-                                f'color:{_vcol}">{_verdict}</span>'
-                                f'<span style="font-size:0.78rem;color:#64748b">{_tot} analysts · {(_rec or {}).get("period","")[:7]}</span></div>'
-                                f'<div style="display:flex;height:9px;border-radius:5px;overflow:hidden;'
-                                f'background:#f1f5f9">{_bar}</div>'
-                                f'<div style="display:flex;gap:1rem;margin-top:0.6rem;font-size:0.72rem;flex-wrap:wrap">'
-                                f'<span style="color:#059669">● {_sb + _bb} Buy</span>'
-                                f'<span style="color:#94a3b8">● {_hh} Hold</span>'
-                                f'<span style="color:#dc2626">● {_sl + _ssl} Sell</span></div></div>',
-                                unsafe_allow_html=True)
-                    with _ac2:
-                        if _earn:
-                            _rows = ""
-                            for _e in _earn:
-                                _a, _est = _e.get("actual"), _e.get("estimate")
-                                if _a is None or _est is None:
-                                    continue
-                                _beat = _a >= _est
-                                _col  = "#16a34a" if _beat else "#dc2626"
-                                _sp   = _e.get("surprisePercent")
-                                _sps  = f"{_sp:+.1f}%" if isinstance(_sp, (int, float)) else ""
-                                _rows += (f'<div style="display:flex;justify-content:space-between;'
-                                          f'padding:0.3rem 0;border-bottom:1px solid #f1f5f9;font-size:0.76rem">'
-                                          f'<span style="color:#64748b">{str(_e.get("period",""))[:7]}</span>'
-                                          f'<span style="font-family:\'JetBrains Mono\',monospace;color:#0f172a">'
-                                          f'${_a} vs ${_est}</span>'
-                                          f'<span style="color:{_col};font-weight:600">{_sps}</span></div>')
-                            if _rows:
+            if _show("Overview"):
+
+                # ── Analyst View (Finnhub: consensus + earnings surprises) ────────
+                if not is_crypto:
+                    _adata = cached_get_analyst_data(ticker_input)
+                    _rec, _earn = _adata.get("recommendation"), _adata.get("earnings")
+                    if _rec or _earn:
+                        st.markdown(
+                            f'<div class="section-header"'
+                            f'{_sec_id("sec-analyst", "Analyst View")}>Analyst View '
+                            '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                            'text-transform:none;font-size:0.7rem">· Wall Street consensus via Finnhub</span></div>',
+                            unsafe_allow_html=True)
+                        _ac1, _ac2 = st.columns([3, 2])
+                        with _ac1:
+                            from market_data import consensus_from_recommendation
+                            _cons = consensus_from_recommendation(_rec)
+                            if _cons:
+                                _sb, _bb, _hh = _cons["strong_buy"], _cons["buy"], _cons["hold"]
+                                _sl, _ssl     = _cons["sell"], _cons["strong_sell"]
+                                _tot          = _cons["total"]
+                                _verdict, _vcol = _cons["verdict"], _cons["color"]
+                                def _seg(_n, _c):
+                                    return f'<div style="width:{_n / _tot * 100:.1f}%;background:{_c}"></div>' if _n else ""
+                                _bar = (_seg(_sb, "#059669") + _seg(_bb, "#34d399") + _seg(_hh, "#cbd5e1")
+                                        + _seg(_sl, "#f59e0b") + _seg(_ssl, "#dc2626"))
                                 st.markdown(
                                     f'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;'
-                                    f'padding:0.7rem 1.1rem"><div style="font-size:0.64rem;font-weight:700;'
-                                    f'letter-spacing:0.5px;text-transform:uppercase;color:#64748b;'
-                                    f'margin-bottom:0.3rem">Earnings vs Estimate (EPS)</div>{_rows}</div>',
+                                    f'padding:1.1rem 1.25rem">'
+                                    f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+                                    f'margin-bottom:0.6rem"><span style="font-size:1.35rem;font-weight:700;'
+                                    f'color:{_vcol}">{_verdict}</span>'
+                                    f'<span style="font-size:0.78rem;color:#64748b">{_tot} analysts · {(_rec or {}).get("period","")[:7]}</span></div>'
+                                    f'<div style="display:flex;height:9px;border-radius:5px;overflow:hidden;'
+                                    f'background:#f1f5f9">{_bar}</div>'
+                                    f'<div style="display:flex;gap:1rem;margin-top:0.6rem;font-size:0.72rem;flex-wrap:wrap">'
+                                    f'<span style="color:#059669">● {_sb + _bb} Buy</span>'
+                                    f'<span style="color:#94a3b8">● {_hh} Hold</span>'
+                                    f'<span style="color:#dc2626">● {_sl + _ssl} Sell</span></div></div>',
                                     unsafe_allow_html=True)
-                    st.markdown("<div style='height:0.7rem'></div>", unsafe_allow_html=True)
-
-            # ── Fundamentals & Valuation (stocks only) ────────────────────────
-            # SEC-sourced statements via Polygon /vX/reference/financials, turned
-            # into margins/returns/leverage/growth/valuation + a reverse-DCF lens.
-            if not is_crypto:
-                # SEC EDGAR is the primary source (10+ yrs, free, authoritative);
-                # fall back to Polygon's 4-period financials for filers EDGAR
-                # doesn't cover (some foreign/ADR names).
-                _fin_raw = cached_fetch_sec_financials(ticker_input)
-                if not _fin_raw:
-                    _fin_raw = cached_fetch_financials(ticker_input, POLYGON_API_KEY)
-                fund = compute_fundamentals(
-                    _fin_raw, market_cap=company_details.get("Market Cap"),
-                    price=float(df["Close"].iloc[-1]),
-                    supplement=_cached_fin_supplement(ticker_input),
-                )
-                if fund.get("ok"):
-
-                    _n_yrs = len(_fin_raw["income_statement"]) if isinstance(_fin_raw, dict) and _fin_raw.get("income_statement") is not None else 0
-                    _hist  = f"{_n_yrs}-yr history · " if _n_yrs > 1 else ""
-                    st.markdown(
-                        f'<div class="section-header"'
-                        f'{_sec_id("sec-fundamentals", "Fundamentals")}>Fundamentals &amp; Valuation '
-                        f'<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
-                        f'text-transform:none;font-size:0.7rem">· {_hist}FY ending {fund["as_of"]} '
-                        f'· {fund.get("source", "Polygon")}</span></div>',
-                        unsafe_allow_html=True)
-
-                    _v, _m, _r, _l, _g = (fund["valuation"], fund["margins"],
-                                          fund["returns"], fund["leverage"], fund["growth"])
-                    _q, _fc = fund["quality"], fund["fcf"]
-                    _fs, _z, _zone, _fy = _q["f_score"], _q["z_score"], _q["z_zone"], _fc["fcf_yield"]
-                    _fs_cls = ("pos" if (_fs is not None and _fs >= 7)
-                               else "neg" if (_fs is not None and _fs <= 3) else "")
-                    _z_cls  = {"safe": "pos", "distress": "neg"}.get(_zone, "")
-                    _qtips = {
-                        "Piotroski F-Score": "9-point test of fundamental strength (profitability, leverage, efficiency vs last year). 8-9 strong, 0-2 weak.",
-                        "Altman Z-Score": "Bankruptcy-risk score. Above 2.99 = safe, 1.81-2.99 grey, below 1.81 = distress. Not meaningful for banks.",
-                        "FCF Yield": "Free cash flow (operating cash flow − capex) ÷ market cap. Higher = more cash per dollar of value.",
-                        "EV / EBITDA": "Enterprise value ÷ EBITDA — a capital-structure-neutral valuation multiple.",
-                    }
-
-
-                    # Ordered by the question each metric answers — how expensive,
-                    # how profitable, how fast-growing, how financially sound.
-                    _fund_groups = [
-                        ("Valuation", [
-                            ("P/E",            _mv(_v["pe"], "×"),   "", ""),
-                            ("P/S",            _mv(_v["ps"], "×"),   "", ""),
-                            ("P/B",            _mv(_v["pb"], "×"),   "", ""),
-                            ("EV / EBITDA",    _mv(fund["ev_ebitda"], "×"), "", _qtips["EV / EBITDA"]),
-                            ("Earnings Yield", _mv(_v["earnings_yield"], "%"), _pos0(_v["earnings_yield"]), ""),
-                            ("FCF Yield",      _mv(_fy, "%"), _pos0(_fy), _qtips["FCF Yield"]),
-                        ]),
-                        ("Profitability", [
-                            ("Gross Margin",     _mv(_m["gross"], "%"),     "pos" if _m["gross"] else "", ""),
-                            ("Operating Margin", _mv(_m["operating"], "%"), "pos" if _m["operating"] else "", ""),
-                            ("Net Margin",       _mv(_m["net"], "%"),       "pos" if _m["net"] else "", ""),
-                            ("Return on Equity", _mv(_r["roe"], "%"),       "pos" if _r["roe"] else "", ""),
-                        ]),
-                        ("Growth", [
-                            ("Revenue Growth (YoY)", _mv(_g["revenue_yoy"], "%"), _dir(_g["revenue_yoy"]), ""),
-                            ("EPS Growth (YoY)",     _mv(_g["eps_yoy"], "%"),     _dir(_g["eps_yoy"]), ""),
-                        ]),
-                        ("Financial Health", [
-                            ("Current Ratio", _mv(_l["current_ratio"]), "", ""),
-                            ("Debt / Equity", _mv(_l["debt_to_equity"]), "", ""),
-                            ("Piotroski F-Score", f"{_fs} / 9" if _fs is not None else "—", _fs_cls, _qtips["Piotroski F-Score"]),
-                            ("Altman Z-Score", f"{_z} · {_zone.title()}" if _z is not None else "—", _z_cls, _qtips["Altman Z-Score"]),
-                        ]),
-                    ]
-                    _rows = ['<table class="fund-table">']
-                    for _cat, _metrics in _fund_groups:
-                        _rows.append(f'<tr class="grp"><td colspan="4">{_cat}</td></tr>')
-                        for _i in range(0, len(_metrics), 2):
-                            _cells = ""
-                            for _j in range(2):
-                                if _i + _j < len(_metrics):
-                                    _lbl, _val, _cls, _tip = _metrics[_i + _j]
-                                    _th = (f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{_tip}</span></span>'
-                                           if _tip else "")
-                                    _kcls = "k pair2" if _j == 1 else "k"
-                                    _cells += f'<td class="{_kcls}">{_lbl}{_th}</td><td class="v {_cls}">{_val}</td>'
-                                else:
-                                    _cells += '<td class="k"></td><td class="v"></td>'
-                            _rows.append(f'<tr>{_cells}</tr>')
-                    _rows.append('</table>')
-                    st.markdown("".join(_rows), unsafe_allow_html=True)
-
-                    # ── Fundamentals vs Peers ─────────────────────────────────
-                    # Context for the metrics above: how this name stacks up against
-                    # the entered peers on valuation, profitability and quality —
-                    # same EDGAR-sourced compute_fundamentals, one row each.
-                    if peers_list and not is_crypto:
-                        def _peer_fund_row(_tk, _fd):
-                            if not _fd or not _fd.get("ok"):
-                                return None
-                            return {
-                                "Ticker":       _tk,
-                                "P/E":          _fd["valuation"]["pe"],
-                                "P/S":          _fd["valuation"]["ps"],
-                                "Net Margin %": _fd["margins"]["net"],
-                                "ROE %":        _fd["returns"]["roe"],
-                                "Rev Grow %":   _fd["growth"]["revenue_yoy"],
-                                "F-Score /9":   _fd["quality"]["f_score"],
-                                "Z-Score":      _fd["quality"]["z_score"],
-                            }
-                        _frows = []
-                        _mrow = _peer_fund_row(ticker_input, fund)
-                        if _mrow:
-                            _frows.append(_mrow)
-                        for _pt in peers_list[:4]:
-                            try:
-                                _pfin = cached_fetch_sec_financials(_pt)
-                                if not _pfin:
-                                    continue
-                                _pmc  = (cached_fetch_company_details(_pt, POLYGON_API_KEY) or {}).get("Market Cap")
-                                _row  = _peer_fund_row(_pt, compute_fundamentals(_pfin, market_cap=_pmc))
-                                if _row:
-                                    _frows.append(_row)
-                            except Exception:
-                                pass
-                        if len(_frows) > 1:
-                            st.markdown('<div class="section-header">Fundamentals vs Peers</div>',
+                        with _ac2:
+                            if _earn:
+                                _rows = ""
+                                for _e in _earn:
+                                    _a, _est = _e.get("actual"), _e.get("estimate")
+                                    if _a is None or _est is None:
+                                        continue
+                                    _beat = _a >= _est
+                                    _col  = "#16a34a" if _beat else "#dc2626"
+                                    _sp   = _e.get("surprisePercent")
+                                    _sps  = f"{_sp:+.1f}%" if isinstance(_sp, (int, float)) else ""
+                                    _rows += (f'<div style="display:flex;justify-content:space-between;'
+                                              f'padding:0.3rem 0;border-bottom:1px solid #f1f5f9;font-size:0.76rem">'
+                                              f'<span style="color:#64748b">{str(_e.get("period",""))[:7]}</span>'
+                                              f'<span style="font-family:\'JetBrains Mono\',monospace;color:#0f172a">'
+                                              f'${_a} vs ${_est}</span>'
+                                              f'<span style="color:{_col};font-weight:600">{_sps}</span></div>')
+                                if _rows:
+                                    st.markdown(
+                                        f'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;'
+                                        f'padding:0.7rem 1.1rem"><div style="font-size:0.64rem;font-weight:700;'
+                                        f'letter-spacing:0.5px;text-transform:uppercase;color:#64748b;'
+                                        f'margin-bottom:0.3rem">Earnings vs Estimate (EPS)</div>{_rows}</div>',
                                         unsafe_allow_html=True)
-                            st.dataframe(pd.DataFrame(_frows).set_index("Ticker"),
-                                         use_container_width=True)
-                            st.markdown(
-                                "<div style='font-size:0.72rem;color:#94a3b8;margin-top:0.25rem'>"
-                                "Blanks mean a metric wasn't available for that peer (e.g. no market cap "
-                                "for valuation multiples, or banks for margins). F-Score 8–9 = strong; "
-                                "Z-Score &gt; 2.99 = safe zone.</div>",
+                        st.markdown("<div style='height:0.7rem'></div>", unsafe_allow_html=True)
+
+                # ── ETF Profile Panel ─────────────────────────────────────────────
+                if is_etf:
+                    meta     = etf_details.get("meta", {})
+                    holdings = etf_details.get("holdings", [])
+                    if meta or holdings:
+                        st.markdown(f'<div class="section-header"'
+                                    f'{_sec_id("sec-etf", "ETF Profile")}>ETF Profile</div>',
+                                    unsafe_allow_html=True)
+                        if meta:
+                            mc1, mc2, mc3, mc4 = st.columns(4)
+                            for col, lbl, val in [
+                                (mc1, "Full Name",      meta.get("name", ticker_input)),
+                                (mc2, "Index Tracked",  meta.get("index", "N/A")),
+                                (mc3, "Category",       meta.get("category", "N/A")),
+                                (mc4, "No. of Holdings",str(meta.get("holdings", "N/A"))),
+                            ]:
+                                with col:
+                                    st.markdown(f"""
+                                    <div class="metric-card">
+                                        <div class="metric-label">{lbl}</div>
+                                        <div style="font-size:0.88rem;font-weight:500;color:#0f172a;
+                                                    margin-top:0.25rem;line-height:1.4">{val}</div>
+                                    </div>""", unsafe_allow_html=True)
+                            st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+                            aum = meta.get("aum_b", 0)
+                            exp = meta.get("expense", 0)
+                            st.markdown(f"""
+                            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:2px;
+                                        padding:0.6rem 1rem;font-size:0.85rem;color:#4a9eff">
+                                <strong>AUM:</strong> ${aum:,.0f}B &nbsp;·&nbsp;
+                                <strong>Expense Ratio:</strong> {exp:.2f}% annually &nbsp;·&nbsp;
+                                <strong>Cost on $10,000:</strong> ${exp*100:.0f}/yr
+                            </div>""", unsafe_allow_html=True)
+
+                        if holdings:
+                            st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
+                            h_col1, h_col2 = st.columns([1, 1])
+                            with h_col1:
+                                st.markdown("**Top Holdings**")
+                                h_rows = [{"Ticker": t, "Weight (%)": f"{w:.2f}%"} for t, w in holdings]
+                                st.dataframe(pd.DataFrame(h_rows), use_container_width=True, hide_index=True)
+                            with h_col2:
+                                fig_h = go.Figure(go.Bar(
+                                    x=[w for _, w in holdings],
+                                    y=[t for t, _ in holdings],
+                                    orientation="h",
+                                    marker_color=ct.color.brand, marker_line_width=0,
+                                    text=[f"{w:.1f}%" for _, w in holdings],
+                                    textposition="outside",
+                                    textfont=dict(size=ct.font.size.grid, family=ct.font.data,
+                                                  color=ct.color.ink_muted),
+                                ))
+                                # Horizontal bars: the value axis is x here, so the
+                                # gridlines belong to x and the category axis is y.
+                                ct.style(
+                                    fig_h,
+                                    height=300, legend=None, crosshair=False,
+                                    margin=dict(l=64, r=32, t=38, b=34),
+                                    x=ct.pct_axis(tick_format=".1f", title="Weight (%)", zero=True),
+                                    y=ct.category_axis(autorange="reversed"),
+                                    title=dict(text="Top Holdings by Weight",
+                                               font=dict(size=13, color=ct.color.ink,
+                                                         family=ct.font.data),
+                                               x=0, xanchor="left"),
+                                )
+                                st.plotly_chart(fig_h, use_container_width=True)
+
+                # ── Crypto Market Data Panel ──────────────────────────────────────
+                if is_crypto and crypto_details:
+                    st.markdown(f'<div class="section-header"'
+                                f'{_sec_id("sec-market-data", "Market Data")}>Market Data</div>',
                                 unsafe_allow_html=True)
+                    cc1, cc2, cc3, cc4, cc5, cc6 = st.columns(6)
+                    mc_usd   = crypto_details.get("market_cap_usd", 0)
+                    vol_24h  = crypto_details.get("volume_24h", 0)
+                    ath_val  = crypto_details.get("ath", 0)
+                    ath_pct  = crypto_details.get("ath_pct", 0)
+                    p7d      = crypto_details.get("price_change_7d", 0)
+                    p30d     = crypto_details.get("price_change_30d", 0)
+                    circ     = crypto_details.get("circulating_supply", 0)
+                    max_sup  = crypto_details.get("max_supply", 0)
 
-                    # Revenue & net income trend with operating margin
-                    _t = fund["trend"]
-                    if any(x is not None for x in _t["revenue"]):
-                        fig_fund = go.Figure()
-                        fig_fund.add_trace(go.Bar(
-                            x=_t["periods"], y=[(x or 0) / 1e9 for x in _t["revenue"]],
-                            name="Revenue ($B)", marker_color=ct.color.brand,
-                            marker_line_width=0, opacity=0.9))
-                        fig_fund.add_trace(go.Bar(
-                            x=_t["periods"], y=[(x or 0) / 1e9 for x in _t["net_income"]],
-                            name="Net Income ($B)", marker_color=ct._rgba(ct.color.brand, 0.38),
-                            marker_line_width=0))
-                        fig_fund.add_trace(go.Scatter(
-                            x=_t["periods"], y=_t["operating_margin"], name="Operating Margin (%)",
-                            yaxis="y2", line=dict(color=ct.color.value_line, width=ct.stroke.value),
-                            marker=dict(size=ct.marker.size, color=ct.marker.fill,
-                                        line=dict(color=ct.color.value_line,
-                                                  width=ct.marker.stroke_width)),
-                            mode="lines+markers"))
-                        ct.style(
-                            fig_fund,
-                            barmode="group", height=330, crosshair=False,
-                            margin=dict(l=56, r=56, t=44, b=34),
-                            x=ct.category_axis(),
-                            y=ct.value_axis(prefix="", tick_format=",.1f", title="$ Billions"),
-                            y2=dict(title="Op. Margin %", overlaying="y", side="right",
-                                    showgrid=False,
-                                    tickfont=dict(size=ct.font.size.axis,
-                                                  color=ct.color.value_line,
-                                                  family=ct.font.data),
-                                    title_font=dict(size=ct.font.size.fact_label,
-                                                    color=ct.color.value_line,
-                                                    family=ct.font.data)),
-                            title=dict(text="Revenue, Net Income & Operating Margin",
-                                       font=dict(size=13, color=ct.color.ink,
-                                                 family=ct.font.data),
-                                       x=0, xanchor="left", y=0.97, yanchor="top"),
+
+                    for col, lbl, val, color in [
+                        (cc1, "Market Cap",     fmt_large(mc_usd),                            "#0f172a"),
+                        (cc2, "24h Volume",     fmt_large(vol_24h),                           "#0f172a"),
+                        (cc3, "All-Time High",  f"${ath_val:,.2f}" if ath_val else "N/A",    "#0f172a"),
+                        (cc4, "vs ATH",         f"{ath_pct:+.1f}%" if ath_pct else "N/A",   "#dc2626" if ath_pct and ath_pct < 0 else "#059669"),
+                        (cc5, "7d Change",      f"{p7d:+.1f}%"  if p7d  else "N/A",         "#059669" if p7d  and p7d  > 0 else "#dc2626"),
+                        (cc6, "30d Change",     f"{p30d:+.1f}%" if p30d else "N/A",         "#059669" if p30d and p30d > 0 else "#dc2626"),
+                    ]:
+                        with col:
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <div class="metric-label">{lbl}</div>
+                                <div class="metric-value" style="color:{color}">{val}</div>
+                            </div>""", unsafe_allow_html=True)
+
+                    if circ:
+                        sup_pct = f" ({circ/max_sup*100:.1f}% of max supply)" if max_sup else ""
+                        ath_date = crypto_details.get("ath_date", "")
+                        st.markdown(f"""
+                        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:2px;
+                                    padding:0.6rem 1rem;margin-top:0.75rem;font-size:0.85rem;color:#6b7a8d">
+                            <strong>Circulating Supply:</strong> {circ:,.0f} {ticker_input}{sup_pct}
+                            {"&nbsp;·&nbsp;<strong>ATH Date:</strong> " + ath_date if ath_date else ""}
+                        </div>""", unsafe_allow_html=True)
+
+                # ── Chart customization controls ──────────────────────────────────
+                # Wider columns + shorter labels so nothing wraps awkwardly. The
+                # main "Price Chart" heading is removed since the controls speak
+                # for themselves — the jump rail still needs a target, hence the
+                # zero-height anchor rather than a heading.
+                _jump_anchor("sec-chart", "Price Chart")
+                _ctrl1, _ctrl2, _ctrl3, _ctrl4, _ctrl5, _ctrl6, _ctrl7 = \
+                    st.columns([1.6, 0.7, 0.7, 0.8, 0.8, 0.6, 0.9])
+                with _ctrl1:
+                    _chart_type = st.selectbox("Type", ["Area", "Line", "Candlestick"],
+                                               index=0, key="main_chart_type")
+                with _ctrl2:
+                    _show_ma20  = st.checkbox("MA 20",  value=False, key="main_show_ma20")
+                with _ctrl3:
+                    _show_ma50  = st.checkbox("MA 50",  value=True,  key="main_show_ma50")
+                with _ctrl4:
+                    _show_ma200 = st.checkbox("MA 200", value=True,  key="main_show_ma200")
+                with _ctrl5:
+                    _show_vol   = st.checkbox("Volume", value=False, key="main_show_volume")
+                with _ctrl6:
+                    # Support/Resistance is an opt-in overlay now (off by default) —
+                    # it cluttered the default chart and most investors don't use it.
+                    _show_sr    = st.checkbox("S/R",    value=False, key="main_show_sr")
+                with _ctrl7:
+                    _show_tag   = st.checkbox("Marker", value=True, key="main_show_tag")
+
+                # ── Range control ────────────────────────────────────────────
+                # This used to be Plotly's in-plot `rangeselector`, which changes the
+                # x-range CLIENT-side and leaves the y-range alone. On a 15-year
+                # series that made every short window unreadable: picking 1Y kept a
+                # y-axis spanning $0-$340 while the year's prices lived between $210
+                # and $340, so two thirds of the panel was empty fill and the actual
+                # movement was squeezed into the top third. (Yahoo's 1Y view spans
+                # 225-350 — fitted to the window, which is the whole point of
+                # choosing a window.)
+                #
+                # Slicing the frame here instead means the y-axis autoranges over
+                # exactly what is on screen, the tick format can suit the span, and
+                # the rendered figure is the whole truth — no client-side state that
+                # a screenshot or an export would miss.
+                _RANGES = [("1D", 1), ("5D", 5), ("1M", 31), ("3M", 92), ("6M", 183),
+                           ("1Y", 365), ("3Y", 1095), ("All", None)]
+                _span_days = (pd.to_datetime(df["Date"].iloc[-1])
+                              - pd.to_datetime(df["Date"].iloc[0])).days
+                # A button earns its place only if it shows LESS than the whole
+                # series; otherwise it is "All" under another name.
+                _range_opts = [lbl for lbl, d in _RANGES
+                               if d is None or _span_days > d * 1.15]
+                # The widget key persists across tickers. Analysing a 15-year name
+                # and then a recent listing would leave "3Y" selected on a control
+                # that no longer offers it, which Streamlit treats as an error
+                # rather than a fallback — so clear a selection this ticker can't
+                # honour before the widget is built.
+                if st.session_state.get("main_chart_range") not in _range_opts:
+                    st.session_state.pop("main_chart_range", None)
+                st.markdown('<div class="field-label" style="margin-top:0.35rem">Range</div>',
+                            unsafe_allow_html=True)
+                _range_sel = st.radio("Range", _range_opts,
+                                      index=len(_range_opts) - 1, horizontal=True,
+                                      key="main_chart_range", label_visibility="collapsed")
+                _range_days = dict(_RANGES)[_range_sel]
+                if _range_days is None:
+                    _cdf = df
+                else:
+                    _cutoff = pd.to_datetime(df["Date"].iloc[-1]) - pd.Timedelta(days=_range_days)
+                    _cdf = df[pd.to_datetime(df["Date"]) >= _cutoff]
+                    if len(_cdf) < 2:
+                        # A single-session range legitimately slices to one daily row.
+                        # Falling back to the FULL history here (which is what this
+                        # guard used to do) handed the y-range a 200-day average
+                        # spanning fifteen years, so a day that traded $322-$327 was
+                        # drawn on a $280-$330 axis. Keep just enough daily rows to
+                        # read a previous close from.
+                        _cdf = df.tail(10)
+                # Tick density and label shape follow the window: "12 Mar" reads
+                # wrong across fifteen years and "'26" reads wrong across one month.
+                _shown_days = (pd.to_datetime(_cdf["Date"].iloc[-1])
+                               - pd.to_datetime(_cdf["Date"].iloc[0])).days
+                _tickfmt = ("%d %b" if _shown_days <= 190 else
+                            "%b '%y" if _shown_days <= 1200 else "%Y")
+
+
+                # ── Drawing frame ────────────────────────────────────────────────
+                # `_cdf` is daily and stays that way: every statistic on this page is
+                # computed from daily bars and hard-codes it, from Close.rolling(200)
+                # to ret.std() * sqrt(252). Handing those hourly bars would silently
+                # turn MA 200 into 200 HOURS - about 29 trading days - understate
+                # annualised volatility by roughly sqrt(7), and carry that error into
+                # Sharpe, Sortino, beta and the forecast. Every number would change
+                # and every one would still look plausible.
+                #
+                # So the denser series is for the LINE ONLY. `_pdf` is what gets
+                # drawn; `_cdf` remains what everything else measures. Moving
+                # averages below are deliberately still plotted from `_cdf`, so
+                # "MA 50" keeps meaning fifty days on a chart drawn hourly.
+                #
+                # Measured on AAPL: a month goes from 23 points to 154. Hourly is
+                # capped at 6M because the provider only serves ~730 days of it, and
+                # beyond a year the daily series is already 250+ points - dense
+                # enough that more would cost payload for no visible gain. 5-minute
+                # bars were rejected outright: 1,716 points for one month is 75x the
+                # payload for a curve indistinguishable at this width.
+                # Interval per range, the ladder every finance site climbs: fine bars
+                # over a short window, coarse bars over a long one. The provider's own
+                # ceilings decide where it stops - 1-minute is 8 days per request,
+                # 5/15/30-minute is the last 60 days, hourly is ~730 - so past a year
+                # there is nothing finer than daily to be had, and daily is already
+                # 250+ points by then.
+                #
+                # `_lookback` is how far back to ASK. A day's chart cannot request a
+                # single day: ask for one and a weekend or a holiday returns nothing,
+                # so it asks for a week and keeps the last session.
+                _DENSE_FOR = {
+                    "1D": ("1min",  7),
+                    "5D": ("5min",  9),
+                    "1M": ("30min", 33),
+                    "3M": ("1hour", 95),
+                    "6M": ("1hour", 186),
+                }
+                _pdf = _cdf
+                _sessions = 0          # >0 means "keep only the last N sessions"
+                _dense_iv = None
+                if _range_sel in _DENSE_FOR:
+                    _dense_iv, _lookback = _DENSE_FOR[_range_sel]
+                    _anchor = pd.to_datetime(df["Date"].iloc[-1])
+                    _d0 = (_anchor - pd.Timedelta(days=_lookback)).strftime("%Y-%m-%d")
+                    _d1 = (_anchor + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+                    _dense = _cached_dense_bars(ticker_input, _d0, _d1, _dense_iv)
+                    if _dense is not None and len(_dense) > 0:
+                        _sessions = {"1D": 1, "5D": 5}.get(_range_sel, 0)
+                        if _sessions:
+                            # Trim to whole sessions rather than a rolling window, so
+                            # "1D" is a trading day and not the last 24 hours.
+                            _days = pd.to_datetime(_dense["Date"]).dt.normalize()
+                            _keep = sorted(_days.unique())[-_sessions:]
+                            _dense = _dense[_days.isin(_keep)]
+                        if len(_dense) > len(_cdf) or _sessions:
+                            _pdf = _dense
+                    else:
+                        _dense_iv = None          # fell back to daily; no rangebreaks
+
+                # Labels follow the window, not the calendar: a single session wants
+                # clock time, a week wants weekday and time, a decade wants years.
+                if _range_sel == "1D":
+                    _tickfmt = "%H:%M"
+                elif _range_sel == "5D":
+                    _tickfmt = "%a %H:%M"
+
+                # US regular session is 09:30-16:00 Eastern, and the provider returns
+                # bars stamped in that zone.
+                _rangebreaks = []
+                if _dense_iv:
+                    _rangebreaks = [
+                        dict(bounds=["sat", "mon"]),
+                        dict(bounds=[16, 9.5], pattern="hour"),
+                    ]
+                elif _range_sel in ("1M", "3M", "6M", "1Y"):
+                    # Daily bars still leave weekend holes worth closing.
+                    _rangebreaks = [dict(bounds=["sat", "mon"])]
+
+                fig = go.Figure()
+
+                # ── Price — line / area / candle depending on selection ───────────
+                if _chart_type == "Candlestick" and {"Open","High","Low","Close"}.issubset(_pdf.columns):
+                    fig.add_trace(go.Candlestick(
+                        x=_pdf["Date"], open=_pdf["Open"], high=_pdf["High"],
+                        low=_pdf["Low"], close=_pdf["Close"],
+                        name="Price",
+                        increasing_line_color=ct.color.positive, decreasing_line_color=ct.color.negative,
+                        increasing_fillcolor=ct.color.positive, decreasing_fillcolor=ct.color.negative,
+                    ))
+                elif _chart_type == "Line":
+                    fig.add_trace(go.Scatter(
+                        x=_pdf["Date"], y=_pdf["Close"],
+                        name="Price",
+                        line=dict(color=ct.color.ink, width=ct.stroke.price),
+                        hovertemplate="$%{y:,.2f}<extra>Price</extra>",
+                    ))
+                else:  # Area (default)
+                    # "tozeroy", not an invisible base trace at the series minimum.
+                    # That base trace spanned the full width at a constant y, so it
+                    # dragged the axis down to the all-time low no matter what was
+                    # selected. tozeroy fills to the bottom of the plot and is
+                    # clipped there, which looks identical and constrains nothing.
+                    fig.add_trace(go.Scatter(
+                        x=_pdf["Date"], y=_pdf["Close"],
+                        name="Price",
+                        line=dict(color=ct.color.ink, width=ct.stroke.price),
+                        fill="tozeroy",
+                        # A brand tint, not an ink tint: ink at 5% on white renders as
+                        # flat grey, which is the exact bland look this redesign is
+                        # meant to remove.
+                        fillcolor=ct._rgba(ct.color.brand, 0.06),
+                        hovertemplate="$%{y:,.2f}<extra>Price</extra>",
+                    ))
+
+                # ── Moving averages — gated by checkboxes ─────────────────────────
+                _ma_cfg = [
+                    # Moving averages are supporting series: hairline, and separated
+                    # mostly by dash length rather than by colour. Three saturated
+                    # hues here would compete with the price line for attention.
+                    (20,  ct.color.ink_faint,  1.0, "dot",      "MA 20",  _show_ma20),
+                    (50,  ct.color.value_line, 1.0, "dash",     "MA 50",  _show_ma50),
+                    (200, ct.color.brand,      1.0, "longdash", "MA 200", _show_ma200),
+                ]
+                # A daily moving average has one value per day, so across a single
+                # session it is a single point and across a week it is five - a
+                # stub, not a trend. Yahoo shows no averages on its intraday chart
+                # either. They return with the ranges that span enough days to draw
+                # one honestly.
+                _ma_ok = _range_sel not in ("1D", "5D") and len(_cdf) >= 10
+                for ma, color, width, dash, label, enabled in _ma_cfg:
+                    if _ma_ok and enabled and f"MA{ma}" in _cdf.columns:
+                        fig.add_trace(go.Scatter(
+                            x=_cdf["Date"], y=_cdf[f"MA{ma}"],
+                            name=label,
+                            line=dict(color=color, width=width, dash=dash),
+                            opacity=0.9,
+                            hovertemplate=f"$%{{y:,.2f}}<extra>MA {ma}</extra>",
+                        ))
+
+                # ── Volume bars on secondary axis (optional) ──────────────────────
+                if _show_vol and "Volume" in _cdf.columns:
+                    _vol_colors = ["#059669" if c >= o else "#dc2626"
+                                   for c, o in zip(_pdf["Close"], _pdf["Open"])] \
+                                  if "Open" in _pdf.columns else "#94a3b8"
+                    fig.add_trace(go.Bar(
+                        x=_pdf["Date"], y=_pdf["Volume"],
+                        name="Volume", marker_color=_vol_colors,
+                        opacity=0.35, yaxis="y2",
+                        hovertemplate="%{y:,.0f}<extra>Volume</extra>",
+                    ))
+
+                # ── Visible y-range ──────────────────────────────────────────────
+                # Set explicitly rather than left to autorange, for one reason:
+                # "tozeroy" counts the fill's own extent, so an area chart always
+                # autoranges down to $0 however narrow the price band is. That is
+                # what left the 1Y view spanning $0-$340 for a year that traded
+                # between $226 and $340. The range covers every series actually
+                # drawn — the price, whichever moving averages are switched on, and
+                # the candle wicks — so nothing plotted can fall outside it.
+                _y_series = [_pdf["Close"]]
+                if _chart_type == "Candlestick" and {"High", "Low"}.issubset(_pdf.columns):
+                    _y_series += [_pdf["High"], _pdf["Low"]]
+                # `_ma_ok` gates this too. The axis should describe what is on the
+                # chart and nothing else: including an average that was never plotted
+                # is what zoomed a quiet day out to a fifteen-year price band.
+                for _ma, _en in ((20, _show_ma20), (50, _show_ma50), (200, _show_ma200)):
+                    if _ma_ok and _en and f"MA{_ma}" in _cdf.columns:
+                        _y_series.append(_cdf[f"MA{_ma}"].dropna())
+                _y_min = min(float(s.min()) for s in _y_series if len(s))
+                _y_max = max(float(s.max()) for s in _y_series if len(s))
+                # The reference line is part of the picture: a day that gapped up and
+                # never looked back would otherwise push it off the top of the plot,
+                # leaving the move to be read against nothing.
+                if _range_sel == "1D" and len(_cdf) >= 2:
+                    _pc = float(_cdf["Close"].iloc[-2])
+                    _y_min, _y_max = min(_y_min, _pc), max(_y_max, _pc)
+                _y_pad = max((_y_max - _y_min) * 0.06, _y_max * 0.005)
+                # A price axis never goes below zero, however much padding the band
+                # asks for — a floor of -$8 under a 15-year chart is nonsense.
+                _y_floor = max(0.0, _y_min - _y_pad)
+                _y_ceil  = _y_max + _y_pad
+
+                if _show_sr and resistance:
+                    # Only show resistance levels INSIDE chart range and above current price
+                    _res_above = sorted(
+                        [r for r in resistance if _y_floor < r < _y_ceil],
+                        reverse=True,
+                    )[:2]
+                    for _i, r in enumerate(_res_above):
+                        fig.add_shape(type="line", x0=0, x1=1, xref="paper",
+                                      y0=r, y1=r,
+                                      line=dict(color=ct.color.negative, width=1, dash="dash"),
+                                      opacity=0.4, layer="below")
+                        fig.add_annotation(
+                            x=0.006, xref="paper", y=r, yref="y",
+                            text=f"Resist ${r:,.0f}",
+                            showarrow=False, xanchor="left", yshift=8,
+                            font=dict(color=ct.color.negative, size=10, family=ct.font.data),
+                            bgcolor="rgba(255,255,255,0.9)",
+                            bordercolor=ct._rgba(ct.color.negative, 0.35), borderwidth=1,
+                            borderpad=3,
                         )
-                        st.plotly_chart(fig_fund, use_container_width=True)
 
-                    # Free cash flow trend (EDGAR-powered)
-                    _tf = _t.get("fcf")
-                    if _tf and any(x is not None for x in _tf):
-                        fig_fcf = go.Figure()
-                        fig_fcf.add_trace(go.Bar(
-                            x=_t["periods"], y=[(x or 0) / 1e9 for x in _tf],
-                            marker_color=[ct.color.positive if (x or 0) >= 0 else ct.color.negative
-                                          for x in _tf],
-                            marker_line_width=0,
-                            name="Free Cash Flow ($B)",
-                            hovertemplate="%{x}: $%{y:.1f}B<extra>Free Cash Flow</extra>"))
-                        # zero=False + an explicit zero line: FCF is signed, so
-                        # the meaningful reference is the axis crossing, not a
-                        # floor pinned under the most negative year.
-                        ct.style(
-                            fig_fcf,
-                            height=240, legend=None, crosshair=False,
-                            margin=dict(l=56, r=20, t=38, b=34),
-                            x=ct.category_axis(),
-                            y=ct.value_axis(prefix="", tick_format=",.1f", zero=False,
-                                            title="$ Billions", zeroline=True,
-                                            zerolinecolor=ct.color.rule),
-                            title=dict(text="Free Cash Flow",
-                                       font=dict(size=13, color=ct.color.ink,
-                                                 family=ct.font.data),
-                                       x=0, xanchor="left"),
+                if _show_sr and support:
+                    _sup_below = sorted(
+                        [s for s in support if _y_floor < s < _y_ceil]
+                    )[:2]
+                    for _i, s in enumerate(_sup_below):
+                        fig.add_shape(type="line", x0=0, x1=1, xref="paper",
+                                      y0=s, y1=s,
+                                      line=dict(color=ct.color.positive, width=1, dash="dash"),
+                                      opacity=0.4, layer="below")
+                        fig.add_annotation(
+                            x=0.006, xref="paper", y=s, yref="y",
+                            text=f"Support ${s:,.0f}",
+                            showarrow=False, xanchor="left", yshift=8,
+                            font=dict(color=ct.color.positive, size=10, family=ct.font.data),
+                            bgcolor="rgba(255,255,255,0.9)",
+                            bordercolor=ct._rgba(ct.color.positive, 0.35), borderwidth=1,
+                            borderpad=3,
                         )
-                        st.plotly_chart(fig_fcf, use_container_width=True)
 
-                    # ── What's Priced In ──────────────────────────────────────
-                    # Renders `_dcf_report` (analysis.dcf_valuation) — the same
-                    # two-stage FCF model the Excel report ships. It replaces an
-                    # older net-income reverse-DCF one-liner that quoted a
-                    # different, less rigorous implied-growth number and showed
-                    # none of the assumptions behind it.
-                    #
-                    # Every rate below is read from the report, never assumed:
-                    # the WACC is CAPM-derived per company, so hardcoding a
-                    # discount rate here would silently misstate the model.
-                    _dcfr = _dcf_report if isinstance(_dcf_report, dict) else {"ok": False}
+                # ── Previous close, on the single-session view ────────────────────
+                # A day's move is meaningless without the level it moved from, which
+                # is why every intraday chart draws this line. The value comes from
+                # the DAILY frame - the close before the session on screen - not from
+                # the intraday bars, which start at the open.
+                if _range_sel == "1D" and len(_cdf) >= 2:
+                    _prev_close = float(_cdf["Close"].iloc[-2])
+                    fig.add_hline(
+                        y=_prev_close, line_dash="dot", line_width=1,
+                        line_color=ct.color.ink_muted, opacity=0.55,
+                        annotation_text=f"Prev close ${_prev_close:,.2f}",
+                        annotation_position="top left",
+                        annotation_font=dict(size=10, color=ct.color.ink_muted,
+                                             family=ct.font.data),
+                    )
+
+                # ── Current price tag ─────────────────────────────────────────────
+                if _show_tag:
+                    _last = _pdf["Close"].iloc[-1]
+                    fig.add_shape(type="line", x0=0, x1=1, xref="paper",
+                                  y0=_last, y1=_last,
+                                  line=dict(color=ct.color.ink_muted, width=1, dash="dot"),
+                                  opacity=0.7, layer="above")
+                    fig.add_annotation(
+                        # Past the right-hand tick labels, not on top of them.
+                        x=1.0, xref="paper", y=_last, yref="y", xshift=56,
+                        text=f"<b>${_last:,.2f}</b>",
+                        showarrow=False, xanchor="left",
+                        font=dict(color=ct.color.paper, size=11, family=ct.font.data),
+                        bgcolor=ct.color.ink,
+                        borderpad=4,
+                    )
+
+                ct.style(
+                    fig,
+                    height=480,
+                    # The price axis is on the RIGHT, so the left gutter is only
+                    # breathing room. The right margin carries the axis (~54px) and
+                    # the last-price tag beyond it. The range buttons used to live
+                    # inside the plot and cost 70px of top margin; they are now a
+                    # Streamlit control above the chart, and that height goes to the
+                    # plot instead.
+                    margin=dict(l=24, r=118, t=28, b=48),
+                    x=ct.time_axis(
+                        fy_ticks=False, title=None, tickformat=_tickfmt,
+                        nticks=8, automargin=True,
+                        rangeslider=dict(visible=False),
+                        # Give no width to time the market was shut. Without this an
+                        # intraday chart spends most of its axis on nights and
+                        # weekends: a 1-minute day is 390 minutes of trading inside a
+                        # 1,440-minute box, so the price action gets a quarter of the
+                        # plot and the line leaps across the gaps. Weekends go for
+                        # every dense range; the overnight bound only applies where
+                        # bars are intraday, since daily bars have no hours to hide.
+                        rangebreaks=_rangebreaks,
+                    ),
+                    y=ct.value_axis(tick_format=",.2f", zero=False, title=None,
+                                    nticks=6, side="right", automargin=True,
+                                    range=[_y_floor, _y_ceil]),
+                    # namelength=-1 keeps long trace names from being truncated in the
+                    # unified tooltip.
+                    hoverlabel=dict(namelength=-1, **ct.hover()),
+                )
+                if _show_vol and "Volume" in _cdf.columns:
+                    fig.update_layout(yaxis2=dict(
+                        title=None, overlaying="y", side="left",   # hidden; keeps off the price axis
+                        showgrid=False, showticklabels=False,
+                        range=[0, float(_cdf["Volume"].max() * 5)],
+                    ))
+                st.plotly_chart(fig, use_container_width=True, config={
+                    "displaylogo": False,
+                    "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
+                })
+
+                # ── One switchable indicator below the price chart ────────────────
+                # Replaces the old always-on stack of RSI + Bollinger (+ MACD) charts
+                # with a single view the user flips between — less scrolling, less
+                # clutter. "None" hides it entirely.
+                _ind_opts = ["None"]
+                if "RSI14" in df.columns:    _ind_opts.append("RSI")
+                if "MACD" in df.columns:     _ind_opts.append("MACD")
+                if "BB_Upper" in df.columns: _ind_opts.append("Bollinger")
+                _ind_view = "None"
+                if len(_ind_opts) > 1:
+                    _jump_anchor("sec-indicator", "Indicators")
+                    st.markdown('<div class="field-label" style="margin-top:0.5rem">Indicator</div>',
+                                unsafe_allow_html=True)
+                    _ind_view = st.radio("Indicator", _ind_opts, horizontal=True,
+                                         key="tech_indicator", label_visibility="collapsed")
+
+                if _ind_view == "RSI" and "RSI14" in df.columns:
+                    st.markdown('<div class="section-header">RSI (14)</div>', unsafe_allow_html=True)
+                    fig_rsi = go.Figure()
+                    fig_rsi.add_trace(go.Scatter(x=df["Date"], y=df["RSI14"],
+                                                 line=dict(color=ct.color.ink, width=ct.stroke.price), name="RSI",
+                                                 hovertemplate="RSI: %{y:.1f}<extra></extra>"))
+                    fig_rsi.add_hrect(y0=70, y1=100, fillcolor="rgba(239,68,68,0.08)", line_width=0)
+                    fig_rsi.add_hrect(y0=0, y1=30, fillcolor="rgba(22,163,74,0.08)", line_width=0)
+                    fig_rsi.add_hline(y=70, line_dash="dash", line_color=ct.color.negative, line_width=1, opacity=0.6)
+                    fig_rsi.add_hline(y=50, line_dash="dot",  line_color=ct.color.ink_muted, line_width=1, opacity=0.5)
+                    fig_rsi.add_hline(y=30, line_dash="dash", line_color=ct.color.positive, line_width=1, opacity=0.6)
+                    # Anchor zone labels INSIDE the plot at the left edge so they
+                    # don't float in the right margin.
+                    fig_rsi.add_annotation(
+                        xref="paper", x=0.005, y=85, text="Overbought",
+                        showarrow=False, xanchor="left",
+                        font=dict(size=10, color=ct.color.negative, family=ct.font.data),
+                    )
+                    fig_rsi.add_annotation(
+                        xref="paper", x=0.005, y=15, text="Oversold",
+                        showarrow=False, xanchor="left",
+                        font=dict(size=10, color=ct.color.positive, family=ct.font.data),
+                    )
+                    # Margins match the price chart above so the two plot areas line
+                    # up: a stacked indicator whose x-axis is offset from the price
+                    # it explains is worse than no indicator at all.
+                    ct.style(
+                        fig_rsi,
+                        height=200,
+                        margin=dict(l=52, r=112, t=20, b=30),
+                        legend=None,
+                        x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
+                        y=ct.plain_axis(range=[0, 100], tickvals=[30, 50, 70], title=None),
+                    )
+                    st.plotly_chart(fig_rsi, use_container_width=True)
+
+                if _ind_view == "Bollinger" and "BB_Upper" in df.columns:
+                    st.markdown('<div class="section-header">Bollinger Bands</div>', unsafe_allow_html=True)
+                    fig_bb = go.Figure()
+                    fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["BB_Upper"],
+                                                line=dict(color=ct.color.ink_muted, width=1), name="Upper Band"))
+                    fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["BB_Lower"],
+                                                line=dict(color=ct.color.ink_muted, width=1), name="Lower Band",
+                                                fill="tonexty", fillcolor="rgba(147,197,253,0.15)"))
+                    fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["BB_Middle"],
+                                                line=dict(color=ct.color.value_line, width=ct.stroke.price, dash="dash"), name="Middle (SMA)"))
+                    fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["Close"],
+                                                line=dict(color=ct.color.ink, width=ct.stroke.price), name="Price",
+                                                hovertemplate="$%{y:,.2f}<extra>Price</extra>"))
+                    ct.style(
+                        fig_bb,
+                        height=320,
+                        margin=dict(l=52, r=112, t=40, b=30),
+                        x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
+                        y=ct.value_axis(tick_format=",.2f", zero=False, title=None),
+                    )
+                    st.plotly_chart(fig_bb, use_container_width=True)
+
+                if _ind_view == "MACD" and "MACD" in df.columns:
+                    st.markdown('<div class="section-header">MACD</div>', unsafe_allow_html=True)
+                    fig_macd = go.Figure()
+                    fig_macd.add_trace(go.Scatter(
+                        x=df["Date"], y=df["MACD"], name="MACD",
+                        line=dict(color=ct.color.ink, width=ct.stroke.price),
+                        hovertemplate="MACD: %{y:.3f}<extra></extra>"))
+                    fig_macd.add_trace(go.Scatter(
+                        x=df["Date"], y=df["MACD_Signal"], name="Signal",
+                        line=dict(color=ct.color.value_line, width=ct.stroke.price),
+                        hovertemplate="Signal: %{y:.3f}<extra></extra>"))
+                    _hist_colors = [ct.color.positive if (v or 0) >= 0 else ct.color.negative
+                                    for v in df["MACD_Hist"].fillna(0)]
+                    fig_macd.add_trace(go.Bar(
+                        x=df["Date"], y=df["MACD_Hist"], name="Histogram",
+                        marker_color=_hist_colors, opacity=0.5,
+                        hovertemplate="Hist: %{y:.3f}<extra></extra>"))
+                    ct.style(
+                        fig_macd,
+                        height=240,
+                        margin=dict(l=52, r=112, t=20, b=30),
+                        x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
+                        y=ct.plain_axis(title=None, zeroline=True,
+                                        zerolinecolor=ct.color.rule),
+                    )
+                    st.plotly_chart(fig_macd, use_container_width=True)
+
+
+                st.markdown(f'<div class="section-header"'
+                            f'{_sec_id("sec-volume", "Volume")}>Volume</div>',
+                            unsafe_allow_html=True)
+                vol_colors = [ct.color.positive if r >= 0 else ct.color.negative
+                              for r in df["Daily_Return"].fillna(0)]
+                fig_vol = go.Figure()
+                fig_vol.add_trace(go.Bar(x=df["Date"], y=df["Volume"], marker_color=vol_colors, opacity=0.85,
+                                         name="Volume",
+                                         hovertemplate="<b>%{x|%b %d, %Y}</b><br>Volume: %{y:,.0f}<extra></extra>"))
+                if "Volume" in df.columns:
+                    _vol_ma20 = df["Volume"].rolling(20, min_periods=5).mean()
+                    fig_vol.add_trace(go.Scatter(
+                        x=df["Date"], y=_vol_ma20, name="20d Avg",
+                        line=dict(color=ct.color.brand, width=1.25, dash="dot"),
+                        hovertemplate="20d Avg: %{y:,.0f}<extra></extra>",
+                    ))
+                # No in-chart title: the "Volume" section header directly above
+                # already says it, and printing it twice is just noise.
+                ct.style(
+                    fig_vol,
+                    height=260,
+                    margin=dict(l=52, r=112, t=26, b=30),
+                    x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
+                    y=ct.value_axis(prefix="", tick_format=".2s", title=None),
+                )
+                st.plotly_chart(fig_vol, use_container_width=True)
+
+            if _show("Financials"):
+
+                # ── Fundamentals & Valuation (stocks only) ────────────────────────
+                # SEC-sourced statements via Polygon /vX/reference/financials, turned
+                # into margins/returns/leverage/growth/valuation + a reverse-DCF lens.
+                if not is_crypto:
+                    # SEC EDGAR is the primary source (10+ yrs, free, authoritative);
+                    # fall back to Polygon's 4-period financials for filers EDGAR
+                    # doesn't cover (some foreign/ADR names).
+                    _fin_raw = cached_fetch_sec_financials(ticker_input)
+                    if not _fin_raw:
+                        _fin_raw = cached_fetch_financials(ticker_input, POLYGON_API_KEY)
+                    fund = compute_fundamentals(
+                        _fin_raw, market_cap=company_details.get("Market Cap"),
+                        price=float(df["Close"].iloc[-1]),
+                        supplement=_cached_fin_supplement(ticker_input),
+                    )
+                    if fund.get("ok"):
+
+                        _n_yrs = len(_fin_raw["income_statement"]) if isinstance(_fin_raw, dict) and _fin_raw.get("income_statement") is not None else 0
+                        _hist  = f"{_n_yrs}-yr history · " if _n_yrs > 1 else ""
+                        st.markdown(
+                            f'<div class="section-header"'
+                            f'{_sec_id("sec-fundamentals", "Fundamentals")}>Fundamentals &amp; Valuation '
+                            f'<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                            f'text-transform:none;font-size:0.7rem">· {_hist}FY ending {fund["as_of"]} '
+                            f'· {fund.get("source", "Polygon")}</span></div>',
+                            unsafe_allow_html=True)
+
+                        _v, _m, _r, _l, _g = (fund["valuation"], fund["margins"],
+                                              fund["returns"], fund["leverage"], fund["growth"])
+                        _q, _fc = fund["quality"], fund["fcf"]
+                        _fs, _z, _zone, _fy = _q["f_score"], _q["z_score"], _q["z_zone"], _fc["fcf_yield"]
+                        _fs_cls = ("pos" if (_fs is not None and _fs >= 7)
+                                   else "neg" if (_fs is not None and _fs <= 3) else "")
+                        _z_cls  = {"safe": "pos", "distress": "neg"}.get(_zone, "")
+                        _qtips = {
+                            "Piotroski F-Score": "9-point test of fundamental strength (profitability, leverage, efficiency vs last year). 8-9 strong, 0-2 weak.",
+                            "Altman Z-Score": "Bankruptcy-risk score. Above 2.99 = safe, 1.81-2.99 grey, below 1.81 = distress. Not meaningful for banks.",
+                            "FCF Yield": "Free cash flow (operating cash flow − capex) ÷ market cap. Higher = more cash per dollar of value.",
+                            "EV / EBITDA": "Enterprise value ÷ EBITDA — a capital-structure-neutral valuation multiple.",
+                        }
+
+
+                        # Ordered by the question each metric answers — how expensive,
+                        # how profitable, how fast-growing, how financially sound.
+                        _fund_groups = [
+                            ("Valuation", [
+                                ("P/E",            _mv(_v["pe"], "×"),   "", ""),
+                                ("P/S",            _mv(_v["ps"], "×"),   "", ""),
+                                ("P/B",            _mv(_v["pb"], "×"),   "", ""),
+                                ("EV / EBITDA",    _mv(fund["ev_ebitda"], "×"), "", _qtips["EV / EBITDA"]),
+                                ("Earnings Yield", _mv(_v["earnings_yield"], "%"), _pos0(_v["earnings_yield"]), ""),
+                                ("FCF Yield",      _mv(_fy, "%"), _pos0(_fy), _qtips["FCF Yield"]),
+                            ]),
+                            ("Profitability", [
+                                ("Gross Margin",     _mv(_m["gross"], "%"),     "pos" if _m["gross"] else "", ""),
+                                ("Operating Margin", _mv(_m["operating"], "%"), "pos" if _m["operating"] else "", ""),
+                                ("Net Margin",       _mv(_m["net"], "%"),       "pos" if _m["net"] else "", ""),
+                                ("Return on Equity", _mv(_r["roe"], "%"),       "pos" if _r["roe"] else "", ""),
+                            ]),
+                            ("Growth", [
+                                ("Revenue Growth (YoY)", _mv(_g["revenue_yoy"], "%"), _dir(_g["revenue_yoy"]), ""),
+                                ("EPS Growth (YoY)",     _mv(_g["eps_yoy"], "%"),     _dir(_g["eps_yoy"]), ""),
+                            ]),
+                            ("Financial Health", [
+                                ("Current Ratio", _mv(_l["current_ratio"]), "", ""),
+                                ("Debt / Equity", _mv(_l["debt_to_equity"]), "", ""),
+                                ("Piotroski F-Score", f"{_fs} / 9" if _fs is not None else "—", _fs_cls, _qtips["Piotroski F-Score"]),
+                                ("Altman Z-Score", f"{_z} · {_zone.title()}" if _z is not None else "—", _z_cls, _qtips["Altman Z-Score"]),
+                            ]),
+                        ]
+                        _rows = ['<table class="fund-table">']
+                        for _cat, _metrics in _fund_groups:
+                            _rows.append(f'<tr class="grp"><td colspan="4">{_cat}</td></tr>')
+                            for _i in range(0, len(_metrics), 2):
+                                _cells = ""
+                                for _j in range(2):
+                                    if _i + _j < len(_metrics):
+                                        _lbl, _val, _cls, _tip = _metrics[_i + _j]
+                                        _th = (f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{_tip}</span></span>'
+                                               if _tip else "")
+                                        _kcls = "k pair2" if _j == 1 else "k"
+                                        _cells += f'<td class="{_kcls}">{_lbl}{_th}</td><td class="v {_cls}">{_val}</td>'
+                                    else:
+                                        _cells += '<td class="k"></td><td class="v"></td>'
+                                _rows.append(f'<tr>{_cells}</tr>')
+                        _rows.append('</table>')
+                        st.markdown("".join(_rows), unsafe_allow_html=True)
+
+                        # ── Fundamentals vs Peers ─────────────────────────────────
+                        # Context for the metrics above: how this name stacks up against
+                        # the entered peers on valuation, profitability and quality —
+                        # same EDGAR-sourced compute_fundamentals, one row each.
+                        if peers_list and not is_crypto:
+                            def _peer_fund_row(_tk, _fd):
+                                if not _fd or not _fd.get("ok"):
+                                    return None
+                                return {
+                                    "Ticker":       _tk,
+                                    "P/E":          _fd["valuation"]["pe"],
+                                    "P/S":          _fd["valuation"]["ps"],
+                                    "Net Margin %": _fd["margins"]["net"],
+                                    "ROE %":        _fd["returns"]["roe"],
+                                    "Rev Grow %":   _fd["growth"]["revenue_yoy"],
+                                    "F-Score /9":   _fd["quality"]["f_score"],
+                                    "Z-Score":      _fd["quality"]["z_score"],
+                                }
+                            _frows = []
+                            _mrow = _peer_fund_row(ticker_input, fund)
+                            if _mrow:
+                                _frows.append(_mrow)
+                            for _pt in peers_list[:4]:
+                                try:
+                                    _pfin = cached_fetch_sec_financials(_pt)
+                                    if not _pfin:
+                                        continue
+                                    _pmc  = (cached_fetch_company_details(_pt, POLYGON_API_KEY) or {}).get("Market Cap")
+                                    _row  = _peer_fund_row(_pt, compute_fundamentals(_pfin, market_cap=_pmc))
+                                    if _row:
+                                        _frows.append(_row)
+                                except Exception:
+                                    pass
+                            if len(_frows) > 1:
+                                st.markdown('<div class="section-header">Fundamentals vs Peers</div>',
+                                            unsafe_allow_html=True)
+                                st.dataframe(pd.DataFrame(_frows).set_index("Ticker"),
+                                             use_container_width=True)
+                                st.markdown(
+                                    "<div style='font-size:0.72rem;color:#94a3b8;margin-top:0.25rem'>"
+                                    "Blanks mean a metric wasn't available for that peer (e.g. no market cap "
+                                    "for valuation multiples, or banks for margins). F-Score 8–9 = strong; "
+                                    "Z-Score &gt; 2.99 = safe zone.</div>",
+                                    unsafe_allow_html=True)
+
+                        # Revenue & net income trend with operating margin
+                        _t = fund["trend"]
+                        if any(x is not None for x in _t["revenue"]):
+                            fig_fund = go.Figure()
+                            fig_fund.add_trace(go.Bar(
+                                x=_t["periods"], y=[(x or 0) / 1e9 for x in _t["revenue"]],
+                                name="Revenue ($B)", marker_color=ct.color.brand,
+                                marker_line_width=0, opacity=0.9))
+                            fig_fund.add_trace(go.Bar(
+                                x=_t["periods"], y=[(x or 0) / 1e9 for x in _t["net_income"]],
+                                name="Net Income ($B)", marker_color=ct._rgba(ct.color.brand, 0.38),
+                                marker_line_width=0))
+                            fig_fund.add_trace(go.Scatter(
+                                x=_t["periods"], y=_t["operating_margin"], name="Operating Margin (%)",
+                                yaxis="y2", line=dict(color=ct.color.value_line, width=ct.stroke.value),
+                                marker=dict(size=ct.marker.size, color=ct.marker.fill,
+                                            line=dict(color=ct.color.value_line,
+                                                      width=ct.marker.stroke_width)),
+                                mode="lines+markers"))
+                            ct.style(
+                                fig_fund,
+                                barmode="group", height=330, crosshair=False,
+                                margin=dict(l=56, r=56, t=44, b=34),
+                                x=ct.category_axis(),
+                                y=ct.value_axis(prefix="", tick_format=",.1f", title="$ Billions"),
+                                y2=dict(title="Op. Margin %", overlaying="y", side="right",
+                                        showgrid=False,
+                                        tickfont=dict(size=ct.font.size.axis,
+                                                      color=ct.color.value_line,
+                                                      family=ct.font.data),
+                                        title_font=dict(size=ct.font.size.fact_label,
+                                                        color=ct.color.value_line,
+                                                        family=ct.font.data)),
+                                title=dict(text="Revenue, Net Income & Operating Margin",
+                                           font=dict(size=13, color=ct.color.ink,
+                                                     family=ct.font.data),
+                                           x=0, xanchor="left", y=0.97, yanchor="top"),
+                            )
+                            st.plotly_chart(fig_fund, use_container_width=True)
+
+                        # Free cash flow trend (EDGAR-powered)
+                        _tf = _t.get("fcf")
+                        if _tf and any(x is not None for x in _tf):
+                            fig_fcf = go.Figure()
+                            fig_fcf.add_trace(go.Bar(
+                                x=_t["periods"], y=[(x or 0) / 1e9 for x in _tf],
+                                marker_color=[ct.color.positive if (x or 0) >= 0 else ct.color.negative
+                                              for x in _tf],
+                                marker_line_width=0,
+                                name="Free Cash Flow ($B)",
+                                hovertemplate="%{x}: $%{y:.1f}B<extra>Free Cash Flow</extra>"))
+                            # zero=False + an explicit zero line: FCF is signed, so
+                            # the meaningful reference is the axis crossing, not a
+                            # floor pinned under the most negative year.
+                            ct.style(
+                                fig_fcf,
+                                height=240, legend=None, crosshair=False,
+                                margin=dict(l=56, r=20, t=38, b=34),
+                                x=ct.category_axis(),
+                                y=ct.value_axis(prefix="", tick_format=",.1f", zero=False,
+                                                title="$ Billions", zeroline=True,
+                                                zerolinecolor=ct.color.rule),
+                                title=dict(text="Free Cash Flow",
+                                           font=dict(size=13, color=ct.color.ink,
+                                                     family=ct.font.data),
+                                           x=0, xanchor="left"),
+                            )
+                            st.plotly_chart(fig_fcf, use_container_width=True)
+
+                        # ── What's Priced In ──────────────────────────────────────
+                        # Renders `_dcf_report` (analysis.dcf_valuation) — the same
+                        # two-stage FCF model the Excel report ships. It replaces an
+                        # older net-income reverse-DCF one-liner that quoted a
+                        # different, less rigorous implied-growth number and showed
+                        # none of the assumptions behind it.
+                        #
+                        # Every rate below is read from the report, never assumed:
+                        # the WACC is CAPM-derived per company, so hardcoding a
+                        # discount rate here would silently misstate the model.
+                        _dcfr = _dcf_report if isinstance(_dcf_report, dict) else {"ok": False}
 
 
 
 
 
-                    st.markdown(
-                        f'<div class="section-header"'
-                        f'{_sec_id("sec-priced-in", "What’s Priced In")}>What&rsquo;s Priced In '
-                        '<span style="font-weight:500;color:var(--dim);letter-spacing:0;'
-                        'text-transform:none;font-size:0.7rem">'
-                        '· two-stage discounted free cash flow</span></div>',
-                        unsafe_allow_html=True)
+                        st.markdown(
+                            f'<div class="section-header"'
+                            f'{_sec_id("sec-priced-in", "What’s Priced In")}>What&rsquo;s Priced In '
+                            '<span style="font-weight:500;color:var(--dim);letter-spacing:0;'
+                            'text-transform:none;font-size:0.7rem">'
+                            '· two-stage discounted free cash flow</span></div>',
+                            unsafe_allow_html=True)
 
-                    # Scoped styles. Colour, radius and rules all come from the
-                    # design tokens in styles.css — no literals here, so this
-                    # block moves with the palette instead of drifting from it.
-                    # NOTE: flush-left, like every other raw-HTML f-string on
-                    # this page (see the comment above the hero block).
-                    st.markdown("""<style>
+                        # Scoped styles. Colour, radius and rules all come from the
+                        # design tokens in styles.css — no literals here, so this
+                        # block moves with the palette instead of drifting from it.
+                        # NOTE: flush-left, like every other raw-HTML f-string on
+                        # this page (see the comment above the hero block).
+                        st.markdown("""<style>
 .wpi{font-family:var(--font-chart);font-variant-numeric:tabular-nums;color:var(--text)}
 .wpi-lbl{font-size:10px;text-transform:uppercase;letter-spacing:0.08em;
 color:var(--muted);font-weight:600;line-height:1.3}
@@ -2757,1174 +3287,678 @@ color:var(--muted);background:var(--surface2)}
 .wpi-note{font-size:0.72rem;line-height:1.55;color:var(--muted);margin:0.4rem 0 0}
 </style>""", unsafe_allow_html=True)
 
-                    if not _dcfr.get("ok"):
-                        # Say why, and say nothing was substituted for it. A
-                        # silently missing section reads as a broken page.
-                        _why = str(_dcfr.get("reason") or "not enough data").strip()
-                        st.markdown(
-                            f'<p class="wpi wpi-note" style="border-top:1px solid var(--border);'
-                            f'padding-top:0.85rem">A discounted-cash-flow read isn&rsquo;t available '
-                            f'for {ticker_input} — {_why}. Nothing has been estimated in its '
-                            f'place.</p>',
-                            unsafe_allow_html=True)
-                    else:
-                        _mig  = _dcfr.get("market_implied_growth")
-                        _bg   = _dcfr.get("base_growth")
-                        _wacc = _dcfr.get("wacc")
-                        _tg   = _dcfr.get("terminal_growth")
-                        _yrs  = _dcfr.get("years")
-                        _px   = _dcfr.get("price")
-                        _fv   = _dcfr.get("fair_value")
-                        _up   = _dcfr.get("upside")
-                        _hist = _g.get("eps_cagr")
-                        _hzn  = f"{_yrs} years" if _yrs else "the forecast horizon"
-                        _base_clause = (f" The model&rsquo;s own base case is <b>{_wpi_pct(_bg)}</b>."
-                                        if _bg is not None else "")
-
-                        # 1 ── Headline. Same three-way tone as before, restated
-                        # for free cash flow: the DCF projects FCF, so comparing
-                        # it to delivered EPS growth is the honest framing.
-                        if _mig is None:
-                            _tone = "na"
-                            _big  = "—"
-                            _read = ("Today&rsquo;s price sits outside the growth range this model can "
-                                     "solve, so there is no single implied rate to quote."
-                                     + _base_clause)
-                        else:
-                            _migp = _mig * 100
-                            _big  = f"{_migp:.1f}%"
-                            if _hist is not None and _migp > _hist + 3:
-                                _tone = "hot"
-                                _read = (f"To justify today&rsquo;s price the company has to compound free "
-                                         f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — well above "
-                                         f"the <b>{_hist:.1f}%</b> earnings growth it has actually "
-                                         f"delivered. The price assumes growth accelerates from "
-                                         f"here.{_base_clause}")
-                            elif _hist is not None and _migp < _hist - 3:
-                                _tone = "cool"
-                                _read = (f"To justify today&rsquo;s price the company only has to compound "
-                                         f"free cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — below "
-                                         f"the <b>{_hist:.1f}%</b> earnings growth it has delivered. "
-                                         f"Expectations look conservative.{_base_clause}")
-                            elif _hist is not None:
-                                _tone = ""
-                                _read = (f"To justify today&rsquo;s price the company has to compound free "
-                                         f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — roughly in "
-                                         f"line with the <b>{_hist:.1f}%</b> earnings growth it has "
-                                         f"delivered.{_base_clause}")
-                            else:
-                                _tone = ""
-                                _read = (f"To justify today&rsquo;s price the company has to compound free "
-                                         f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn}, discounted "
-                                         f"at <b>{_wpi_pct(_wacc)}</b> with a <b>{_wpi_pct(_tg)}</b> "
-                                         f"terminal rate.{_base_clause}")
-
-                        _wpi = ['<div class="wpi">', '<div class="wpi-head">',
-                                '<div><div class="wpi-lbl">Market-implied FCF growth</div>',
-                                f'<div class="wpi-big {_tone}">{_big}</div></div>',
-                                f'<div class="wpi-read">{_read}</div>', '</div>']
-
-                        # 2 ── Fair value vs price.
-                        _up_cls = "" if _up is None else ("pos" if _up >= 0 else "neg")
-                        _up_lbl = "Downside to fair value" if (_up is not None and _up < 0) \
-                                  else "Upside to fair value"
-                        _wpi.append(
-                            '<div class="wpi-fv">'
-                            '<div class="wpi-fv-c"><div class="wpi-lbl">DCF fair value</div>'
-                            f'<div class="wpi-fv-v">{_wpi_usd(_fv)}</div></div>'
-                            '<div class="wpi-fv-c"><div class="wpi-lbl">Current price</div>'
-                            f'<div class="wpi-fv-v">{_wpi_usd(_px)}</div></div>'
-                            f'<div class="wpi-fv-c"><div class="wpi-lbl">{_up_lbl}</div>'
-                            f'<div class="wpi-fv-v {_up_cls}">{_wpi_pct(_up, 1, sign=True)}</div>'
-                            '</div></div>')
-
-                        # 3 ── Scenarios. Reuses .fund-table so the row rhythm
-                        # matches the fundamentals grid directly above.
-                        _scn = _dcfr.get("scenarios") or {}
-                        _wpi.append(
-                            '<table class="fund-table">'
-                            '<tr class="grp"><td>Scenario</td><td class="v">FCF growth</td>'
-                            '<td class="v">Fair value</td><td class="v">Upside</td></tr>')
-                        for _sk, _sn in (("bear", "Bear"), ("base", "Base"), ("bull", "Bull")):
-                            _s   = _scn.get(_sk) or {}
-                            _sup = _s.get("upside")
-                            _scl = "" if _sup is None else ("pos" if _sup >= 0 else "neg")
-                            _wpi.append(
-                                f'<tr><td class="k">{_sn}</td>'
-                                f'<td class="v">{_wpi_pct(_s.get("growth"))}</td>'
-                                f'<td class="v">{_wpi_usd(_s.get("fair_value"))}</td>'
-                                f'<td class="v {_scl}">{_wpi_pct(_sup, 1, sign=True)}</td></tr>')
-                        _wpi.append('</table>')
-
-                        # 4 ── Sensitivity. An HTML table, not a heatmap: the
-                        # point of this grid is that you can read the numbers.
-                        # The tint is a low-alpha mix of the semantic tokens so
-                        # the figure on top of it stays legible.
-                        _sen  = _dcfr.get("sensitivity") or {}
-                        _wax  = _sen.get("wacc_axis") or []
-                        _tax  = _sen.get("tg_axis") or []
-                        _grid = _sen.get("grid") or []
-                        if _wax and _tax and _grid:
-                            _wmid = next((i for i, w in enumerate(_wax)
-                                          if _wacc is not None and abs(w - _wacc) < 5e-5), None)
-                            _tmid = next((i for i, t in enumerate(_tax)
-                                          if _tg is not None and abs(t - _tg) < 5e-5), None)
-                            _hdr  = "".join(f'<th>{_wpi_pct(_t)}</th>' for _t in _tax)
-                            _body = []
-                            for _ri, _w in enumerate(_wax):
-                                _row   = _grid[_ri] if _ri < len(_grid) else []
-                                _cells = []
-                                for _ci in range(len(_tax)):
-                                    _cv = _row[_ci] if _ci < len(_row) else None
-                                    if _cv is None or not _px:
-                                        _ccls, _ctxt = "na", "—"
-                                    else:
-                                        _d = _cv / _px - 1
-                                        _ccls = ("up2" if _d >= 0.25 else "up" if _d > 0 else
-                                                 "dn2" if _d <= -0.25 else "dn" if _d < 0 else "")
-                                        _ctxt = _wpi_usd(_cv)
-                                    if _ri == _wmid and _ci == _tmid:
-                                        _ccls = (_ccls + " mid").strip()
-                                    _cells.append(f'<td class="{_ccls}">{_ctxt}</td>')
-                                _body.append(f'<tr><th class="rh">{_wpi_pct(_w)}</th>'
-                                             + "".join(_cells) + '</tr>')
-                            _wpi.append(
-                                '<div class="wpi-lbl" style="margin:1.6rem 0 0.15rem">'
-                                'Fair value sensitivity</div>'
-                                '<div class="wpi-scroll"><table class="wpi-sens"><thead>'
-                                f'<tr><th class="cnr">WACC &darr; &nbsp;/&nbsp; Terminal growth &rarr;</th>'
-                                f'{_hdr}</tr></thead><tbody>' + "".join(_body)
-                                + '</tbody></table></div>'
-                                '<p class="wpi-note">Each cell is the fair value per share at that '
-                                'discount rate and terminal growth rate. Green sits above '
-                                f'today&rsquo;s price of {_wpi_usd(_px)}, red below it; the outlined '
-                                'cell is the base case above.</p>')
-
-                        # 5 ── Assumptions. The section is only as credible as
-                        # the inputs it will show you, so they are shown.
-                        _pvx, _pvt = _dcfr.get("pv_explicit"), _dcfr.get("pv_terminal")
-                        _tshare = (_pvt / (_pvx + _pvt)
-                                   if (_pvx is not None and _pvt is not None and (_pvx + _pvt))
-                                   else None)
-                        _shares = _dcfr.get("shares")
-                        _eqv    = _dcfr.get("equity_value")
-
-                        # Where the discount rate came from. This is the single
-                        # most load-bearing assumption in the section — the same
-                        # financials priced at a 0.55 beta vs a 1.35 beta imply
-                        # -1.6% vs +13.8% growth — so it is shown, not asserted.
-                        # A fallback rate is labelled as one rather than passed
-                        # off as company-specific.
-                        _wb = _dcfr.get("wacc_basis") or {}
-                        if _wb.get("beta") is not None:
-                            # The estimation window is part of the assumption:
-                            # beta over 1y and over 5y are different numbers for
-                            # the same company, so quoting one without saying
-                            # which is incomplete.
-                            _rate_basis = (f"CAPM &middot; &beta; {_wb['beta']:.2f} "
-                                           f"({'selected range' if custom_range else period_label}"
-                                           f" vs benchmark) &middot; "
-                                           f"Rf {_wpi_pct(_wb.get('risk_free'), 2)} &middot; "
-                                           f"ERP {_wpi_pct(_wb.get('erp'), 1)}")
-                            _rate_extra = [
-                                ("Cost of equity", _wpi_pct(_wb.get("cost_of_equity"), 2)),
-                                ("Cost of debt (assumed)", _wpi_pct(_wb.get("cost_of_debt"), 2)),
-                                ("Equity / debt weight",
-                                 f"{_wpi_pct(_wb.get('equity_weight'))} / {_wpi_pct(_wb.get('debt_weight'))}"),
-                            ]
-                        else:
-                            _rate_basis = ("Default rate &mdash; no benchmark selected, "
-                                           "so no beta could be estimated")
-                            _rate_extra = []
-
-                        _wpi.append('<table class="fund-table" style="margin-top:1.5rem">')
-                        for _grp, _items in (
-                            ("Assumptions, stated openly", [
-                                ("Discount rate (WACC)", _wpi_pct(_wacc, 2)),
-                                ("How the rate was set", _rate_basis),
-                                *_rate_extra,
-                                ("Terminal growth",      _wpi_pct(_tg, 2)),
-                                ("Forecast horizon",     f"{_yrs} years" if _yrs else "—"),
-                                ("Base-case FCF growth", _wpi_pct(_bg, 2)),
-                                ("Base free cash flow",  _wpi_mag(_dcfr.get("base_fcf"))),
-                                ("Net debt",             _wpi_mag(_dcfr.get("net_debt"))),
-                                ("Shares outstanding",   _wpi_cnt(_shares)),
-                                ("Terminal share of value", _wpi_pct(_tshare)),
-                            ]),
-                            ("Value bridge", [
-                                (f"PV of years 1&ndash;{_yrs}" if _yrs else "PV of forecast years",
-                                 _wpi_mag(_pvx)),
-                                ("PV of terminal value",  _wpi_mag(_pvt)),
-                                ("Terminal value (undiscounted)",
-                                 _wpi_mag(_dcfr.get("terminal_value"))),
-                                ("Enterprise value",      _wpi_mag(_dcfr.get("enterprise_value"))),
-                                ("Equity value",          _wpi_mag(_eqv)),
-                                ("Equity value / share",
-                                 _wpi_usd(_eqv / _shares) if (_eqv is not None and _shares) else "—"),
-                            ]),
-                        ):
-                            _wpi.append(f'<tr class="grp"><td colspan="4">{_grp}</td></tr>')
-                            for _i in range(0, len(_items), 2):
-                                _cells = ""
-                                for _j in range(2):
-                                    if _i + _j < len(_items):
-                                        _k, _val = _items[_i + _j]
-                                        _cells += (f'<td class="{"k pair2" if _j else "k"}">{_k}</td>'
-                                                   f'<td class="v">{_val}</td>')
-                                    else:
-                                        _cells += '<td class="k"></td><td class="v"></td>'
-                                _wpi.append(f'<tr>{_cells}</tr>')
-                        _wpi.append('</table></div>')
-                        st.markdown("".join(_wpi), unsafe_allow_html=True)
-                        st.caption(
-                            "Two-stage DCF on free cash flow: stage-one growth fades linearly to "
-                            "the terminal rate over the horizon, discounted at the company's own "
-                            "CAPM cost of capital, then bridged from enterprise value to equity "
-                            "with net debt. Market-implied growth is the same model solved "
-                            "backwards from today's price. A lens on expectations, not a price "
-                            "target — always do your own research.")
-
-            # ── ETF Profile Panel ─────────────────────────────────────────────
-            if is_etf:
-                meta     = etf_details.get("meta", {})
-                holdings = etf_details.get("holdings", [])
-                if meta or holdings:
-                    st.markdown(f'<div class="section-header"'
-                                f'{_sec_id("sec-etf", "ETF Profile")}>ETF Profile</div>',
+                        if not _dcfr.get("ok"):
+                            # Say why, and say nothing was substituted for it. A
+                            # silently missing section reads as a broken page.
+                            _why = str(_dcfr.get("reason") or "not enough data").strip()
+                            st.markdown(
+                                f'<p class="wpi wpi-note" style="border-top:1px solid var(--border);'
+                                f'padding-top:0.85rem">A discounted-cash-flow read isn&rsquo;t available '
+                                f'for {ticker_input} — {_why}. Nothing has been estimated in its '
+                                f'place.</p>',
                                 unsafe_allow_html=True)
-                    if meta:
-                        mc1, mc2, mc3, mc4 = st.columns(4)
-                        for col, lbl, val in [
-                            (mc1, "Full Name",      meta.get("name", ticker_input)),
-                            (mc2, "Index Tracked",  meta.get("index", "N/A")),
-                            (mc3, "Category",       meta.get("category", "N/A")),
-                            (mc4, "No. of Holdings",str(meta.get("holdings", "N/A"))),
-                        ]:
-                            with col:
-                                st.markdown(f"""
-                                <div class="metric-card">
-                                    <div class="metric-label">{lbl}</div>
-                                    <div style="font-size:0.88rem;font-weight:500;color:#0f172a;
-                                                margin-top:0.25rem;line-height:1.4">{val}</div>
-                                </div>""", unsafe_allow_html=True)
-                        st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-                        aum = meta.get("aum_b", 0)
-                        exp = meta.get("expense", 0)
-                        st.markdown(f"""
-                        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:2px;
-                                    padding:0.6rem 1rem;font-size:0.85rem;color:#4a9eff">
-                            <strong>AUM:</strong> ${aum:,.0f}B &nbsp;·&nbsp;
-                            <strong>Expense Ratio:</strong> {exp:.2f}% annually &nbsp;·&nbsp;
-                            <strong>Cost on $10,000:</strong> ${exp*100:.0f}/yr
-                        </div>""", unsafe_allow_html=True)
+                        else:
+                            _mig  = _dcfr.get("market_implied_growth")
+                            _bg   = _dcfr.get("base_growth")
+                            _wacc = _dcfr.get("wacc")
+                            _tg   = _dcfr.get("terminal_growth")
+                            _yrs  = _dcfr.get("years")
+                            _px   = _dcfr.get("price")
+                            _fv   = _dcfr.get("fair_value")
+                            _up   = _dcfr.get("upside")
+                            _hist = _g.get("eps_cagr")
+                            _hzn  = f"{_yrs} years" if _yrs else "the forecast horizon"
+                            _base_clause = (f" The model&rsquo;s own base case is <b>{_wpi_pct(_bg)}</b>."
+                                            if _bg is not None else "")
 
-                    if holdings:
-                        st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
-                        h_col1, h_col2 = st.columns([1, 1])
-                        with h_col1:
-                            st.markdown("**Top Holdings**")
-                            h_rows = [{"Ticker": t, "Weight (%)": f"{w:.2f}%"} for t, w in holdings]
-                            st.dataframe(pd.DataFrame(h_rows), use_container_width=True, hide_index=True)
-                        with h_col2:
-                            fig_h = go.Figure(go.Bar(
-                                x=[w for _, w in holdings],
-                                y=[t for t, _ in holdings],
-                                orientation="h",
-                                marker_color=ct.color.brand, marker_line_width=0,
-                                text=[f"{w:.1f}%" for _, w in holdings],
-                                textposition="outside",
-                                textfont=dict(size=ct.font.size.grid, family=ct.font.data,
-                                              color=ct.color.ink_muted),
-                            ))
-                            # Horizontal bars: the value axis is x here, so the
-                            # gridlines belong to x and the category axis is y.
-                            ct.style(
-                                fig_h,
-                                height=300, legend=None, crosshair=False,
-                                margin=dict(l=64, r=32, t=38, b=34),
-                                x=ct.pct_axis(tick_format=".1f", title="Weight (%)", zero=True),
-                                y=ct.category_axis(autorange="reversed"),
-                                title=dict(text="Top Holdings by Weight",
-                                           font=dict(size=13, color=ct.color.ink,
-                                                     family=ct.font.data),
-                                           x=0, xanchor="left"),
-                            )
-                            st.plotly_chart(fig_h, use_container_width=True)
+                            # 1 ── Headline. Same three-way tone as before, restated
+                            # for free cash flow: the DCF projects FCF, so comparing
+                            # it to delivered EPS growth is the honest framing.
+                            if _mig is None:
+                                _tone = "na"
+                                _big  = "—"
+                                _read = ("Today&rsquo;s price sits outside the growth range this model can "
+                                         "solve, so there is no single implied rate to quote."
+                                         + _base_clause)
+                            else:
+                                _migp = _mig * 100
+                                _big  = f"{_migp:.1f}%"
+                                if _hist is not None and _migp > _hist + 3:
+                                    _tone = "hot"
+                                    _read = (f"To justify today&rsquo;s price the company has to compound free "
+                                             f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — well above "
+                                             f"the <b>{_hist:.1f}%</b> earnings growth it has actually "
+                                             f"delivered. The price assumes growth accelerates from "
+                                             f"here.{_base_clause}")
+                                elif _hist is not None and _migp < _hist - 3:
+                                    _tone = "cool"
+                                    _read = (f"To justify today&rsquo;s price the company only has to compound "
+                                             f"free cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — below "
+                                             f"the <b>{_hist:.1f}%</b> earnings growth it has delivered. "
+                                             f"Expectations look conservative.{_base_clause}")
+                                elif _hist is not None:
+                                    _tone = ""
+                                    _read = (f"To justify today&rsquo;s price the company has to compound free "
+                                             f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — roughly in "
+                                             f"line with the <b>{_hist:.1f}%</b> earnings growth it has "
+                                             f"delivered.{_base_clause}")
+                                else:
+                                    _tone = ""
+                                    _read = (f"To justify today&rsquo;s price the company has to compound free "
+                                             f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn}, discounted "
+                                             f"at <b>{_wpi_pct(_wacc)}</b> with a <b>{_wpi_pct(_tg)}</b> "
+                                             f"terminal rate.{_base_clause}")
 
-            # ── Crypto Market Data Panel ──────────────────────────────────────
-            if is_crypto and crypto_details:
-                st.markdown(f'<div class="section-header"'
-                            f'{_sec_id("sec-market-data", "Market Data")}>Market Data</div>',
+                            _wpi = ['<div class="wpi">', '<div class="wpi-head">',
+                                    '<div><div class="wpi-lbl">Market-implied FCF growth</div>',
+                                    f'<div class="wpi-big {_tone}">{_big}</div></div>',
+                                    f'<div class="wpi-read">{_read}</div>', '</div>']
+
+                            # 2 ── Fair value vs price.
+                            _up_cls = "" if _up is None else ("pos" if _up >= 0 else "neg")
+                            _up_lbl = "Downside to fair value" if (_up is not None and _up < 0) \
+                                      else "Upside to fair value"
+                            _wpi.append(
+                                '<div class="wpi-fv">'
+                                '<div class="wpi-fv-c"><div class="wpi-lbl">DCF fair value</div>'
+                                f'<div class="wpi-fv-v">{_wpi_usd(_fv)}</div></div>'
+                                '<div class="wpi-fv-c"><div class="wpi-lbl">Current price</div>'
+                                f'<div class="wpi-fv-v">{_wpi_usd(_px)}</div></div>'
+                                f'<div class="wpi-fv-c"><div class="wpi-lbl">{_up_lbl}</div>'
+                                f'<div class="wpi-fv-v {_up_cls}">{_wpi_pct(_up, 1, sign=True)}</div>'
+                                '</div></div>')
+
+                            # 3 ── Scenarios. Reuses .fund-table so the row rhythm
+                            # matches the fundamentals grid directly above.
+                            _scn = _dcfr.get("scenarios") or {}
+                            _wpi.append(
+                                '<table class="fund-table">'
+                                '<tr class="grp"><td>Scenario</td><td class="v">FCF growth</td>'
+                                '<td class="v">Fair value</td><td class="v">Upside</td></tr>')
+                            for _sk, _sn in (("bear", "Bear"), ("base", "Base"), ("bull", "Bull")):
+                                _s   = _scn.get(_sk) or {}
+                                _sup = _s.get("upside")
+                                _scl = "" if _sup is None else ("pos" if _sup >= 0 else "neg")
+                                _wpi.append(
+                                    f'<tr><td class="k">{_sn}</td>'
+                                    f'<td class="v">{_wpi_pct(_s.get("growth"))}</td>'
+                                    f'<td class="v">{_wpi_usd(_s.get("fair_value"))}</td>'
+                                    f'<td class="v {_scl}">{_wpi_pct(_sup, 1, sign=True)}</td></tr>')
+                            _wpi.append('</table>')
+
+                            # 4 ── Sensitivity. An HTML table, not a heatmap: the
+                            # point of this grid is that you can read the numbers.
+                            # The tint is a low-alpha mix of the semantic tokens so
+                            # the figure on top of it stays legible.
+                            _sen  = _dcfr.get("sensitivity") or {}
+                            _wax  = _sen.get("wacc_axis") or []
+                            _tax  = _sen.get("tg_axis") or []
+                            _grid = _sen.get("grid") or []
+                            if _wax and _tax and _grid:
+                                _wmid = next((i for i, w in enumerate(_wax)
+                                              if _wacc is not None and abs(w - _wacc) < 5e-5), None)
+                                _tmid = next((i for i, t in enumerate(_tax)
+                                              if _tg is not None and abs(t - _tg) < 5e-5), None)
+                                _hdr  = "".join(f'<th>{_wpi_pct(_t)}</th>' for _t in _tax)
+                                _body = []
+                                for _ri, _w in enumerate(_wax):
+                                    _row   = _grid[_ri] if _ri < len(_grid) else []
+                                    _cells = []
+                                    for _ci in range(len(_tax)):
+                                        _cv = _row[_ci] if _ci < len(_row) else None
+                                        if _cv is None or not _px:
+                                            _ccls, _ctxt = "na", "—"
+                                        else:
+                                            _d = _cv / _px - 1
+                                            _ccls = ("up2" if _d >= 0.25 else "up" if _d > 0 else
+                                                     "dn2" if _d <= -0.25 else "dn" if _d < 0 else "")
+                                            _ctxt = _wpi_usd(_cv)
+                                        if _ri == _wmid and _ci == _tmid:
+                                            _ccls = (_ccls + " mid").strip()
+                                        _cells.append(f'<td class="{_ccls}">{_ctxt}</td>')
+                                    _body.append(f'<tr><th class="rh">{_wpi_pct(_w)}</th>'
+                                                 + "".join(_cells) + '</tr>')
+                                _wpi.append(
+                                    '<div class="wpi-lbl" style="margin:1.6rem 0 0.15rem">'
+                                    'Fair value sensitivity</div>'
+                                    '<div class="wpi-scroll"><table class="wpi-sens"><thead>'
+                                    f'<tr><th class="cnr">WACC &darr; &nbsp;/&nbsp; Terminal growth &rarr;</th>'
+                                    f'{_hdr}</tr></thead><tbody>' + "".join(_body)
+                                    + '</tbody></table></div>'
+                                    '<p class="wpi-note">Each cell is the fair value per share at that '
+                                    'discount rate and terminal growth rate. Green sits above '
+                                    f'today&rsquo;s price of {_wpi_usd(_px)}, red below it; the outlined '
+                                    'cell is the base case above.</p>')
+
+                            # 5 ── Assumptions. The section is only as credible as
+                            # the inputs it will show you, so they are shown.
+                            _pvx, _pvt = _dcfr.get("pv_explicit"), _dcfr.get("pv_terminal")
+                            _tshare = (_pvt / (_pvx + _pvt)
+                                       if (_pvx is not None and _pvt is not None and (_pvx + _pvt))
+                                       else None)
+                            _shares = _dcfr.get("shares")
+                            _eqv    = _dcfr.get("equity_value")
+
+                            # Where the discount rate came from. This is the single
+                            # most load-bearing assumption in the section — the same
+                            # financials priced at a 0.55 beta vs a 1.35 beta imply
+                            # -1.6% vs +13.8% growth — so it is shown, not asserted.
+                            # A fallback rate is labelled as one rather than passed
+                            # off as company-specific.
+                            _wb = _dcfr.get("wacc_basis") or {}
+                            if _wb.get("beta") is not None:
+                                # The estimation window is part of the assumption:
+                                # beta over 1y and over 5y are different numbers for
+                                # the same company, so quoting one without saying
+                                # which is incomplete.
+                                _rate_basis = (f"CAPM &middot; &beta; {_wb['beta']:.2f} "
+                                               f"({'selected range' if custom_range else period_label}"
+                                               f" vs benchmark) &middot; "
+                                               f"Rf {_wpi_pct(_wb.get('risk_free'), 2)} &middot; "
+                                               f"ERP {_wpi_pct(_wb.get('erp'), 1)}")
+                                _rate_extra = [
+                                    ("Cost of equity", _wpi_pct(_wb.get("cost_of_equity"), 2)),
+                                    ("Cost of debt (assumed)", _wpi_pct(_wb.get("cost_of_debt"), 2)),
+                                    ("Equity / debt weight",
+                                     f"{_wpi_pct(_wb.get('equity_weight'))} / {_wpi_pct(_wb.get('debt_weight'))}"),
+                                ]
+                            else:
+                                _rate_basis = ("Default rate &mdash; no benchmark selected, "
+                                               "so no beta could be estimated")
+                                _rate_extra = []
+
+                            _wpi.append('<table class="fund-table" style="margin-top:1.5rem">')
+                            for _grp, _items in (
+                                ("Assumptions, stated openly", [
+                                    ("Discount rate (WACC)", _wpi_pct(_wacc, 2)),
+                                    ("How the rate was set", _rate_basis),
+                                    *_rate_extra,
+                                    ("Terminal growth",      _wpi_pct(_tg, 2)),
+                                    ("Forecast horizon",     f"{_yrs} years" if _yrs else "—"),
+                                    ("Base-case FCF growth", _wpi_pct(_bg, 2)),
+                                    ("Base free cash flow",  _wpi_mag(_dcfr.get("base_fcf"))),
+                                    ("Net debt",             _wpi_mag(_dcfr.get("net_debt"))),
+                                    ("Shares outstanding",   _wpi_cnt(_shares)),
+                                    ("Terminal share of value", _wpi_pct(_tshare)),
+                                ]),
+                                ("Value bridge", [
+                                    (f"PV of years 1&ndash;{_yrs}" if _yrs else "PV of forecast years",
+                                     _wpi_mag(_pvx)),
+                                    ("PV of terminal value",  _wpi_mag(_pvt)),
+                                    ("Terminal value (undiscounted)",
+                                     _wpi_mag(_dcfr.get("terminal_value"))),
+                                    ("Enterprise value",      _wpi_mag(_dcfr.get("enterprise_value"))),
+                                    ("Equity value",          _wpi_mag(_eqv)),
+                                    ("Equity value / share",
+                                     _wpi_usd(_eqv / _shares) if (_eqv is not None and _shares) else "—"),
+                                ]),
+                            ):
+                                _wpi.append(f'<tr class="grp"><td colspan="4">{_grp}</td></tr>')
+                                for _i in range(0, len(_items), 2):
+                                    _cells = ""
+                                    for _j in range(2):
+                                        if _i + _j < len(_items):
+                                            _k, _val = _items[_i + _j]
+                                            _cells += (f'<td class="{"k pair2" if _j else "k"}">{_k}</td>'
+                                                       f'<td class="v">{_val}</td>')
+                                        else:
+                                            _cells += '<td class="k"></td><td class="v"></td>'
+                                    _wpi.append(f'<tr>{_cells}</tr>')
+                            _wpi.append('</table></div>')
+                            st.markdown("".join(_wpi), unsafe_allow_html=True)
+                            st.caption(
+                                "Two-stage DCF on free cash flow: stage-one growth fades linearly to "
+                                "the terminal rate over the horizon, discounted at the company's own "
+                                "CAPM cost of capital, then bridged from enterprise value to equity "
+                                "with net debt. Market-implied growth is the same model solved "
+                                "backwards from today's price. A lens on expectations, not a price "
+                                "target — always do your own research.")
+
+            if _show("Valuation"):
+
+                # ── Valuation Lens — price vs. earnings-justified fair value ──────
+                if not is_crypto and VALUATION_AVAILABLE:
+                    with st.spinner("Building the valuation view…"):
+                        _vdata = _cached_valuation(ticker_input)
+                    if _vdata:
+                        st.markdown(
+                            f'<div class="section-header"'
+                            f'{_sec_id("sec-valuation", "Valuation Lens")}>Valuation Lens '
+                            '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                            'text-transform:none;font-size:0.7rem">· price vs. earnings-justified fair value</span></div>',
                             unsafe_allow_html=True)
-                cc1, cc2, cc3, cc4, cc5, cc6 = st.columns(6)
-                mc_usd   = crypto_details.get("market_cap_usd", 0)
-                vol_24h  = crypto_details.get("volume_24h", 0)
-                ath_val  = crypto_details.get("ath", 0)
-                ath_pct  = crypto_details.get("ath_pct", 0)
-                p7d      = crypto_details.get("price_change_7d", 0)
-                p30d     = crypto_details.get("price_change_30d", 0)
-                circ     = crypto_details.get("circulating_supply", 0)
-                max_sup  = crypto_details.get("max_supply", 0)
+                        # ── facts ──
+                        # Prefer the latest trailing-twelve-month EPS so this figure
+                        # matches where the chart's fair-value line actually ends.
+                        # Reading annual core EPS here while the line rode TTM put a
+                        # headline fair value on screen the chart disagreed with.
+                        _core      = _vdata.get("eps_core") or _vdata.get("eps") or [None]
+                        _ttm_e     = _vdata.get("ttm_eps") or []
+                        _core_last = (_ttm_e[-1] if _ttm_e else
+                                      (_core[-1] if _core else None))
+                        _eps_basis = "TTM EPS" if _ttm_e else "core (3-yr median) EPS"
+                        _fair_last = _core_last * _vdata["normal_pe"] if _core_last else None
+                        _cur       = _vdata.get("current_price")
+                        _bpe       = _vdata.get("blended_pe")
+                        _npe       = _vdata["normal_pe"]
+                        # NB: not `_disc` — that name is the `disclaimers` module alias
+                        # (see the import block); rebinding it here is module-scope in a
+                        # Streamlit script and broke the footer's _disc.DIVIDENDS.
+                        _disc_pct  = ((_cur / _fair_last - 1) * 100) if (_fair_last and _cur) else None
+                        _div_last  = next((v for v in reversed(_vdata.get("div") or []) if v), None)
+                        _dyield    = (_div_last / _cur * 100) if (_div_last and _cur) else None
+                        _epsyield  = (100.0 / _bpe) if _bpe else None
+                        # Verdict colour now comes from a CSS class, not inline hex,
+                        # so the badge tracks the chart palette (see .vf-badge).
+                        if _disc_pct is None:
+                            _verd, _vcls = "—", "fair"
+                        elif _disc_pct > 15:
+                            _verd, _vcls = "Above its own history", "over"
+                        elif _disc_pct < -15:
+                            _verd, _vcls = "Below its own history", "under"
+                        else:
+                            _verd, _vcls = "In line with history", "fair"
+                        _mcap   = company_details.get("Market Cap")
+                        _mcap_s = (f"${_mcap/1e12:.2f}T" if _mcap and _mcap >= 1e12 else
+                                   f"${_mcap/1e9:.1f}B"  if _mcap and _mcap >= 1e9  else
+                                   f"${_mcap/1e6:.0f}M"  if _mcap else "—")
+                        _cur_s  = f"${_cur:,.2f}"      if _cur else "—"
+                        _bpe_s  = f"{_bpe:g}x"         if _bpe else "—"
+                        _eps_s  = f"{_epsyield:.1f}%"  if _epsyield else "—"
+                        _dy_s   = f"{_dyield:.1f}%"    if _dyield else "—"
+                        _fair_s = f"${_fair_last:,.2f}" if _fair_last else "—"
+                        _sector = company_details.get("Sector") or "—"
 
+                        _prem_s = f"{_disc_pct:+.0f}%" if _disc_pct is not None else "—"
+                        _fcol, _mcol = st.columns([1, 3.2])
+                        with _fcol:
+                            st.markdown(f"""<div class="val-facts">
+                              <div class="vf-group">Fast facts</div>
+                              <div class="vf-row"><span>Current price</span><b>{_cur_s}</b></div>
+                              <div class="vf-row"><span>Blended P/E</span><b>{_bpe_s}</b></div>
+                              <div class="vf-row"><span>EPS yield</span><b>{_eps_s}</b></div>
+                              <div class="vf-row"><span>Dividend yield</span><b>{_dy_s}</b></div>
+                              <div class="vf-group">Valuation</div>
+                              <div class="vf-row"><span>Normal P/E</span><span class="vf-pill value">{_npe:g}x</span></div>
+                              <div class="vf-row"><span>Fair value</span><b>{_fair_s}</b></div>
+                              <div class="vf-row"><span>Premium / discount</span><b>{_prem_s}</b></div>
+                              <div class="vf-row"><span>Assessment</span><span class="vf-badge {_vcls}">{_verd}</span></div>
+                              <div class="vf-group">Company</div>
+                              <div class="vf-row"><span>Sector</span><b>{_sector}</b></div>
+                              <div class="vf-row"><span>Market cap</span><b>{_mcap_s}</b></div>
+                            </div>""", unsafe_allow_html=True)
+                        with _mcol:
+                            # Display window. Deliberately does NOT recompute the
+                            # normal P/E — that is the stock's long-run multiple, and
+                            # rebasing it per zoom level would redefine fair value
+                            # every time the user changed the range.
+                            _n_yrs   = len(_vdata["years"])
+                            _ranges  = [("MAX", None), ("15Y", 15), ("10Y", 10),
+                                        ("5Y", 5), ("3Y", 3), ("1Y", 1)]
+                            _ranges  = [r for r in _ranges if r[1] is None or r[1] < _n_yrs]
+                            _labels  = [r[0] for r in _ranges]
+                            try:
+                                _pick = st.segmented_control(
+                                    "Range", _labels, default="MAX", key="lens_range",
+                                    label_visibility="collapsed")
+                            except Exception:
+                                _pick = st.radio("Range", _labels, index=0, horizontal=True,
+                                                 key="lens_range", label_visibility="collapsed")
+                            _yb = dict(_ranges).get(_pick or "MAX")
 
-                for col, lbl, val, color in [
-                    (cc1, "Market Cap",     fmt_large(mc_usd),                            "#0f172a"),
-                    (cc2, "24h Volume",     fmt_large(vol_24h),                           "#0f172a"),
-                    (cc3, "All-Time High",  f"${ath_val:,.2f}" if ath_val else "N/A",    "#0f172a"),
-                    (cc4, "vs ATH",         f"{ath_pct:+.1f}%" if ath_pct else "N/A",   "#dc2626" if ath_pct and ath_pct < 0 else "#059669"),
-                    (cc5, "7d Change",      f"{p7d:+.1f}%"  if p7d  else "N/A",         "#059669" if p7d  and p7d  > 0 else "#dc2626"),
-                    (cc6, "30d Change",     f"{p30d:+.1f}%" if p30d else "N/A",         "#059669" if p30d and p30d > 0 else "#dc2626"),
-                ]:
-                    with col:
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">{lbl}</div>
-                            <div class="metric-value" style="color:{color}">{val}</div>
-                        </div>""", unsafe_allow_html=True)
+                            _tab_v, _tab_e, _tab_d = st.tabs(["Valuation", "Earnings", "Dividends"])
+                            with _tab_v:
+                                _vfig = build_valuation_figure(_vdata, years_back=_yb)
+                                if _vfig is not None:
+                                    st.plotly_chart(_vfig, use_container_width=True)
+                            with _tab_e:
+                                _efig = build_eps_figure(_vdata)
+                                if _efig is not None:
+                                    st.plotly_chart(_efig, use_container_width=True)
+                            with _tab_d:
+                                _dfig = build_dividend_figure(_vdata)
+                                if _dfig is not None:
+                                    st.plotly_chart(_dfig, use_container_width=True)
+                                else:
+                                    st.caption("This company doesn't pay a dividend.")
+                        st.caption(
+                            f"Fair value = {_eps_basis} × the stock's own historical normal "
+                            f"P/E, from SEC-filed earnings"
+                            + (", updated each quarter." if _ttm_e else ".")
+                            + " A valuation lens, not a price target — always do your "
+                              "own research.")
+                        st.markdown("---")
 
-                if circ:
-                    sup_pct = f" ({circ/max_sup*100:.1f}% of max supply)" if max_sup else ""
-                    ath_date = crypto_details.get("ath_date", "")
-                    st.markdown(f"""
-                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:2px;
-                                padding:0.6rem 1rem;margin-top:0.75rem;font-size:0.85rem;color:#6b7a8d">
-                        <strong>Circulating Supply:</strong> {circ:,.0f} {ticker_input}{sup_pct}
-                        {"&nbsp;·&nbsp;<strong>ATH Date:</strong> " + ath_date if ath_date else ""}
-                    </div>""", unsafe_allow_html=True)
+            if _show("Forecast"):
 
-            # ── Chart customization controls ──────────────────────────────────
-            # Wider columns + shorter labels so nothing wraps awkwardly. The
-            # main "Price Chart" heading is removed since the controls speak
-            # for themselves — the jump rail still needs a target, hence the
-            # zero-height anchor rather than a heading.
-            _jump_anchor("sec-chart", "Price Chart")
-            _ctrl1, _ctrl2, _ctrl3, _ctrl4, _ctrl5, _ctrl6, _ctrl7 = \
-                st.columns([1.6, 0.7, 0.7, 0.8, 0.8, 0.6, 0.9])
-            with _ctrl1:
-                _chart_type = st.selectbox("Type", ["Area", "Line", "Candlestick"],
-                                           index=0, key="main_chart_type")
-            with _ctrl2:
-                _show_ma20  = st.checkbox("MA 20",  value=False, key="main_show_ma20")
-            with _ctrl3:
-                _show_ma50  = st.checkbox("MA 50",  value=True,  key="main_show_ma50")
-            with _ctrl4:
-                _show_ma200 = st.checkbox("MA 200", value=True,  key="main_show_ma200")
-            with _ctrl5:
-                _show_vol   = st.checkbox("Volume", value=False, key="main_show_volume")
-            with _ctrl6:
-                # Support/Resistance is an opt-in overlay now (off by default) —
-                # it cluttered the default chart and most investors don't use it.
-                _show_sr    = st.checkbox("S/R",    value=False, key="main_show_sr")
-            with _ctrl7:
-                _show_tag   = st.checkbox("Marker", value=True, key="main_show_tag")
+                if mc_summary:
+                    _header    = "Monte Carlo Forecast"
+                    st.markdown(f'<div class="section-header"'
+                                f'{_sec_id("sec-forecast", "Forecast")}>{_header}</div>',
+                                unsafe_allow_html=True)
 
-            # ── Range control ────────────────────────────────────────────
-            # This used to be Plotly's in-plot `rangeselector`, which changes the
-            # x-range CLIENT-side and leaves the y-range alone. On a 15-year
-            # series that made every short window unreadable: picking 1Y kept a
-            # y-axis spanning $0-$340 while the year's prices lived between $210
-            # and $340, so two thirds of the panel was empty fill and the actual
-            # movement was squeezed into the top third. (Yahoo's 1Y view spans
-            # 225-350 — fitted to the window, which is the whole point of
-            # choosing a window.)
-            #
-            # Slicing the frame here instead means the y-axis autoranges over
-            # exactly what is on screen, the tick format can suit the span, and
-            # the rendered figure is the whole truth — no client-side state that
-            # a screenshot or an export would miss.
-            _RANGES = [("1D", 1), ("5D", 5), ("1M", 31), ("3M", 92), ("6M", 183),
-                       ("1Y", 365), ("3Y", 1095), ("All", None)]
-            _span_days = (pd.to_datetime(df["Date"].iloc[-1])
-                          - pd.to_datetime(df["Date"].iloc[0])).days
-            # A button earns its place only if it shows LESS than the whole
-            # series; otherwise it is "All" under another name.
-            _range_opts = [lbl for lbl, d in _RANGES
-                           if d is None or _span_days > d * 1.15]
-            # The widget key persists across tickers. Analysing a 15-year name
-            # and then a recent listing would leave "3Y" selected on a control
-            # that no longer offers it, which Streamlit treats as an error
-            # rather than a fallback — so clear a selection this ticker can't
-            # honour before the widget is built.
-            if st.session_state.get("main_chart_range") not in _range_opts:
-                st.session_state.pop("main_chart_range", None)
-            st.markdown('<div class="field-label" style="margin-top:0.35rem">Range</div>',
-                        unsafe_allow_html=True)
-            _range_sel = st.radio("Range", _range_opts,
-                                  index=len(_range_opts) - 1, horizontal=True,
-                                  key="main_chart_range", label_visibility="collapsed")
-            _range_days = dict(_RANGES)[_range_sel]
-            if _range_days is None:
-                _cdf = df
-            else:
-                _cutoff = pd.to_datetime(df["Date"].iloc[-1]) - pd.Timedelta(days=_range_days)
-                _cdf = df[pd.to_datetime(df["Date"]) >= _cutoff]
-                if len(_cdf) < 2:
-                    # A single-session range legitimately slices to one daily row.
-                    # Falling back to the FULL history here (which is what this
-                    # guard used to do) handed the y-range a 200-day average
-                    # spanning fifteen years, so a day that traded $322-$327 was
-                    # drawn on a $280-$330 axis. Keep just enough daily rows to
-                    # read a previous close from.
-                    _cdf = df.tail(10)
-            # Tick density and label shape follow the window: "12 Mar" reads
-            # wrong across fifteen years and "'26" reads wrong across one month.
-            _shown_days = (pd.to_datetime(_cdf["Date"].iloc[-1])
-                           - pd.to_datetime(_cdf["Date"].iloc[0])).days
-            _tickfmt = ("%d %b" if _shown_days <= 190 else
-                        "%b '%y" if _shown_days <= 1200 else "%Y")
+                    # ── Metric cards — row 1: price scenarios ─────────────────────
+                    _r1 = st.columns(5)
+                    for col, label, value, color in [
+                        (_r1[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
+                        (_r1[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#1d4ed8"),
+                        (_r1[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
+                        (_r1[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#4a9eff"),
+                        (_r1[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#059669"),
+                    ]:
+                        with col:
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <div class="metric-label">{label}</div>
+                                <div class="metric-value" style="color:{color}">{value}</div>
+                            </div>""", unsafe_allow_html=True)
 
+                    # ── Metric cards — row 2: stats ────────────────────────────────
+                    _r2_items = [("Prob. of Gain", mc_summary["Prob. of Gain"], "#1d4ed8")]
+                    _r2 = st.columns(len(_r2_items))
+                    for col, (_lbl, _val, _clr) in zip(_r2, _r2_items):
+                        with col:
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <div class="metric-label">{_lbl}</div>
+                                <div class="metric-value" style="color:{_clr}">{_val}</div>
+                            </div>""", unsafe_allow_html=True)
 
-            # ── Drawing frame ────────────────────────────────────────────────
-            # `_cdf` is daily and stays that way: every statistic on this page is
-            # computed from daily bars and hard-codes it, from Close.rolling(200)
-            # to ret.std() * sqrt(252). Handing those hourly bars would silently
-            # turn MA 200 into 200 HOURS - about 29 trading days - understate
-            # annualised volatility by roughly sqrt(7), and carry that error into
-            # Sharpe, Sortino, beta and the forecast. Every number would change
-            # and every one would still look plausible.
-            #
-            # So the denser series is for the LINE ONLY. `_pdf` is what gets
-            # drawn; `_cdf` remains what everything else measures. Moving
-            # averages below are deliberately still plotted from `_cdf`, so
-            # "MA 50" keeps meaning fifty days on a chart drawn hourly.
-            #
-            # Measured on AAPL: a month goes from 23 points to 154. Hourly is
-            # capped at 6M because the provider only serves ~730 days of it, and
-            # beyond a year the daily series is already 250+ points - dense
-            # enough that more would cost payload for no visible gain. 5-minute
-            # bars were rejected outright: 1,716 points for one month is 75x the
-            # payload for a curve indistinguishable at this width.
-            # Interval per range, the ladder every finance site climbs: fine bars
-            # over a short window, coarse bars over a long one. The provider's own
-            # ceilings decide where it stops - 1-minute is 8 days per request,
-            # 5/15/30-minute is the last 60 days, hourly is ~730 - so past a year
-            # there is nothing finer than daily to be had, and daily is already
-            # 250+ points by then.
-            #
-            # `_lookback` is how far back to ASK. A day's chart cannot request a
-            # single day: ask for one and a weekend or a holiday returns nothing,
-            # so it asks for a week and keeps the last session.
-            _DENSE_FOR = {
-                "1D": ("1min",  7),
-                "5D": ("5min",  9),
-                "1M": ("30min", 33),
-                "3M": ("1hour", 95),
-                "6M": ("1hour", 186),
-            }
-            _pdf = _cdf
-            _sessions = 0          # >0 means "keep only the last N sessions"
-            _dense_iv = None
-            if _range_sel in _DENSE_FOR:
-                _dense_iv, _lookback = _DENSE_FOR[_range_sel]
-                _anchor = pd.to_datetime(df["Date"].iloc[-1])
-                _d0 = (_anchor - pd.Timedelta(days=_lookback)).strftime("%Y-%m-%d")
-                _d1 = (_anchor + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-                _dense = _cached_dense_bars(ticker_input, _d0, _d1, _dense_iv)
-                if _dense is not None and len(_dense) > 0:
-                    _sessions = {"1D": 1, "5D": 5}.get(_range_sel, 0)
-                    if _sessions:
-                        # Trim to whole sessions rather than a rolling window, so
-                        # "1D" is a trading day and not the last 24 hours.
-                        _days = pd.to_datetime(_dense["Date"]).dt.normalize()
-                        _keep = sorted(_days.unique())[-_sessions:]
-                        _dense = _dense[_days.isin(_keep)]
-                    if len(_dense) > len(_cdf) or _sessions:
-                        _pdf = _dense
-                else:
-                    _dense_iv = None          # fell back to daily; no rangebreaks
-
-            # Labels follow the window, not the calendar: a single session wants
-            # clock time, a week wants weekday and time, a decade wants years.
-            if _range_sel == "1D":
-                _tickfmt = "%H:%M"
-            elif _range_sel == "5D":
-                _tickfmt = "%a %H:%M"
-
-            # US regular session is 09:30-16:00 Eastern, and the provider returns
-            # bars stamped in that zone.
-            _rangebreaks = []
-            if _dense_iv:
-                _rangebreaks = [
-                    dict(bounds=["sat", "mon"]),
-                    dict(bounds=[16, 9.5], pattern="hour"),
-                ]
-            elif _range_sel in ("1M", "3M", "6M", "1Y"):
-                # Daily bars still leave weekend holes worth closing.
-                _rangebreaks = [dict(bounds=["sat", "mon"])]
-
-            fig = go.Figure()
-
-            # ── Price — line / area / candle depending on selection ───────────
-            if _chart_type == "Candlestick" and {"Open","High","Low","Close"}.issubset(_pdf.columns):
-                fig.add_trace(go.Candlestick(
-                    x=_pdf["Date"], open=_pdf["Open"], high=_pdf["High"],
-                    low=_pdf["Low"], close=_pdf["Close"],
-                    name="Price",
-                    increasing_line_color=ct.color.positive, decreasing_line_color=ct.color.negative,
-                    increasing_fillcolor=ct.color.positive, decreasing_fillcolor=ct.color.negative,
-                ))
-            elif _chart_type == "Line":
-                fig.add_trace(go.Scatter(
-                    x=_pdf["Date"], y=_pdf["Close"],
-                    name="Price",
-                    line=dict(color=ct.color.ink, width=ct.stroke.price),
-                    hovertemplate="$%{y:,.2f}<extra>Price</extra>",
-                ))
-            else:  # Area (default)
-                # "tozeroy", not an invisible base trace at the series minimum.
-                # That base trace spanned the full width at a constant y, so it
-                # dragged the axis down to the all-time low no matter what was
-                # selected. tozeroy fills to the bottom of the plot and is
-                # clipped there, which looks identical and constrains nothing.
-                fig.add_trace(go.Scatter(
-                    x=_pdf["Date"], y=_pdf["Close"],
-                    name="Price",
-                    line=dict(color=ct.color.ink, width=ct.stroke.price),
-                    fill="tozeroy",
-                    # A brand tint, not an ink tint: ink at 5% on white renders as
-                    # flat grey, which is the exact bland look this redesign is
-                    # meant to remove.
-                    fillcolor=ct._rgba(ct.color.brand, 0.06),
-                    hovertemplate="$%{y:,.2f}<extra>Price</extra>",
-                ))
-
-            # ── Moving averages — gated by checkboxes ─────────────────────────
-            _ma_cfg = [
-                # Moving averages are supporting series: hairline, and separated
-                # mostly by dash length rather than by colour. Three saturated
-                # hues here would compete with the price line for attention.
-                (20,  ct.color.ink_faint,  1.0, "dot",      "MA 20",  _show_ma20),
-                (50,  ct.color.value_line, 1.0, "dash",     "MA 50",  _show_ma50),
-                (200, ct.color.brand,      1.0, "longdash", "MA 200", _show_ma200),
-            ]
-            # A daily moving average has one value per day, so across a single
-            # session it is a single point and across a week it is five - a
-            # stub, not a trend. Yahoo shows no averages on its intraday chart
-            # either. They return with the ranges that span enough days to draw
-            # one honestly.
-            _ma_ok = _range_sel not in ("1D", "5D") and len(_cdf) >= 10
-            for ma, color, width, dash, label, enabled in _ma_cfg:
-                if _ma_ok and enabled and f"MA{ma}" in _cdf.columns:
-                    fig.add_trace(go.Scatter(
-                        x=_cdf["Date"], y=_cdf[f"MA{ma}"],
-                        name=label,
-                        line=dict(color=color, width=width, dash=dash),
-                        opacity=0.9,
-                        hovertemplate=f"$%{{y:,.2f}}<extra>MA {ma}</extra>",
-                    ))
-
-            # ── Volume bars on secondary axis (optional) ──────────────────────
-            if _show_vol and "Volume" in _cdf.columns:
-                _vol_colors = ["#059669" if c >= o else "#dc2626"
-                               for c, o in zip(_pdf["Close"], _pdf["Open"])] \
-                              if "Open" in _pdf.columns else "#94a3b8"
-                fig.add_trace(go.Bar(
-                    x=_pdf["Date"], y=_pdf["Volume"],
-                    name="Volume", marker_color=_vol_colors,
-                    opacity=0.35, yaxis="y2",
-                    hovertemplate="%{y:,.0f}<extra>Volume</extra>",
-                ))
-
-            # ── Visible y-range ──────────────────────────────────────────────
-            # Set explicitly rather than left to autorange, for one reason:
-            # "tozeroy" counts the fill's own extent, so an area chart always
-            # autoranges down to $0 however narrow the price band is. That is
-            # what left the 1Y view spanning $0-$340 for a year that traded
-            # between $226 and $340. The range covers every series actually
-            # drawn — the price, whichever moving averages are switched on, and
-            # the candle wicks — so nothing plotted can fall outside it.
-            _y_series = [_pdf["Close"]]
-            if _chart_type == "Candlestick" and {"High", "Low"}.issubset(_pdf.columns):
-                _y_series += [_pdf["High"], _pdf["Low"]]
-            # `_ma_ok` gates this too. The axis should describe what is on the
-            # chart and nothing else: including an average that was never plotted
-            # is what zoomed a quiet day out to a fifteen-year price band.
-            for _ma, _en in ((20, _show_ma20), (50, _show_ma50), (200, _show_ma200)):
-                if _ma_ok and _en and f"MA{_ma}" in _cdf.columns:
-                    _y_series.append(_cdf[f"MA{_ma}"].dropna())
-            _y_min = min(float(s.min()) for s in _y_series if len(s))
-            _y_max = max(float(s.max()) for s in _y_series if len(s))
-            # The reference line is part of the picture: a day that gapped up and
-            # never looked back would otherwise push it off the top of the plot,
-            # leaving the move to be read against nothing.
-            if _range_sel == "1D" and len(_cdf) >= 2:
-                _pc = float(_cdf["Close"].iloc[-2])
-                _y_min, _y_max = min(_y_min, _pc), max(_y_max, _pc)
-            _y_pad = max((_y_max - _y_min) * 0.06, _y_max * 0.005)
-            # A price axis never goes below zero, however much padding the band
-            # asks for — a floor of -$8 under a 15-year chart is nonsense.
-            _y_floor = max(0.0, _y_min - _y_pad)
-            _y_ceil  = _y_max + _y_pad
-
-            if _show_sr and resistance:
-                # Only show resistance levels INSIDE chart range and above current price
-                _res_above = sorted(
-                    [r for r in resistance if _y_floor < r < _y_ceil],
-                    reverse=True,
-                )[:2]
-                for _i, r in enumerate(_res_above):
-                    fig.add_shape(type="line", x0=0, x1=1, xref="paper",
-                                  y0=r, y1=r,
-                                  line=dict(color=ct.color.negative, width=1, dash="dash"),
-                                  opacity=0.4, layer="below")
-                    fig.add_annotation(
-                        x=0.006, xref="paper", y=r, yref="y",
-                        text=f"Resist ${r:,.0f}",
-                        showarrow=False, xanchor="left", yshift=8,
-                        font=dict(color=ct.color.negative, size=10, family=ct.font.data),
-                        bgcolor="rgba(255,255,255,0.9)",
-                        bordercolor=ct._rgba(ct.color.negative, 0.35), borderwidth=1,
-                        borderpad=3,
-                    )
-
-            if _show_sr and support:
-                _sup_below = sorted(
-                    [s for s in support if _y_floor < s < _y_ceil]
-                )[:2]
-                for _i, s in enumerate(_sup_below):
-                    fig.add_shape(type="line", x0=0, x1=1, xref="paper",
-                                  y0=s, y1=s,
-                                  line=dict(color=ct.color.positive, width=1, dash="dash"),
-                                  opacity=0.4, layer="below")
-                    fig.add_annotation(
-                        x=0.006, xref="paper", y=s, yref="y",
-                        text=f"Support ${s:,.0f}",
-                        showarrow=False, xanchor="left", yshift=8,
-                        font=dict(color=ct.color.positive, size=10, family=ct.font.data),
-                        bgcolor="rgba(255,255,255,0.9)",
-                        bordercolor=ct._rgba(ct.color.positive, 0.35), borderwidth=1,
-                        borderpad=3,
-                    )
-
-            # ── Previous close, on the single-session view ────────────────────
-            # A day's move is meaningless without the level it moved from, which
-            # is why every intraday chart draws this line. The value comes from
-            # the DAILY frame - the close before the session on screen - not from
-            # the intraday bars, which start at the open.
-            if _range_sel == "1D" and len(_cdf) >= 2:
-                _prev_close = float(_cdf["Close"].iloc[-2])
-                fig.add_hline(
-                    y=_prev_close, line_dash="dot", line_width=1,
-                    line_color=ct.color.ink_muted, opacity=0.55,
-                    annotation_text=f"Prev close ${_prev_close:,.2f}",
-                    annotation_position="top left",
-                    annotation_font=dict(size=10, color=ct.color.ink_muted,
-                                         family=ct.font.data),
-                )
-
-            # ── Current price tag ─────────────────────────────────────────────
-            if _show_tag:
-                _last = _pdf["Close"].iloc[-1]
-                fig.add_shape(type="line", x0=0, x1=1, xref="paper",
-                              y0=_last, y1=_last,
-                              line=dict(color=ct.color.ink_muted, width=1, dash="dot"),
-                              opacity=0.7, layer="above")
-                fig.add_annotation(
-                    # Past the right-hand tick labels, not on top of them.
-                    x=1.0, xref="paper", y=_last, yref="y", xshift=56,
-                    text=f"<b>${_last:,.2f}</b>",
-                    showarrow=False, xanchor="left",
-                    font=dict(color=ct.color.paper, size=11, family=ct.font.data),
-                    bgcolor=ct.color.ink,
-                    borderpad=4,
-                )
-
-            ct.style(
-                fig,
-                height=480,
-                # The price axis is on the RIGHT, so the left gutter is only
-                # breathing room. The right margin carries the axis (~54px) and
-                # the last-price tag beyond it. The range buttons used to live
-                # inside the plot and cost 70px of top margin; they are now a
-                # Streamlit control above the chart, and that height goes to the
-                # plot instead.
-                margin=dict(l=24, r=118, t=28, b=48),
-                x=ct.time_axis(
-                    fy_ticks=False, title=None, tickformat=_tickfmt,
-                    nticks=8, automargin=True,
-                    rangeslider=dict(visible=False),
-                    # Give no width to time the market was shut. Without this an
-                    # intraday chart spends most of its axis on nights and
-                    # weekends: a 1-minute day is 390 minutes of trading inside a
-                    # 1,440-minute box, so the price action gets a quarter of the
-                    # plot and the line leaps across the gaps. Weekends go for
-                    # every dense range; the overnight bound only applies where
-                    # bars are intraday, since daily bars have no hours to hide.
-                    rangebreaks=_rangebreaks,
-                ),
-                y=ct.value_axis(tick_format=",.2f", zero=False, title=None,
-                                nticks=6, side="right", automargin=True,
-                                range=[_y_floor, _y_ceil]),
-                # namelength=-1 keeps long trace names from being truncated in the
-                # unified tooltip.
-                hoverlabel=dict(namelength=-1, **ct.hover()),
-            )
-            if _show_vol and "Volume" in _cdf.columns:
-                fig.update_layout(yaxis2=dict(
-                    title=None, overlaying="y", side="left",   # hidden; keeps off the price axis
-                    showgrid=False, showticklabels=False,
-                    range=[0, float(_cdf["Volume"].max() * 5)],
-                ))
-            st.plotly_chart(fig, use_container_width=True, config={
-                "displaylogo": False,
-                "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
-            })
-
-            # ── One switchable indicator below the price chart ────────────────
-            # Replaces the old always-on stack of RSI + Bollinger (+ MACD) charts
-            # with a single view the user flips between — less scrolling, less
-            # clutter. "None" hides it entirely.
-            _ind_opts = ["None"]
-            if "RSI14" in df.columns:    _ind_opts.append("RSI")
-            if "MACD" in df.columns:     _ind_opts.append("MACD")
-            if "BB_Upper" in df.columns: _ind_opts.append("Bollinger")
-            _ind_view = "None"
-            if len(_ind_opts) > 1:
-                _jump_anchor("sec-indicator", "Indicators")
-                st.markdown('<div class="field-label" style="margin-top:0.5rem">Indicator</div>',
-                            unsafe_allow_html=True)
-                _ind_view = st.radio("Indicator", _ind_opts, horizontal=True,
-                                     key="tech_indicator", label_visibility="collapsed")
-
-            if _ind_view == "RSI" and "RSI14" in df.columns:
-                st.markdown('<div class="section-header">RSI (14)</div>', unsafe_allow_html=True)
-                fig_rsi = go.Figure()
-                fig_rsi.add_trace(go.Scatter(x=df["Date"], y=df["RSI14"],
-                                             line=dict(color=ct.color.ink, width=ct.stroke.price), name="RSI",
-                                             hovertemplate="RSI: %{y:.1f}<extra></extra>"))
-                fig_rsi.add_hrect(y0=70, y1=100, fillcolor="rgba(239,68,68,0.08)", line_width=0)
-                fig_rsi.add_hrect(y0=0, y1=30, fillcolor="rgba(22,163,74,0.08)", line_width=0)
-                fig_rsi.add_hline(y=70, line_dash="dash", line_color=ct.color.negative, line_width=1, opacity=0.6)
-                fig_rsi.add_hline(y=50, line_dash="dot",  line_color=ct.color.ink_muted, line_width=1, opacity=0.5)
-                fig_rsi.add_hline(y=30, line_dash="dash", line_color=ct.color.positive, line_width=1, opacity=0.6)
-                # Anchor zone labels INSIDE the plot at the left edge so they
-                # don't float in the right margin.
-                fig_rsi.add_annotation(
-                    xref="paper", x=0.005, y=85, text="Overbought",
-                    showarrow=False, xanchor="left",
-                    font=dict(size=10, color=ct.color.negative, family=ct.font.data),
-                )
-                fig_rsi.add_annotation(
-                    xref="paper", x=0.005, y=15, text="Oversold",
-                    showarrow=False, xanchor="left",
-                    font=dict(size=10, color=ct.color.positive, family=ct.font.data),
-                )
-                # Margins match the price chart above so the two plot areas line
-                # up: a stacked indicator whose x-axis is offset from the price
-                # it explains is worse than no indicator at all.
-                ct.style(
-                    fig_rsi,
-                    height=200,
-                    margin=dict(l=52, r=112, t=20, b=30),
-                    legend=None,
-                    x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
-                    y=ct.plain_axis(range=[0, 100], tickvals=[30, 50, 70], title=None),
-                )
-                st.plotly_chart(fig_rsi, use_container_width=True)
-
-            if _ind_view == "Bollinger" and "BB_Upper" in df.columns:
-                st.markdown('<div class="section-header">Bollinger Bands</div>', unsafe_allow_html=True)
-                fig_bb = go.Figure()
-                fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["BB_Upper"],
-                                            line=dict(color=ct.color.ink_muted, width=1), name="Upper Band"))
-                fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["BB_Lower"],
-                                            line=dict(color=ct.color.ink_muted, width=1), name="Lower Band",
-                                            fill="tonexty", fillcolor="rgba(147,197,253,0.15)"))
-                fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["BB_Middle"],
-                                            line=dict(color=ct.color.value_line, width=ct.stroke.price, dash="dash"), name="Middle (SMA)"))
-                fig_bb.add_trace(go.Scatter(x=df["Date"], y=df["Close"],
-                                            line=dict(color=ct.color.ink, width=ct.stroke.price), name="Price",
-                                            hovertemplate="$%{y:,.2f}<extra>Price</extra>"))
-                ct.style(
-                    fig_bb,
-                    height=320,
-                    margin=dict(l=52, r=112, t=40, b=30),
-                    x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
-                    y=ct.value_axis(tick_format=",.2f", zero=False, title=None),
-                )
-                st.plotly_chart(fig_bb, use_container_width=True)
-
-            if _ind_view == "MACD" and "MACD" in df.columns:
-                st.markdown('<div class="section-header">MACD</div>', unsafe_allow_html=True)
-                fig_macd = go.Figure()
-                fig_macd.add_trace(go.Scatter(
-                    x=df["Date"], y=df["MACD"], name="MACD",
-                    line=dict(color=ct.color.ink, width=ct.stroke.price),
-                    hovertemplate="MACD: %{y:.3f}<extra></extra>"))
-                fig_macd.add_trace(go.Scatter(
-                    x=df["Date"], y=df["MACD_Signal"], name="Signal",
-                    line=dict(color=ct.color.value_line, width=ct.stroke.price),
-                    hovertemplate="Signal: %{y:.3f}<extra></extra>"))
-                _hist_colors = [ct.color.positive if (v or 0) >= 0 else ct.color.negative
-                                for v in df["MACD_Hist"].fillna(0)]
-                fig_macd.add_trace(go.Bar(
-                    x=df["Date"], y=df["MACD_Hist"], name="Histogram",
-                    marker_color=_hist_colors, opacity=0.5,
-                    hovertemplate="Hist: %{y:.3f}<extra></extra>"))
-                ct.style(
-                    fig_macd,
-                    height=240,
-                    margin=dict(l=52, r=112, t=20, b=30),
-                    x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
-                    y=ct.plain_axis(title=None, zeroline=True,
-                                    zerolinecolor=ct.color.rule),
-                )
-                st.plotly_chart(fig_macd, use_container_width=True)
-
-            if mc_summary:
-                _header    = "Monte Carlo Forecast"
-                st.markdown(f'<div class="section-header"'
-                            f'{_sec_id("sec-forecast", "Forecast")}>{_header}</div>',
-                            unsafe_allow_html=True)
-
-                # ── Metric cards — row 1: price scenarios ─────────────────────
-                _r1 = st.columns(5)
-                for col, label, value, color in [
-                    (_r1[0],"Bear (P5)",  f"${mc_summary['Bear Case (P5)']:,.2f}","#dc2626"),
-                    (_r1[1],"Low (P25)",  f"${mc_summary['Low Case (P25)']:,.2f}","#1d4ed8"),
-                    (_r1[2],"Median",     f"${mc_summary['Median (P50)']:,.2f}",  "#0f172a"),
-                    (_r1[3],"Bull (P75)", f"${mc_summary['Bull Case (P75)']:,.2f}","#4a9eff"),
-                    (_r1[4],"Best (P95)", f"${mc_summary['Best Case (P95)']:,.2f}","#059669"),
-                ]:
-                    with col:
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">{label}</div>
-                            <div class="metric-value" style="color:{color}">{value}</div>
-                        </div>""", unsafe_allow_html=True)
-
-                # ── Metric cards — row 2: stats ────────────────────────────────
-                _r2_items = [("Prob. of Gain", mc_summary["Prob. of Gain"], "#1d4ed8")]
-                _r2 = st.columns(len(_r2_items))
-                for col, (_lbl, _val, _clr) in zip(_r2, _r2_items):
-                    with col:
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">{_lbl}</div>
-                            <div class="metric-value" style="color:{_clr}">{_val}</div>
-                        </div>""", unsafe_allow_html=True)
-
-                # ── Simulated price-path fan chart ────────────────────────────
-                # Percentiles over ALL paths, not the first 200. The metric cards
-                # above use the full set, so sampling here made the fan's endpoints
-                # disagree with the Bear/Median/Best figures printed right above it.
-                if mc_sim_df.empty or mc_sim_df.shape[1] == 0:
-                    st.warning("Monte Carlo simulation produced no paths.")
-                    pcts = None
-                else:
-                    pcts = np.percentile(mc_sim_df.values, [5,25,50,75,95], axis=1)
-                if pcts is not None:
-                    x      = list(range(len(pcts[0])))
-                    fig_mc = go.Figure()
-                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[4], name="P95",
-                                                line=dict(color=ct.color.positive, width=1.25),
-                                                hovertemplate="Day %{x} — Best: $%{y:,.2f}<extra></extra>"))
-                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[3], name="P75",
-                                                line=dict(color=ct.color.brand, width=1),
-                                                fill="tonexty", fillcolor=ct._rgba(ct.color.brand, 0.10),
-                                                hovertemplate="Day %{x} — Bull: $%{y:,.2f}<extra></extra>"))
-                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[2], name="Median",
-                                                line=dict(color=ct.color.ink, width=1.75),
-                                                hovertemplate="Day %{x} — Median: $%{y:,.2f}<extra></extra>"))
-                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[1], name="P25",
-                                                line=dict(color=ct.color.brand, width=1),
-                                                fill="tonexty", fillcolor=ct._rgba(ct.color.brand, 0.06),
-                                                hovertemplate="Day %{x} — Low: $%{y:,.2f}<extra></extra>"))
-                    fig_mc.add_trace(go.Scatter(x=x, y=pcts[0], name="P5",
-                                                line=dict(color=ct.color.negative, width=1.25),
-                                                hovertemplate="Day %{x} — Bear: $%{y:,.2f}<extra></extra>"))
-                    # Legend moves OUTSIDE the plot: a legend floating over the
-                    # data in a white box covers the fan it is describing.
-                    ct.style(
-                        fig_mc,
-                        height=370,
-                        margin=dict(l=52, r=20, t=30, b=40),
-                        legend="top-left",
-                        x=ct.linear_axis(title="Trading Days",
-                                         tickvals=[0, 50, 100, 150, 200, 250],
-                                         tickformat=",d"),
-                        y=ct.value_axis(zero=False, title=None),
-                    )
-                    st.plotly_chart(fig_mc, use_container_width=True)
-
-
-            st.markdown(f'<div class="section-header"'
-                        f'{_sec_id("sec-volume", "Volume")}>Volume</div>',
-                        unsafe_allow_html=True)
-            vol_colors = [ct.color.positive if r >= 0 else ct.color.negative
-                          for r in df["Daily_Return"].fillna(0)]
-            fig_vol = go.Figure()
-            fig_vol.add_trace(go.Bar(x=df["Date"], y=df["Volume"], marker_color=vol_colors, opacity=0.85,
-                                     name="Volume",
-                                     hovertemplate="<b>%{x|%b %d, %Y}</b><br>Volume: %{y:,.0f}<extra></extra>"))
-            if "Volume" in df.columns:
-                _vol_ma20 = df["Volume"].rolling(20, min_periods=5).mean()
-                fig_vol.add_trace(go.Scatter(
-                    x=df["Date"], y=_vol_ma20, name="20d Avg",
-                    line=dict(color=ct.color.brand, width=1.25, dash="dot"),
-                    hovertemplate="20d Avg: %{y:,.0f}<extra></extra>",
-                ))
-            # No in-chart title: the "Volume" section header directly above
-            # already says it, and printing it twice is just noise.
-            ct.style(
-                fig_vol,
-                height=260,
-                margin=dict(l=52, r=112, t=26, b=30),
-                x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
-                y=ct.value_axis(prefix="", tick_format=".2s", title=None),
-            )
-            st.plotly_chart(fig_vol, use_container_width=True)
-
-            if corr_matrix is not None:
-                st.markdown(f'<div class="section-header"'
-                            f'{_sec_id("sec-correlation", "Correlation")}>Correlation Matrix</div>',
-                            unsafe_allow_html=True)
-                # Square cells are kept deliberately (px.imshow's default): a
-                # correlation matrix is read as a grid, and stretching the cells
-                # to the container width turns it into something that scans as a
-                # stacked bar. The problem was never the aspect, it was the
-                # container — a ~300px square was being centred in ~900px of
-                # column, so the matrix looked stranded and its x labels sat on
-                # the bottom edge. Narrower column below, taller margin here.
-                fig_corr = px.imshow(
-                    corr_matrix,
-                    text_auto=".2f",
-                    color_continuous_scale=ct.color.diverging,
-                    zmin=-1, zmax=1,
-                    aspect="equal",
-                )
-                fig_corr.update_traces(
-                    xgap=2, ygap=2,
-                    hovertemplate="<b>%{x} vs %{y}</b><br>Correlation: %{z:.2f}<extra></extra>",
-                    textfont=dict(size=11, family=ct.font.data),
-                )
-                ct.style(
-                    fig_corr,
-                    height=300,
-                    # r=96, not 20. The colorbar and its tick labels live in the
-                    # right margin, and aspect="equal" shrinks the plot area to a
-                    # square — so Plotly places the bar at 1.02 of the SQUARE,
-                    # which lands further right than a naive margin allows for.
-                    # Measured in the browser: the "-1.0" label overflowed the
-                    # 543px figure by 14px at r=72. This leaves ~24px of slack.
-                    margin=dict(l=64, r=96, t=20, b=48),
-                    legend=None, grid=False, crosshair=False,
-                    x=ct.category_axis(tickfont=dict(size=12, color=ct.color.ink,
-                                                     family=ct.font.data),
-                                       automargin=True),
-                    y=ct.category_axis(tickfont=dict(size=12, color=ct.color.ink,
-                                                     family=ct.font.data),
-                                       automargin=True),
-                    coloraxis_colorbar=dict(
-                        # No title: the section header two lines up already says
-                        # "Correlation Matrix", and in the narrower column the
-                        # word clipped to "Correlati…" against the right edge.
-                        tickvals=[-1, -0.5, 0, 0.5, 1],
-                        ticktext=["-1.0", "-0.5", "0.0", "0.5", "1.0"],
-                        tickfont=dict(size=11, color=ct.color.ink_muted,
-                                      family=ct.font.data),
-                        title_font=dict(size=12, color=ct.color.ink_muted,
-                                        family=ct.font.data),
-                        thickness=14, len=0.8,
-                    ),
-                )
-                _cm_l, _cm_mid, _cm_r = st.columns([1, 2.2, 1])
-                with _cm_mid:
-                    st.plotly_chart(fig_corr, use_container_width=True)
-
-            # News moved to the Research page, which now leads with SEC
-            # filings and financial statements and is where a reader goes to
-            # ask what is happening to a company. Showing the same feed here
-            # meant two pages carrying it, which is the duplication just
-            # removed from Home. `news_list` is still fetched for the
-            # EXPORTED report: a standalone research document should carry
-            # the headlines it was written against, even though the page
-            # sends you elsewhere to read them.
-
-            # Fetched here rather than up front. Memoised, so the export path
-            # above may already have paid for it, or may not have run at all -
-            # neither this section nor that one needs to know.
-            peer_df, peer_price_dfs = _load_peers()
-            if peer_df is not None and not peer_df.empty:
-                st.markdown(f'<div class="section-header"'
-                            f'{_sec_id("sec-peers", "Peer Comparison")}>Peer Comparison</div>',
-                            unsafe_allow_html=True)
-                # Say where the comparison set came from. A reader who does not
-                # know these were picked by sector and size has no way to judge
-                # whether they are the right companies to be compared against.
-                if peers_auto:
-                    # Deliberately does not name the sector. `sector` here is
-                    # Polygon's SIC description ("Electronic Computers" for
-                    # AAPL), not a GICS sector, and the peers were matched on the
-                    # ranked universe's sector instead - so printing this string
-                    # would caption the right companies with the wrong reason.
-                    st.caption(f"Peers chosen automatically — companies in the same "
-                               f"sector, closest to {ticker_input} in market value. "
-                               f"Name your own under **Advanced options** to override.")
-
-                # `_chart_layout` used to be defined here and was never applied to
-                # anything — every peer chart below re-specified its layout inline.
-                # ct.style() is the real shared layout now, so it is gone.
-
-                # ── 1. Cumulative Return Overlay ──────────────────────────────
-                if peer_price_dfs:
-                    fig_cum = go.Figure()
-                    for _ci, (_pt, _pdf) in enumerate(peer_price_dfs.items()):
-                        if "Cumulative_Index" not in _pdf.columns or _pdf.empty:
-                            continue
-                        _x = _pdf["Date"] if "Date" in _pdf.columns else _pdf.index
-                        _is_main = (_pt == ticker_input)
-                        fig_cum.add_trace(go.Scatter(
-                            x=_x,
-                            y=_pdf["Cumulative_Index"],
-                            name=_pt,
-                            mode="lines",
-                            line=dict(
-                                # The analysed ticker is always ink and always
-                                # solid; peers take the categorical ramp. The
-                                # subject should never be mistakable for a peer.
-                                color=ct.color.ink if _is_main else ct.series_color(_ci),
-                                width=ct.stroke.value if _is_main else ct.stroke.price,
-                                dash="solid" if _is_main else "dot" if _ci > 0 else "solid",
-                            ),
-                            hovertemplate=f"<b>{_pt}</b>: %{{y:.1f}}<extra></extra>",
-                        ))
-                    ct.style(
-                        fig_cum,
-                        height=380,
-                        margin=dict(l=52, r=20, t=26, b=30),
-                        x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
-                        y=ct.value_axis(prefix="", tick_format=".0f", zero=False,
-                                        title="Index (Start = 100)"),
-                    )
-                    st.plotly_chart(fig_cum, use_container_width=True)
-
-                # ── 2. Key Metrics Bar Charts ─────────────────────────────────
-                if peer_price_dfs:
-                    _mrows = []
-                    _rfr = get_risk_free_rate()
-                    for _pt, _pdf in peer_price_dfs.items():
-                        if _pdf.empty or "Daily_Return" not in _pdf.columns:
-                            continue
-                        _ret = _pdf["Daily_Return"].dropna()
-                        if len(_ret) < 5:
-                            continue
-                        # Match the headline metric definitions: arithmetic
-                        # annualised return and excess-return Sharpe (minus the
-                        # risk-free rate) so a stock's peer-chart Sharpe equals
-                        # the value shown in its metric card.
-                        _ann_ret = _ret.mean() * 252
-                        _ann_vol = _ret.std() * np.sqrt(252)
-                        _sharpe  = ((_ann_ret - _rfr) / _ann_vol) if _ann_vol > 0 else 0
-                        _cum     = _pdf["Cumulative_Index"]
-                        _max_dd  = ((_cum - _cum.cummax()) / _cum.cummax()).min()
-                        _mrows.append({
-                            "Ticker":           _pt,
-                            "Ann. Return (%)":  round(_ann_ret * 100, 2),
-                            "Volatility (%)":   round(_ann_vol * 100, 2),
-                            "Sharpe Ratio":     round(_sharpe, 2),
-                            "Max Drawdown (%)": round(_max_dd * 100, 2),
-                        })
-
-                    if _mrows:
-                        _mdf    = pd.DataFrame(_mrows)
-                        _ticks  = _mdf["Ticker"].tolist()
-                        # (No per-ticker colour list here: every bar chart below
-                        # colours by VALUE — positive/negative, or Sharpe band —
-                        # not by series identity. A `_peer_colors` lookup used to
-                        # sit here, referencing a name that was never defined, so
-                        # entering any peer ticker raised NameError and took the
-                        # whole Analysis page down with a traceback.)
-
-                        _mc1, _mc2 = st.columns(2)
-
-                        with _mc1:
-                            # Annualised Return + Volatility grouped bar
-                            fig_rv = go.Figure()
-                            fig_rv.add_trace(go.Bar(
-                                name="Ann. Return (%)",
-                                x=_ticks,
-                                y=_mdf["Ann. Return (%)"],
-                                marker_color=[
-                                    ct.color.positive if v >= 0 else ct.color.negative
-                                    for v in _mdf["Ann. Return (%)"]
-                                ],
-                                marker_line_width=0,
-                                hovertemplate="%{x}: %{y:.2f}%<extra>Ann. Return</extra>",
-                            ))
-                            fig_rv.add_trace(go.Bar(
-                                name="Volatility (%)",
-                                x=_ticks,
-                                y=_mdf["Volatility (%)"],
-                                marker_color=ct.color.value_line, marker_line_width=0,
-                                hovertemplate="%{x}: %{y:.2f}%<extra>Volatility</extra>",
-                            ))
-                            ct.style(
-                                fig_rv,
-                                height=300, barmode="group", crosshair=False,
-                                margin=dict(l=52, r=20, t=26, b=40),
-                                x=ct.category_axis(title="Ticker"),
-                                y=ct.pct_axis(tick_format=".1f", title="Percent (%)",
-                                              zeroline=True, zerolinecolor=ct.color.rule),
-                                title=dict(text="Ann. Return vs Volatility",
-                                           font=dict(size=13, color=ct.color.ink,
-                                                     family=ct.font.data),
-                                           x=0, xanchor="left"),
-                            )
-                            st.plotly_chart(fig_rv, use_container_width=True)
-
-                        with _mc2:
-                            # Sharpe Ratio bars
-                            fig_sh = go.Figure(go.Bar(
-                                x=_ticks,
-                                y=_mdf["Sharpe Ratio"],
-                                marker_color=[
-                                    ct.color.positive if v >= 1 else
-                                    ct.color.value_line if v >= 0 else ct.color.negative
-                                    for v in _mdf["Sharpe Ratio"]
-                                ],
-                                marker_line_width=0,
-                                hovertemplate="%{x}: %{y:.2f}<extra>Sharpe</extra>",
-                            ))
-                            ct.style(
-                                fig_sh,
-                                height=300, legend=None, crosshair=False,
-                                margin=dict(l=52, r=20, t=26, b=40),
-                                x=ct.category_axis(title="Ticker"),
-                                y=ct.plain_axis(tick_format=".2f", title="Sharpe Ratio",
-                                                zeroline=True, zerolinecolor=ct.color.rule),
-                                title=dict(text="Sharpe Ratio Comparison",
-                                           font=dict(size=13, color=ct.color.ink,
-                                                     family=ct.font.data),
-                                           x=0, xanchor="left"),
-                            )
-                            st.plotly_chart(fig_sh, use_container_width=True)
-
-                        # Max Drawdown full-width
-                        fig_dd = go.Figure(go.Bar(
-                            x=_ticks,
-                            y=_mdf["Max Drawdown (%)"],
-                            marker_color=ct.color.negative, marker_line_width=0,
-                            hovertemplate="%{x}: %{y:.2f}%<extra>Max Drawdown</extra>",
-                        ))
+                    # ── Simulated price-path fan chart ────────────────────────────
+                    # Percentiles over ALL paths, not the first 200. The metric cards
+                    # above use the full set, so sampling here made the fan's endpoints
+                    # disagree with the Bear/Median/Best figures printed right above it.
+                    if mc_sim_df.empty or mc_sim_df.shape[1] == 0:
+                        st.warning("Monte Carlo simulation produced no paths.")
+                        pcts = None
+                    else:
+                        pcts = np.percentile(mc_sim_df.values, [5,25,50,75,95], axis=1)
+                    if pcts is not None:
+                        x      = list(range(len(pcts[0])))
+                        fig_mc = go.Figure()
+                        fig_mc.add_trace(go.Scatter(x=x, y=pcts[4], name="P95",
+                                                    line=dict(color=ct.color.positive, width=1.25),
+                                                    hovertemplate="Day %{x} — Best: $%{y:,.2f}<extra></extra>"))
+                        fig_mc.add_trace(go.Scatter(x=x, y=pcts[3], name="P75",
+                                                    line=dict(color=ct.color.brand, width=1),
+                                                    fill="tonexty", fillcolor=ct._rgba(ct.color.brand, 0.10),
+                                                    hovertemplate="Day %{x} — Bull: $%{y:,.2f}<extra></extra>"))
+                        fig_mc.add_trace(go.Scatter(x=x, y=pcts[2], name="Median",
+                                                    line=dict(color=ct.color.ink, width=1.75),
+                                                    hovertemplate="Day %{x} — Median: $%{y:,.2f}<extra></extra>"))
+                        fig_mc.add_trace(go.Scatter(x=x, y=pcts[1], name="P25",
+                                                    line=dict(color=ct.color.brand, width=1),
+                                                    fill="tonexty", fillcolor=ct._rgba(ct.color.brand, 0.06),
+                                                    hovertemplate="Day %{x} — Low: $%{y:,.2f}<extra></extra>"))
+                        fig_mc.add_trace(go.Scatter(x=x, y=pcts[0], name="P5",
+                                                    line=dict(color=ct.color.negative, width=1.25),
+                                                    hovertemplate="Day %{x} — Bear: $%{y:,.2f}<extra></extra>"))
+                        # Legend moves OUTSIDE the plot: a legend floating over the
+                        # data in a white box covers the fan it is describing.
                         ct.style(
-                            fig_dd,
-                            height=280, legend=None, crosshair=False,
-                            margin=dict(l=52, r=20, t=26, b=40),
-                            x=ct.category_axis(title="Ticker"),
-                            y=ct.pct_axis(tick_format=".1f", title="Max Drawdown (%)"),
-                            title=dict(text="Maximum Drawdown Comparison",
-                                       font=dict(size=13, color=ct.color.ink,
-                                                 family=ct.font.data),
-                                       x=0, xanchor="left"),
+                            fig_mc,
+                            height=370,
+                            margin=dict(l=52, r=20, t=30, b=40),
+                            legend="top-left",
+                            x=ct.linear_axis(title="Trading Days",
+                                             tickvals=[0, 50, 100, 150, 200, 250],
+                                             tickformat=",d"),
+                            y=ct.value_axis(zero=False, title=None),
                         )
-                        st.plotly_chart(fig_dd, use_container_width=True)
+                        st.plotly_chart(fig_mc, use_container_width=True)
 
-                # ── 3. Company Info Table ─────────────────────────────────────
-                _show_cols = [c for c in
-                              ["Ticker", "Company", "Exchange", "Market Cap ($B)", "Employees", "Country"]
-                              if c in peer_df.columns]
-                st.dataframe(peer_df[_show_cols], use_container_width=True, hide_index=True)
+                if corr_matrix is not None:
+                    st.markdown(f'<div class="section-header"'
+                                f'{_sec_id("sec-correlation", "Correlation")}>Correlation Matrix</div>',
+                                unsafe_allow_html=True)
+                    # Square cells are kept deliberately (px.imshow's default): a
+                    # correlation matrix is read as a grid, and stretching the cells
+                    # to the container width turns it into something that scans as a
+                    # stacked bar. The problem was never the aspect, it was the
+                    # container — a ~300px square was being centred in ~900px of
+                    # column, so the matrix looked stranded and its x labels sat on
+                    # the bottom edge. Narrower column below, taller margin here.
+                    fig_corr = px.imshow(
+                        corr_matrix,
+                        text_auto=".2f",
+                        color_continuous_scale=ct.color.diverging,
+                        zmin=-1, zmax=1,
+                        aspect="equal",
+                    )
+                    fig_corr.update_traces(
+                        xgap=2, ygap=2,
+                        hovertemplate="<b>%{x} vs %{y}</b><br>Correlation: %{z:.2f}<extra></extra>",
+                        textfont=dict(size=11, family=ct.font.data),
+                    )
+                    ct.style(
+                        fig_corr,
+                        height=300,
+                        # r=96, not 20. The colorbar and its tick labels live in the
+                        # right margin, and aspect="equal" shrinks the plot area to a
+                        # square — so Plotly places the bar at 1.02 of the SQUARE,
+                        # which lands further right than a naive margin allows for.
+                        # Measured in the browser: the "-1.0" label overflowed the
+                        # 543px figure by 14px at r=72. This leaves ~24px of slack.
+                        margin=dict(l=64, r=96, t=20, b=48),
+                        legend=None, grid=False, crosshair=False,
+                        x=ct.category_axis(tickfont=dict(size=12, color=ct.color.ink,
+                                                         family=ct.font.data),
+                                           automargin=True),
+                        y=ct.category_axis(tickfont=dict(size=12, color=ct.color.ink,
+                                                         family=ct.font.data),
+                                           automargin=True),
+                        coloraxis_colorbar=dict(
+                            # No title: the section header two lines up already says
+                            # "Correlation Matrix", and in the narrower column the
+                            # word clipped to "Correlati…" against the right edge.
+                            tickvals=[-1, -0.5, 0, 0.5, 1],
+                            ticktext=["-1.0", "-0.5", "0.0", "0.5", "1.0"],
+                            tickfont=dict(size=11, color=ct.color.ink_muted,
+                                          family=ct.font.data),
+                            title_font=dict(size=12, color=ct.color.ink_muted,
+                                            family=ct.font.data),
+                            thickness=14, len=0.8,
+                        ),
+                    )
+                    _cm_l, _cm_mid, _cm_r = st.columns([1, 2.2, 1])
+                    with _cm_mid:
+                        st.plotly_chart(fig_corr, use_container_width=True)
+
+            if _show("Peers"):
+
+                # News moved to the Research page, which now leads with SEC
+                # filings and financial statements and is where a reader goes to
+                # ask what is happening to a company. Showing the same feed here
+                # meant two pages carrying it, which is the duplication just
+                # removed from Home. `news_list` is still fetched for the
+                # EXPORTED report: a standalone research document should carry
+                # the headlines it was written against, even though the page
+                # sends you elsewhere to read them.
+
+                # Fetched here rather than up front. Memoised, so the export path
+                # above may already have paid for it, or may not have run at all -
+                # neither this section nor that one needs to know.
+                peer_df, peer_price_dfs = _load_peers()
+                if peer_df is not None and not peer_df.empty:
+                    st.markdown(f'<div class="section-header"'
+                                f'{_sec_id("sec-peers", "Peer Comparison")}>Peer Comparison</div>',
+                                unsafe_allow_html=True)
+                    # Say where the comparison set came from. A reader who does not
+                    # know these were picked by sector and size has no way to judge
+                    # whether they are the right companies to be compared against.
+                    if peers_auto:
+                        # Deliberately does not name the sector. `sector` here is
+                        # Polygon's SIC description ("Electronic Computers" for
+                        # AAPL), not a GICS sector, and the peers were matched on the
+                        # ranked universe's sector instead - so printing this string
+                        # would caption the right companies with the wrong reason.
+                        st.caption(f"Peers chosen automatically — companies in the same "
+                                   f"sector, closest to {ticker_input} in market value. "
+                                   f"Name your own under **Advanced options** to override.")
+
+                    # `_chart_layout` used to be defined here and was never applied to
+                    # anything — every peer chart below re-specified its layout inline.
+                    # ct.style() is the real shared layout now, so it is gone.
+
+                    # ── 1. Cumulative Return Overlay ──────────────────────────────
+                    if peer_price_dfs:
+                        fig_cum = go.Figure()
+                        for _ci, (_pt, _pdf) in enumerate(peer_price_dfs.items()):
+                            if "Cumulative_Index" not in _pdf.columns or _pdf.empty:
+                                continue
+                            _x = _pdf["Date"] if "Date" in _pdf.columns else _pdf.index
+                            _is_main = (_pt == ticker_input)
+                            fig_cum.add_trace(go.Scatter(
+                                x=_x,
+                                y=_pdf["Cumulative_Index"],
+                                name=_pt,
+                                mode="lines",
+                                line=dict(
+                                    # The analysed ticker is always ink and always
+                                    # solid; peers take the categorical ramp. The
+                                    # subject should never be mistakable for a peer.
+                                    color=ct.color.ink if _is_main else ct.series_color(_ci),
+                                    width=ct.stroke.value if _is_main else ct.stroke.price,
+                                    dash="solid" if _is_main else "dot" if _ci > 0 else "solid",
+                                ),
+                                hovertemplate=f"<b>{_pt}</b>: %{{y:.1f}}<extra></extra>",
+                            ))
+                        ct.style(
+                            fig_cum,
+                            height=380,
+                            margin=dict(l=52, r=20, t=26, b=30),
+                            x=ct.time_axis(fy_ticks=False, title=None, tickformat="%b '%y"),
+                            y=ct.value_axis(prefix="", tick_format=".0f", zero=False,
+                                            title="Index (Start = 100)"),
+                        )
+                        st.plotly_chart(fig_cum, use_container_width=True)
+
+                    # ── 2. Key Metrics Bar Charts ─────────────────────────────────
+                    if peer_price_dfs:
+                        _mrows = []
+                        _rfr = get_risk_free_rate()
+                        for _pt, _pdf in peer_price_dfs.items():
+                            if _pdf.empty or "Daily_Return" not in _pdf.columns:
+                                continue
+                            _ret = _pdf["Daily_Return"].dropna()
+                            if len(_ret) < 5:
+                                continue
+                            # Match the headline metric definitions: arithmetic
+                            # annualised return and excess-return Sharpe (minus the
+                            # risk-free rate) so a stock's peer-chart Sharpe equals
+                            # the value shown in its metric card.
+                            _ann_ret = _ret.mean() * 252
+                            _ann_vol = _ret.std() * np.sqrt(252)
+                            _sharpe  = ((_ann_ret - _rfr) / _ann_vol) if _ann_vol > 0 else 0
+                            _cum     = _pdf["Cumulative_Index"]
+                            _max_dd  = ((_cum - _cum.cummax()) / _cum.cummax()).min()
+                            _mrows.append({
+                                "Ticker":           _pt,
+                                "Ann. Return (%)":  round(_ann_ret * 100, 2),
+                                "Volatility (%)":   round(_ann_vol * 100, 2),
+                                "Sharpe Ratio":     round(_sharpe, 2),
+                                "Max Drawdown (%)": round(_max_dd * 100, 2),
+                            })
+
+                        if _mrows:
+                            _mdf    = pd.DataFrame(_mrows)
+                            _ticks  = _mdf["Ticker"].tolist()
+                            # (No per-ticker colour list here: every bar chart below
+                            # colours by VALUE — positive/negative, or Sharpe band —
+                            # not by series identity. A `_peer_colors` lookup used to
+                            # sit here, referencing a name that was never defined, so
+                            # entering any peer ticker raised NameError and took the
+                            # whole Analysis page down with a traceback.)
+
+                            _mc1, _mc2 = st.columns(2)
+
+                            with _mc1:
+                                # Annualised Return + Volatility grouped bar
+                                fig_rv = go.Figure()
+                                fig_rv.add_trace(go.Bar(
+                                    name="Ann. Return (%)",
+                                    x=_ticks,
+                                    y=_mdf["Ann. Return (%)"],
+                                    marker_color=[
+                                        ct.color.positive if v >= 0 else ct.color.negative
+                                        for v in _mdf["Ann. Return (%)"]
+                                    ],
+                                    marker_line_width=0,
+                                    hovertemplate="%{x}: %{y:.2f}%<extra>Ann. Return</extra>",
+                                ))
+                                fig_rv.add_trace(go.Bar(
+                                    name="Volatility (%)",
+                                    x=_ticks,
+                                    y=_mdf["Volatility (%)"],
+                                    marker_color=ct.color.value_line, marker_line_width=0,
+                                    hovertemplate="%{x}: %{y:.2f}%<extra>Volatility</extra>",
+                                ))
+                                ct.style(
+                                    fig_rv,
+                                    height=300, barmode="group", crosshair=False,
+                                    margin=dict(l=52, r=20, t=26, b=40),
+                                    x=ct.category_axis(title="Ticker"),
+                                    y=ct.pct_axis(tick_format=".1f", title="Percent (%)",
+                                                  zeroline=True, zerolinecolor=ct.color.rule),
+                                    title=dict(text="Ann. Return vs Volatility",
+                                               font=dict(size=13, color=ct.color.ink,
+                                                         family=ct.font.data),
+                                               x=0, xanchor="left"),
+                                )
+                                st.plotly_chart(fig_rv, use_container_width=True)
+
+                            with _mc2:
+                                # Sharpe Ratio bars
+                                fig_sh = go.Figure(go.Bar(
+                                    x=_ticks,
+                                    y=_mdf["Sharpe Ratio"],
+                                    marker_color=[
+                                        ct.color.positive if v >= 1 else
+                                        ct.color.value_line if v >= 0 else ct.color.negative
+                                        for v in _mdf["Sharpe Ratio"]
+                                    ],
+                                    marker_line_width=0,
+                                    hovertemplate="%{x}: %{y:.2f}<extra>Sharpe</extra>",
+                                ))
+                                ct.style(
+                                    fig_sh,
+                                    height=300, legend=None, crosshair=False,
+                                    margin=dict(l=52, r=20, t=26, b=40),
+                                    x=ct.category_axis(title="Ticker"),
+                                    y=ct.plain_axis(tick_format=".2f", title="Sharpe Ratio",
+                                                    zeroline=True, zerolinecolor=ct.color.rule),
+                                    title=dict(text="Sharpe Ratio Comparison",
+                                               font=dict(size=13, color=ct.color.ink,
+                                                         family=ct.font.data),
+                                               x=0, xanchor="left"),
+                                )
+                                st.plotly_chart(fig_sh, use_container_width=True)
+
+                            # Max Drawdown full-width
+                            fig_dd = go.Figure(go.Bar(
+                                x=_ticks,
+                                y=_mdf["Max Drawdown (%)"],
+                                marker_color=ct.color.negative, marker_line_width=0,
+                                hovertemplate="%{x}: %{y:.2f}%<extra>Max Drawdown</extra>",
+                            ))
+                            ct.style(
+                                fig_dd,
+                                height=280, legend=None, crosshair=False,
+                                margin=dict(l=52, r=20, t=26, b=40),
+                                x=ct.category_axis(title="Ticker"),
+                                y=ct.pct_axis(tick_format=".1f", title="Max Drawdown (%)"),
+                                title=dict(text="Maximum Drawdown Comparison",
+                                           font=dict(size=13, color=ct.color.ink,
+                                                     family=ct.font.data),
+                                           x=0, xanchor="left"),
+                            )
+                            st.plotly_chart(fig_dd, use_container_width=True)
+
+                    # ── 3. Company Info Table ─────────────────────────────────────
+                    _show_cols = [c for c in
+                                  ["Ticker", "Company", "Exchange", "Market Cap ($B)", "Employees", "Country"]
+                                  if c in peer_df.columns]
+                    st.dataframe(peer_df[_show_cols], use_container_width=True, hide_index=True)
 
             # (The plain-English summary is now surfaced as "The Bottom Line" up
             # top, right under the key metrics — no need to repeat it here.)
