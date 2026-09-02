@@ -865,37 +865,71 @@ button[kind^="primary"]:active,
   box-shadow: var(--shadow-blue) !important;
 }
 
-/* ── Research-package download button ──
-   These used to paint the generate/download buttons in Office brand colours —
-   Excel green, PowerPoint orange, Word blue — back when there were three
-   coequal export buttons side by side. There is one action now ("Generate
-   research package") with format as a secondary radio, so borrowing another
-   product's brand colour for it is both off-palette and misleading: the button
-   generates a QuantWizard report, it does not launch Excel.
+/* ── Export buttons wear their format's colour ──
+   Excel green, PowerPoint orange, Word blue. This was tried once and reverted,
+   on the argument that the button "generates a QuantWizard report, it does not
+   launch Excel". That holds for a generic "Generate research package" button
+   and does not hold for these: every selector below is a button that either
+   says the format's name or hands over a file of that type, and matching the
+   format is how a reader picks the right one without reading the label.
 
-   The generate button keeps the app's primary style. Only the download button
-   is tinted, and in the brand green, to mark it as the completed state. */
+   Selectors use *= because the keys carry suffixes: Your Portfolios appends a
+   portfolio id (dl_excel_<pid>) and the Analysis page a window suffix.
+
+   The :not() on the generate buttons matters. The Analysis page has ONE button,
+   "Generate research package", with the format chosen by a radio beside it - its
+   key is gen_excel_top only because the kind keeps the widget unique, and
+   painting it Excel green would be wrong whichever format the reader picked.
+   The Portfolio Builder's button really does say "Generate Excel Report" and is
+   keyed exactly gen_excel. The trailing underscore is what tells them apart. The
+   builder's two download keys were "download_portfolio" and
+   "download_portfolio_pptx", where the first is a prefix of the second, so a
+   substring match on the Excel one also caught the PowerPoint one - the Excel
+   key is now download_portfolio_excel. */
 [class*="st-key-dl_excel"] button,
-[class*="st-key-dl_pptx"]  button,
-[class*="st-key-dl_word"]  button {
-  background: var(--green) !important;
-  border: 1px solid var(--green) !important;
+[class*="st-key-gen_excel"]:not([class*="st-key-gen_excel_"]) button,
+[class*="st-key-download_portfolio_excel"] button {
+  background: #10793F !important;      /* Microsoft Excel primary green */
+  border: 1px solid #10793F !important;
+  box-shadow: none !important;
+}
+[class*="st-key-dl_pptx"] button,
+[class*="st-key-gen_pptx"]:not([class*="st-key-gen_pptx_"]) button,
+[class*="st-key-download_portfolio_pptx"] button {
+  background: #FF6000 !important;      /* Microsoft PowerPoint orange */
+  border: 1px solid #FF6000 !important;
+  box-shadow: none !important;
+}
+[class*="st-key-dl_word"] button,
+[class*="st-key-gen_word"]:not([class*="st-key-gen_word_"]) button {
+  background: #185ABD !important;      /* Microsoft Word blue, to complete the set */
+  border: 1px solid #185ABD !important;
   box-shadow: none !important;
 }
 [class*="st-key-dl_excel"] button:hover,
-[class*="st-key-dl_pptx"]  button:hover,
-[class*="st-key-dl_word"]  button:hover {
+[class*="st-key-gen_excel"]:not([class*="st-key-gen_excel_"]) button:hover,
+[class*="st-key-download_portfolio_excel"] button:hover,
+[class*="st-key-dl_pptx"] button:hover,
+[class*="st-key-gen_pptx"]:not([class*="st-key-gen_pptx_"]) button:hover,
+[class*="st-key-download_portfolio_pptx"] button:hover,
+[class*="st-key-dl_word"] button:hover,
+[class*="st-key-gen_word"]:not([class*="st-key-gen_word_"]) button:hover {
   filter: brightness(0.92);
 }
-/* White label — high specificity (incl. the markdown container) so it beats the
+/* White label - high specificity (incl. the markdown container) so it beats the
    global slate text rule that otherwise bleeds dark onto the button labels. */
 [class*="st-key-dl_excel"] button, [class*="st-key-dl_excel"] button *,
-[class*="st-key-dl_pptx"]  button, [class*="st-key-dl_pptx"]  button *,
-[class*="st-key-dl_word"]  button, [class*="st-key-dl_word"]  button * {
+[class*="st-key-gen_excel"]:not([class*="st-key-gen_excel_"]) button, [class*="st-key-gen_excel"]:not([class*="st-key-gen_excel_"]) button *,
+[class*="st-key-download_portfolio_excel"] button,
+[class*="st-key-download_portfolio_excel"] button *,
+[class*="st-key-dl_pptx"] button, [class*="st-key-dl_pptx"] button *,
+[class*="st-key-gen_pptx"]:not([class*="st-key-gen_pptx_"]) button, [class*="st-key-gen_pptx"]:not([class*="st-key-gen_pptx_"]) button *,
+[class*="st-key-download_portfolio_pptx"] button,
+[class*="st-key-download_portfolio_pptx"] button *,
+[class*="st-key-dl_word"] button, [class*="st-key-dl_word"] button *,
+[class*="st-key-gen_word"]:not([class*="st-key-gen_word_"]) button, [class*="st-key-gen_word"]:not([class*="st-key-gen_word_"]) button * {
   color: #ffffff !important;
-  fill:  #ffffff !important;
 }
-
 /* ── Valuation Lens: header, controls and fact panel ──
    Dense by design. The previous panel used an airy label/value stack with a
    divider under every row, which spent vertical space on rules instead of on

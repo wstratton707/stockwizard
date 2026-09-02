@@ -496,8 +496,13 @@ elif not DEV_MODE_FREE and not st.session_state.get("is_pro"):
 # built portfolio) survives — while ?page= keeps the URL shareable.
 # "terms" and "privacy" are routable but deliberately absent from the navbar —
 # they are reached from the footer strip that renders on every page.
-_PAGES = ("home", "analysis", "news", "builder", "portfolios",
+_PAGES = ("home", "analysis", "research", "builder", "portfolios",
           "terms", "privacy")
+# Old links keep working. The page was called "News" until it grew SEC filings
+# and financial statements above the feed, at which point the name described
+# only the thing at the bottom of it. Anything already pointing at ?page=news -
+# a bookmark, a shared link, an exported workbook - still lands correctly.
+_PAGE_ALIASES = {"news": "research"}
 # The current page lives in session state, seeded from the URL on first load.
 #
 # It used to be read straight from st.query_params here, at the top, while the
@@ -513,10 +518,13 @@ _PAGES = ("home", "analysis", "news", "builder", "portfolios",
 # dispatch at the bottom of this file see it in the SAME run: one execution, no
 # teardown. The URL is still written so links stay shareable.
 if "_page" not in st.session_state:
-    st.session_state["_page"] = st.query_params.get("page", "home")
+    _requested = st.query_params.get("page", "home")
+    st.session_state["_page"] = _PAGE_ALIASES.get(_requested, _requested)
 _page = st.session_state["_page"]
+_page = _PAGE_ALIASES.get(_page, _page)
 if _page not in _PAGES:
-    _page = st.session_state["_page"] = "home"
+    _page = "home"
+st.session_state["_page"] = _page
 
 
 def _goto(pg, rerun=False):
@@ -646,7 +654,7 @@ with st.container(key="topnav"):
         '<span class="topnav-word">Quant<b>Wizard</b></span></div>',
         unsafe_allow_html=True)
     for _i, (_lbl, _pg) in enumerate(
-            [("Home", "home"), ("Analysis", "analysis"), ("News", "news"),
+            [("Home", "home"), ("Analysis", "analysis"), ("Research", "research"),
              ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=2):
         # Every tab renders unstyled. Which one is active cannot be known while
         # this loop runs — the click that decides it happens inside the loop —
@@ -945,34 +953,11 @@ if _page == "home":
     if _hc[1].button("Build a portfolio", use_container_width=True, key="cta_build"):
         _goto("builder", rerun=True)
 
-    st.markdown("""
-    <div class="guide-panel">
-      <div class="guide-header">Quick start</div>
-      <div class="guide-grid">
-        <div class="guide-card">
-          <span class="material-symbols-outlined">query_stats</span>
-          <div>
-            <strong>Start with analysis</strong>
-            <p>Check any ticker, review the technicals and fundamentals, and export a polished report.</p>
-          </div>
-        </div>
-        <div class="guide-card">
-          <span class="material-symbols-outlined">pie_chart</span>
-          <div>
-            <strong>Build your first portfolio</strong>
-            <p>Pick a balanced starting point, then refine allocations and risk settings in a few steps.</p>
-          </div>
-        </div>
-        <div class="guide-card">
-          <span class="material-symbols-outlined">account_balance_wallet</span>
-          <div>
-            <strong>Track what matters</strong>
-            <p>Monitor forward performance against the S&amp;P 500 and keep your portfolio ideas organized.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Quick start lived here: three cards reading "Start with analysis",
+    # "Build your first portfolio" and "Track what matters". "What you can do"
+    # below says the same three things about the same three products, with
+    # buttons that actually go there — so the page introduced itself twice
+    # before making any case for itself. The version with the CTAs survives.
 
     # ── Live ticker tape ──────────────────────────────────────────────────────
     _tape_items = _cached_tape(POLYGON_API_KEY)
@@ -3789,7 +3774,7 @@ color:var(--muted);background:var(--surface2)}
 # ═════════════════════════════════════════════════════════════════════════════
 # NEWS — market-wide pulse + per-ticker research
 # ═════════════════════════════════════════════════════════════════════════════
-elif _page == "news":
+elif _page == "research":
     # The ticker search leads. It was underneath a twenty-story market feed, so
     # the page's primary action - look up one company - sat below a screen and a
     # half of something else. Market news still follows, and is what the page

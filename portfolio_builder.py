@@ -2408,7 +2408,7 @@ def _section_export():
                 data=st.session_state[_K_EXCEL],
                 file_name=f"QuantWizard_Portfolio_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True, type="primary", key="download_portfolio",
+                use_container_width=True, type="primary", key="download_portfolio_excel",
             )
     with _dl_col2:
         if _exp_ok and _K_PPTX in st.session_state:
