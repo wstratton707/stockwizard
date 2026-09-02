@@ -1361,7 +1361,10 @@ elif _page == "analysis":
             _m1, _m2, _m3 = st.columns(3)
             do_mc     = _m1.checkbox("Price Forecast",    value=True)
             do_sector = _m2.checkbox("Sector Comparison", value=True)
-            do_news   = _m3.checkbox("News Headlines",    value=True)
+            do_news   = _m3.checkbox("News Headlines",    value=True,
+                                     help="Includes recent headlines in the "
+                                          "exported report. Read them on the "
+                                          "Research page.")
 
             # Off by default: the standard run fetches HISTORY_YEARS and reports
             # risk over METRICS_YEARS, so nobody has to pick a lookback to get a
@@ -3662,28 +3665,14 @@ color:var(--muted);background:var(--surface2)}
                 with _cm_mid:
                     st.plotly_chart(fig_corr, use_container_width=True)
 
-            if not is_crypto:
-                st.markdown(f'<div class="section-header"'
-                            f'{_sec_id("sec-news", "News & Research")}>News &amp; Research '
-                            '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
-                            'text-transform:none;font-size:0.7rem">· multi-source, theme-tagged'
-                            ', AI-briefed</span></div>', unsafe_allow_html=True)
-                _render_stock_news(ticker_input, company_details.get("Name"))
-            elif news_list:
-                st.markdown(f'<div class="section-header"'
-                            f'{_sec_id("sec-news", "Recent News")}>Recent News</div>',
-                            unsafe_allow_html=True)
-                for item in news_list[:8]:
-                    st.markdown(f"""
-                    <div style="padding:0.6rem 0;border-bottom:1px solid #e2e8f0">
-                        <div style="font-size:0.82rem;font-weight:500">
-                            <a href="{item['URL']}" target="_blank"
-                               style="text-decoration:none;color:#0f172a">{item['Headline']}</a>
-                        </div>
-                        <div style="font-size:0.72rem;color:#6b7a8d;margin-top:2px">
-                            {item['Publisher']} &nbsp;·&nbsp; {item['Date']}
-                        </div>
-                    </div>""", unsafe_allow_html=True)
+            # News moved to the Research page, which now leads with SEC
+            # filings and financial statements and is where a reader goes to
+            # ask what is happening to a company. Showing the same feed here
+            # meant two pages carrying it, which is the duplication just
+            # removed from Home. `news_list` is still fetched for the
+            # EXPORTED report: a standalone research document should carry
+            # the headlines it was written against, even though the page
+            # sends you elsewhere to read them.
 
             if peer_df is not None and not peer_df.empty:
                 st.markdown(f'<div class="section-header"'
