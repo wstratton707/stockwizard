@@ -1947,3 +1947,128 @@ section[data-testid="stMain"], .stMain { scroll-behavior: smooth; }
   border-color:var(--red-border) !important;
   padding-left:0.75rem !important;
 }
+
+/* ── Results state: the search collapses, the tabs become the landmark ──────
+   Measured before this change, on a 1440x900 viewport with MSFT loaded: the
+   full-dress input panel (180px), the Advanced expander (105px) and an export
+   block that sat *above* the results (185px) pushed the section tab bar to
+   y=1276 - 436px below the fold. The five sections were invisible on arrival
+   and the first thing after a search was more form.
+
+   Three moves fix it: the export block now renders after the content (it was
+   always mirrored at the bottom, so nothing was lost), the plain-English
+   summary moved inside Overview where it belongs, and the panel below shrinks
+   to a single line once a ticker has been run. */
+
+/* The panel keeps its key so its ~40 existing rules still apply; .ai-compact is
+   a zero-height marker the app emits only in the results state. */
+.st-key-analysis-inputs .ai-compact { height: 0; overflow: hidden; }
+
+.st-key-analysis-inputs:has(.ai-compact) {
+  margin-bottom: 0.55rem;
+}
+/* The field label and the strapline are empty-state copy: with results on the
+   screen, the page is its own explanation. */
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stCaptionContainer"] {
+  display: none;
+}
+/* The ticker keeps its monospaced treatment but stops being a hero field. */
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stTextInput"]:first-of-type input {
+  font-size: 1rem;
+  padding: 0.44rem 0.8rem;
+  letter-spacing: 0.06em;
+}
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stHorizontalBlock"] {
+  gap: 0.5rem;
+}
+/* Advanced options drops to a quiet inline link rather than a panelled card. */
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stExpander"] details {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+.st-key-analysis-inputs:has(.ai-compact) summary {
+  padding: 0.2rem 0 !important;
+  background: transparent !important;
+  /* The panelled state draws its navy header's blue edge with an inset
+     box-shadow, not a border - clearing the background alone left a 2px rule
+     hanging under "Advanced options" with nothing above it. */
+  box-shadow: none !important;
+}
+.st-key-analysis-inputs:has(.ai-compact) summary p {
+  font-size: 0.72rem !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text2) !important;
+}
+
+/* ── The section rail ───────────────────────────────────────────────────────
+   Streamlit's segmented_control ships as a rounded pill group, which reads as a
+   filter chip set - something optional you might not press. These are the five
+   views of the page, so they are drawn as an editorial tab rail: a full-width
+   rule, the active section carrying ink and a 2px underline sitting on it.
+
+   Pinned under the chrome (--chrome-h) so the rail stays on screen while the
+   reader scrolls a long section and can switch without scrolling back. */
+/* The sticky goes on Streamlit's layout wrapper, NOT on the keyed container
+   inside it. A sticky box can only travel inside its containing block, and the
+   wrapper Streamlit puts around a container is only as tall as the container
+   itself - measured at 60px here, so the rail unstuck almost immediately and
+   scrolled away with it. The wrapper's own parent is the page's vertical block
+   (2772px), which is the travel the rail needs. */
+[data-testid="stLayoutWrapper"]:has(> .st-key-analysis-tabs) {
+  position: sticky;
+  top: calc(var(--chrome-h) - 4px);
+  z-index: 50;
+  background: var(--bg);
+}
+.st-key-analysis-tabs {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  margin: 0.2rem 0 1.15rem;
+  padding-top: 0.35rem;
+}
+.st-key-analysis-tabs [data-baseweb="button-group"] {
+  gap: 0.35rem;
+  background: transparent !important;
+  border: none !important;
+}
+.st-key-analysis-tabs [data-baseweb="button-group"] button {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0.5rem 0.15rem !important;
+  margin: 0 0.85rem 0 0 !important;
+  font-family: var(--font-sans);
+  font-size: 0.82rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text2) !important;
+  opacity: 0.62;
+  border-bottom: 2px solid transparent !important;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+.st-key-analysis-tabs [data-baseweb="button-group"] button:hover {
+  opacity: 1;
+  color: var(--brand-1) !important;
+}
+/* Streamlit marks the selected item with its own test id, not an ARIA state:
+   inspected in 1.55 the active button carries
+   data-testid="stBaseButton-segmented_controlActive" while aria-checked is
+   absent entirely. The emotion class beside it (st-emotion-cache-*) is a build
+   hash and must not be selected on. */
+.st-key-analysis-tabs button[data-testid="stBaseButton-segmented_controlActive"] {
+  opacity: 1;
+  color: var(--brand-1) !important;
+  border-bottom: 2px solid var(--accent) !important;
+}
+@media (max-width: 640px) {
+  [data-testid="stLayoutWrapper"]:has(> .st-key-analysis-tabs) { position: static; }
+  .st-key-analysis-tabs [data-baseweb="button-group"] { flex-wrap: wrap; }
+  .st-key-analysis-tabs [data-baseweb="button-group"] button {
+    font-size: 0.74rem !important;
+    margin-right: 0.6rem !important;
+  }
+}

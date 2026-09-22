@@ -1390,36 +1390,64 @@ elif _page == "analysis":
     #     single-stock Monte Carlo allocates three unbatched arrays of
     #     days x sims, so the slider's top end was a memory footgun on a box that
     #     has hit its ceiling twice this month. Fixed at the defaults they had.
+    # ?ticker=MSFT prefills and runs the analysis, so a link can point at a
+    # specific name. This is what makes the ticker links inside the exported
+    # workbooks land on that company's page instead of a blank form. Read before
+    # the container opens because the panel's whole shape depends on it.
+    _qt = (st.query_params.get("ticker") or "").strip().upper()
+    if _qt and not st.session_state.get("analysis_ticker"):
+        st.session_state["analysis_ticker"] = _qt
+        st.session_state["analysis_ran"] = True
+
+    # Once a ticker has been run the panel has done its job, so it collapses to
+    # one line and the data starts at the top of the screen. Measured before
+    # this: the full-dress panel, the Advanced expander and the export block put
+    # the tab bar at y=1276 on a 900px viewport - 436px below the fold, so the
+    # five sections were invisible on arrival and the first thing after a search
+    # was more form.
+    _compact = bool(st.session_state.get("analysis_ran")
+                    and (st.session_state.get("analysis_ticker") or "").strip())
+
+    # The key stays "analysis-inputs" in both states: styles.css hangs ~40 rules
+    # off .st-key-analysis-inputs (the input, the expander, the field label) and
+    # a second key would match none of them. The compact state is flagged with a
+    # zero-height marker instead, selected via :has().
     _inputs_box = st.container(key="analysis-inputs")
     with _inputs_box:
+        if _compact:
+            st.markdown('<div class="ai-compact"></div>', unsafe_allow_html=True)
         bar_size = "day"
         _today = datetime.today().date()
 
-        # ?ticker=MSFT prefills and runs the analysis, so a link can point at a
-        # specific name. This is what makes the ticker links inside the exported
-        # workbooks land on that company's page instead of a blank form.
-        _qt = (st.query_params.get("ticker") or "").strip().upper()
-        if _qt and not st.session_state.get("analysis_ticker"):
-            st.session_state["analysis_ticker"] = _qt
-            st.session_state["analysis_ran"] = True
-
-        st.markdown('<div class="field-label">Ticker</div>', unsafe_allow_html=True)
         # Pressing Enter runs the analysis just like the button does (see the
         # `not run_btn and not ticker_input` landing-page test below).
-        ticker_input = st.text_input(
-            "", placeholder="Enter a ticker — e.g. AAPL, SPY, BTC",
+        _tick_kw = dict(
+            placeholder="Enter a ticker — e.g. AAPL, SPY, BTC",
             key="analysis_ticker",
             on_change=lambda: st.session_state.update(
                 analysis_ran=bool(st.session_state.get("analysis_ticker", "").strip())),
-            label_visibility="collapsed"
-        ).strip().upper()
-
-        run_btn = st.button(
-            "Run Analysis", type="primary", use_container_width=True,
-            on_click=lambda: st.session_state.update(analysis_ran=True))
-
-        st.caption("Financial analysis, valuation, peer comparison, risk metrics, "
-                   "technicals and a price forecast.")
+            label_visibility="collapsed",
+        )
+        if _compact:
+            # Same widget key in both branches, so the value survives the switch
+            # from the empty state to the results state.
+            _c_field, _c_go = st.columns([8, 1], vertical_alignment="bottom")
+            with _c_field:
+                ticker_input = st.text_input("", **_tick_kw).strip().upper()
+            with _c_go:
+                run_btn = st.button(
+                    "Search", type="secondary", use_container_width=True,
+                    on_click=lambda: st.session_state.update(analysis_ran=True))
+        else:
+            st.markdown('<div class="field-label">Ticker</div>', unsafe_allow_html=True)
+            ticker_input = st.text_input("", **_tick_kw).strip().upper()
+            run_btn = st.button(
+                "Run Analysis", type="primary", use_container_width=True,
+                on_click=lambda: st.session_state.update(analysis_ran=True))
+            # Empty-state copy only: once there are results on screen, the page
+            # is the explanation.
+            st.caption("Financial analysis, valuation, peer comparison, risk metrics, "
+                       "technicals and a price forecast.")
 
         # ── Advanced options ─────────────────────────────────────────
         # Only things that cost a network call or genuinely change the answer.
@@ -2085,8 +2113,6 @@ elif _page == "analysis":
                             st.caption(f"{_name} export isn’t available.")
                 render_quota_note(_user)
 
-            _stock_exports("top")
-            st.markdown("---")
 
             # ── Stock Hero Panel ──────────────────────────────────────────────
             # One panel: identity (ticker + name + tags), big price + change,
@@ -2284,23 +2310,6 @@ elif _page == "analysis":
                         <div class="metric-value {cls}">{value}</div>
                     </div>""", unsafe_allow_html=True)
 
-            # ── What The Data Shows (summary up top) ──────────────────────────
-            # Surface the plain-English readout here instead of only at the very
-            # bottom. It describes what the numbers did — deliberately not what to
-            # do about them; this platform states findings, it does not advise.
-            if summary_text:
-                st.markdown(
-                    f'<div style="background:linear-gradient(135deg,var(--brand-1) 0%,var(--brand-2) 100%);'
-                    f'border:1px solid rgba(59,130,246,0.3);border-radius:12px;'
-                    f'padding:1.2rem 1.5rem;margin:1.4rem 0 0.4rem;box-shadow:0 4px 16px rgba(15,23,42,0.09)">'
-                    f'<div style="font-size:0.66rem;font-weight:700;letter-spacing:1.2px;'
-                    f'text-transform:uppercase;color:#60a5fa;margin-bottom:0.5rem;'
-                    f'display:flex;align-items:center;gap:0.4rem">'
-                    f'<span class="material-symbols-outlined" style="font-size:1rem">lightbulb</span> What The Data Shows</div>'
-                    f'<div style="color:#cbd5e1;font-size:0.9rem;line-height:1.75;'
-                    f'font-family:var(--font-sans)">{summary_text}</div></div>',
-                    unsafe_allow_html=True)
-
             # ── Sections ─────────────────────────────────────────────────────
             # One report became five views. The page rendered every section on
             # every run - a cold pass measured 8.1s, of which peers alone was
@@ -2315,9 +2324,13 @@ elif _page == "analysis":
             _atab = st.session_state.get("analysis_tab", _ATABS[0])
             if _atab not in _ATABS:
                 _atab = _ATABS[0]
-            _picked = st.segmented_control(
-                "Section", _ATABS, default=_atab, key="analysis_tab_bar",
-                label_visibility="collapsed")
+            # Wrapped in a keyed container so styles.css can turn Streamlit's
+            # pill group into a ruled tab rail and pin it under the chrome. A
+            # widget key alone emits no CSS class here; only containers do.
+            with st.container(key="analysis-tabs"):
+                _picked = st.segmented_control(
+                    "Section", _ATABS, default=_atab, key="analysis_tab_bar",
+                    label_visibility="collapsed")
             # Clicking the active option deselects it; treat that as "stay".
             _atab = st.session_state["analysis_tab"] = _picked or _atab
 
@@ -2326,6 +2339,26 @@ elif _page == "analysis":
 
 
             if _show("Overview"):
+
+                # The plain-English readout leads the Overview. It used to sit
+                # above the tab bar, where its 203px pushed the tabs off-screen;
+                # it is a finding, not a page header, so it belongs in the tab.
+                # ── What The Data Shows (summary up top) ──────────────────────────
+                # Surface the plain-English readout here instead of only at the very
+                # bottom. It describes what the numbers did — deliberately not what to
+                # do about them; this platform states findings, it does not advise.
+                if summary_text:
+                    st.markdown(
+                        f'<div style="background:linear-gradient(135deg,var(--brand-1) 0%,var(--brand-2) 100%);'
+                        f'border:1px solid rgba(59,130,246,0.3);border-radius:12px;'
+                        f'padding:1.2rem 1.5rem;margin:1.4rem 0 0.4rem;box-shadow:0 4px 16px rgba(15,23,42,0.09)">'
+                        f'<div style="font-size:0.66rem;font-weight:700;letter-spacing:1.2px;'
+                        f'text-transform:uppercase;color:#60a5fa;margin-bottom:0.5rem;'
+                        f'display:flex;align-items:center;gap:0.4rem">'
+                        f'<span class="material-symbols-outlined" style="font-size:1rem">lightbulb</span> What The Data Shows</div>'
+                        f'<div style="color:#cbd5e1;font-size:0.9rem;line-height:1.75;'
+                        f'font-family:var(--font-sans)">{summary_text}</div></div>',
+                        unsafe_allow_html=True)
 
                 # ── Analyst View (Finnhub: consensus + earnings surprises) ────────
                 if not is_crypto:
