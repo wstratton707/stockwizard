@@ -696,6 +696,11 @@ def _goto(pg, rerun=False):
     """
     st.session_state["_page"] = pg
     st.query_params["page"] = pg
+    # The ticker only means something on Analysis. Left in place it produced
+    # links like ?page=home&ticker=AAPL - a Home page that says nothing about
+    # AAPL, shared under a URL that implies it does.
+    if pg != "analysis" and "ticker" in st.query_params:
+        del st.query_params["ticker"]
     if rerun:
         st.rerun()
 
@@ -808,7 +813,9 @@ with st.container(key="topnav"):
     # Column 1 was an empty spacer; it now holds the ticker search, so a stock
     # can be looked up from any page the way Yahoo and Seeking Alpha put search
     # in the header. The brand and the two long links give up the width.
-    _nc = st.columns([1.9, 2.1, 0.95, 1.25, 1.3, 1.8, 1.7, 1.5],
+    # Search sits at the right beside Sign in, where finance sites put it, so
+    # the logo gets room to breathe instead of a field jammed against it.
+    _nc = st.columns([1.9, 0.95, 1.2, 1.2, 1.65, 1.6, 2.1, 1.15],
                      vertical_alignment="center")
     _brand_mark = (
         f'<img class="topnav-mark-img" src="data:image/png;base64,{_MARK_B64}" alt="QuantWizard">'
@@ -833,13 +840,13 @@ with st.container(key="topnav"):
         _goto("analysis")
         st.query_params["ticker"] = _v
 
-    with _nc[1]:
+    with _nc[6]:
         st.text_input("Search a stock by ticker", key="nav_search",
-                      placeholder="Search a stock, e.g. AAPL",
+                      placeholder="Ticker, e.g. AAPL",
                       label_visibility="collapsed", on_change=_nav_search_go)
     for _i, (_lbl, _pg) in enumerate(
             [("Home", "home"), ("Analysis", "analysis"), ("Research", "research"),
-             ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=2):
+             ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=1):
         # Every tab renders unstyled. Which one is active cannot be known while
         # this loop runs — the click that decides it happens inside the loop —
         # so the highlight is applied by CSS immediately afterwards instead.
@@ -853,13 +860,18 @@ with st.container(key="topnav"):
 # Re-read after the navbar: if a tab was just clicked this is the new page, and
 # the dispatch at the bottom of this file renders it in this same run.
 _page = st.session_state["_page"]
+if _page != "analysis" and "ticker" in st.query_params:
+    del st.query_params["ticker"]
 
 # Paint the active tab. Mirrors the `stBaseButton-primary` rule in styles.css,
 # which no longer applies now that every nav button is tertiary.
 st.markdown(
+    # An underline, not a filled box: the box made the active tab look like the
+    # Sign in button beside it, so navigation and action read as one thing.
     f"<style>.st-key-topnav .st-key-nav_{_page} button{{"
-    f"background:rgba(56,189,248,0.16)!important;"
-    f"border:1px solid rgba(56,189,248,0.32)!important}}</style>",
+    f"background:transparent!important;border:1px solid transparent!important;"
+    f"box-shadow:inset 0 -2px 0 #38bdf8!important}}"
+    f".st-key-topnav .st-key-nav_{_page} button p{{font-weight:600!important}}</style>",
     unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -1258,30 +1270,69 @@ if _page == "home":
     # third clause of a three-part sentence ("...then export a report"), which
     # framed the thing we actually charge for as an afterthought of the thing
     # that is free.
-    st.markdown("""
-    <div class="home-hero">
-      <span class="home-hero-badge">Institutional tools · retail price</span>
-      <h1 class="home-hero-title">A full equity research report —<br>on any stock, in 30 seconds.</h1>
-      <p class="home-hero-sub">Valuation, Monte Carlo, fundamentals, peers and risk — exported to a
-      polished <b>Excel</b> workbook, <b>PowerPoint</b> deck or <b>Word</b> doc. The work that takes an
-      analyst an afternoon. Stock analysis and portfolio tools included.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Two columns: the pitch and the core action on the left, the product on
+    # the right. A design review found the right half of the first screen empty
+    # while the pitch was "polished output" - so the output is shown, not
+    # described: the Excel dashboard behind, the valuation chart in front, both
+    # real renders of the product (static/hero_*.webp, ~55 KB together).
+    #
+    # The main action is a ticker field, not a button that leads to one. Typing
+    # a symbol here and pressing Enter lands on that stock's analysis.
+    def _hero_go():
+        _v = re.sub(r"[^A-Za-z0-9.^=-]", "",
+                    st.session_state.get("hero_ticker") or "").upper()
+        st.session_state["hero_ticker"] = ""
+        if _v:
+            st.session_state["analysis_ticker"] = _v
+            st.session_state["analysis_ran"] = True
+        _goto("analysis")
+        if _v:
+            st.query_params["ticker"] = _v
 
-    if _sm:
-        from icons import icon as _icon
+    _hero_l, _hero_r = st.columns([1.1, 1], gap="large", vertical_alignment="center")
+    with _hero_l:
         st.markdown(
-            f'<a class="sample-dl sample-dl-hero" href="app/static/{_sm["file"]}" download>'
-            f'{_icon("download", 17)}'
-            f'<span><b>See a real one — {_sm["ticker"]} research report</b>'
-            f'<span class="sample-dl-sub">Excel · {_sm["period"]} · {_sm["_size"]} · '
-            f'generated {_sm["_date"]}</span></span></a>', unsafe_allow_html=True)
-
-    _hc = st.columns([1.1, 1.1, 2.8])
-    if _hc[0].button("Analyze a stock", type="primary", use_container_width=True, key="cta_analyze"):
-        _goto("analysis", rerun=True)
-    if _hc[1].button("Build a portfolio", use_container_width=True, key="cta_build"):
-        _goto("builder", rerun=True)
+            '<div class="home-hero">'
+            '<span class="home-hero-badge">Institutional-grade research · Free to try</span>'
+            '<h1 class="home-hero-title">A full equity research report on any stock, '
+            'in&nbsp;30&nbsp;seconds.</h1>'
+            '<p class="home-hero-sub">Valuation, Monte Carlo, fundamentals, peers and risk '
+            '— exported to a polished <b>Excel</b> workbook, <b>PowerPoint</b> deck or '
+            '<b>Word</b> doc. The work that takes an analyst an afternoon.</p>'
+            '</div>', unsafe_allow_html=True)
+        with st.container(key="hero-search"):
+            _hs1, _hs2 = st.columns([3, 1.4], vertical_alignment="bottom")
+            with _hs1:
+                st.text_input("Ticker", key="hero_ticker",
+                              placeholder="Enter a ticker, e.g. AAPL",
+                              label_visibility="collapsed", on_change=_hero_go)
+            with _hs2:
+                st.button("Get the report", type="primary", use_container_width=True,
+                          key="cta_analyze", on_click=_hero_go)
+        if st.button("or build a portfolio →", key="cta_build", type="tertiary"):
+            _goto("builder", rerun=True)
+        st.markdown(
+            '<div class="home-trust">Built on SEC EDGAR filings and market data from '
+            'Polygon and Yahoo Finance. Research, not investment advice.</div>',
+            unsafe_allow_html=True)
+        if _sm:
+            from icons import icon as _icon
+            _per = {"1Y": "1-year", "3Y": "3-year", "5Y": "5-year",
+                    "10Y": "10-year"}.get(str(_sm.get("period")), _sm.get("period"))
+            st.markdown(
+                f'<a class="sample-dl sample-dl-hero" href="app/static/{_sm["file"]}" download>'
+                f'{_icon("download", 17)}'
+                f'<span><b>Download a real one: {_sm["ticker"]} research report</b>'
+                f'<span class="sample-dl-sub">Excel · {_per} history · {_sm["_size"]} · '
+                f'generated {_sm["_date"]}</span></span></a>', unsafe_allow_html=True)
+    with _hero_r:
+        st.markdown(
+            '<div class="hero-shot">'
+            '<img class="hero-shot-back" src="app/static/hero_excel.webp" '
+            'alt="The Excel research dashboard QuantWizard generates">'
+            '<img class="hero-shot-front" src="app/static/hero_chart.webp" '
+            'alt="Price against earnings-justified fair value, with the annual table">'
+            '</div>', unsafe_allow_html=True)
 
     # Quick start lived here: three cards reading "Start with analysis",
     # "Build your first portfolio" and "Track what matters". "What you can do"

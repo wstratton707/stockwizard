@@ -2440,3 +2440,101 @@ html, body, .stApp, .stApp * { font-variant-numeric: tabular-nums; }
   .st-key-nav_search input { font-size: 0.78rem !important; padding-left: 1.9rem !important;
                              background-position: 0.6rem 50% !important; }
 }
+
+
+/* ── Home hero: pitch + search on the left, the product on the right ────────── */
+.st-key-hero-search [data-baseweb="input"],
+.st-key-hero-search [data-baseweb="base-input"] { background: transparent !important; border: none !important; }
+.st-key-hero-search input {
+  height: 50px !important; font-size: 1.05rem !important; font-weight: 500;
+  border: 1.5px solid var(--border2) !important; border-radius: 10px !important;
+  background-color: #ffffff !important; color: var(--brand-1) !important;
+  padding-left: 2.5rem !important; letter-spacing: 0.02em;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.3' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><line x1='16.5' y1='16.5' x2='21' y2='21'/></svg>") !important;
+  background-repeat: no-repeat !important; background-position: 0.85rem 50% !important;
+}
+.st-key-hero-search input:focus {
+  border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(29,78,216,0.15) !important;
+}
+.st-key-hero-search [data-testid="InputInstructions"] { display: none; }
+.st-key-hero-search button { height: 50px !important; border-radius: 10px !important; font-weight: 600 !important; }
+.st-key-cta_build button { padding-left: 0 !important; }
+.st-key-cta_build button p { color: var(--accent) !important; font-weight: 600; }
+.home-trust { font-size: 0.8rem; color: var(--text3); margin: 0.1rem 0 0.9rem; line-height: 1.5; }
+
+/* Product preview: two real renders, stacked like sheets on a desk. */
+.hero-shot { position: relative; height: 440px; }
+.hero-shot img {
+  position: absolute; background: #ffffff; border-radius: 10px;
+  border: 1px solid var(--border);
+  box-shadow: 0 22px 44px -18px rgba(12,30,53,0.38), 0 3px 8px rgba(12,30,53,0.10);
+}
+.hero-shot-back  { width: 74%; top: 0; right: 0; }
+.hero-shot-front { width: 90%; left: 0; bottom: 0; }
+@media (max-width: 900px) {
+  .hero-shot { height: auto; margin-top: 1rem; }
+  .hero-shot-back { display: none; }
+  .hero-shot-front { position: static; width: 100%; }
+}
+
+/* ── Nav: quieter links, a distinct Sign in, a divider under the bar ──────────
+   The links were set as heavy as body copy and their boxes filled the bar, so
+   it read loud and tight. A size down and a lighter weight give the logo the
+   visual lead; the active page is an underline (painted inline, see app.py). */
+.st-key-topnav button p,
+.st-key-topnav button [data-testid="stMarkdownContainer"] p {
+  font-size: 0.86rem !important; font-weight: 500 !important;
+}
+.st-key-topnav button { min-height: 36px !important; }
+/* The pressed state used to be the same filled box as the old active tab;
+   it is now the same underline, so a click and its result look alike. */
+.st-key-topnav button:not([data-testid*="primary"]):active,
+.st-key-topnav button:not([data-testid*="primary"]):focus,
+.st-key-topnav button:not([data-testid*="primary"]):hover:active,
+.st-key-topnav button:not([data-testid*="primary"]):hover:focus {
+  background: transparent !important; border: 1px solid transparent !important;
+  box-shadow: inset 0 -2px 0 #38bdf8 !important;
+}
+/* Sign in is an action, not a page: a solid button. :not(#_) lifts the
+   specificity above every generic nav-button rule, pressed states included. */
+.st-key-topnav :is(.st-key-nav_signin, .st-key-nav_signin_unconfigured) button:not(#_),
+.st-key-topnav :is(.st-key-nav_signin, .st-key-nav_signin_unconfigured) button:not(#_):is(:hover, :focus, :active) {
+  background: #2563eb !important; border: 1px solid #2563eb !important;
+  border-radius: 8px !important; box-shadow: none !important;
+}
+.st-key-topnav :is(.st-key-nav_signin, .st-key-nav_signin_unconfigured) button:not(#_):hover {
+  background: #1d4ed8 !important;
+}
+.st-key-topnav :is(.st-key-nav_signin, .st-key-nav_signin_unconfigured) button:not(#_) p {
+  font-weight: 600 !important; color: #ffffff !important;
+}
+/* Nav search: still a clear field, but lighter than pure white so it no longer
+   out-shouts the logo, and the same height as the nav items. */
+.st-key-nav_search input {
+  background-color: #eef3f9 !important; border-color: #eef3f9 !important;
+  height: 36px !important; box-shadow: none !important;
+}
+/* Header and tape were two near-identical navies with no edge between them,
+   reading as one heavy block. A hairline separates them. */
+.ticker-tape-wrap { border-top: 1px solid rgba(255,255,255,0.10); }
+
+/* Mobile: search moved to the right on desktop, which on a phone would push it
+   off the end of the swipeable row. Pull it to the front there. */
+@media (max-width: 640px) {
+  .st-key-topnav [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child { order: -2; }
+  .st-key-topnav [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_search) { order: -1; }
+}
+/* The input is 50px but BaseWeb's wrapper is fixed at 40px with overflow
+   hidden, which sliced off the field's bottom edge. The wrapper grows with it. */
+.st-key-hero-search [data-baseweb="input"],
+.st-key-hero-search [data-baseweb="base-input"] { height: 50px !important; overflow: visible !important; }
+/* Narrow screens: the preview flows in the page instead of stacking. The
+   earlier rule lost on specificity - `.hero-shot img` (0,1,1) outranked
+   `.hero-shot-front` (0,1,0) - so on a phone the chart stayed absolutely
+   positioned against a zero-height box and slid up over the data-source line
+   and the sample download. */
+@media (max-width: 900px) {
+  .hero-shot { height: auto !important; margin-top: 1.25rem; }
+  .hero-shot img.hero-shot-back  { display: none; }
+  .hero-shot img.hero-shot-front { position: static; width: 100%; display: block; }
+}
