@@ -273,7 +273,7 @@ def _render_filings(ticker):
                     <div style="color:#64748b;font-size:0.75rem;line-height:1.5;
                                 margin-bottom:0.5rem">{_f['description']}</div>
                     <div style="color:#94a3b8;font-size:0.72rem;
-                                font-family:'JetBrains Mono',monospace">
+                                font-family:var(--font-data)">
                         Filed {_f['filed']}</div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -1334,7 +1334,7 @@ if _page == "home":
         with col:
             st.markdown(f"""
             <div style="border-top:2px solid #0f2747;padding:0.95rem 1.4rem 0.5rem 0">
-                <div style="font-family:'JetBrains Mono',monospace;font-size:0.76rem;font-weight:600;color:#3b82f6;letter-spacing:0.6px;margin-bottom:0.5rem">0{num}</div>
+                <div style="font-family:var(--font-data);font-size:0.76rem;font-weight:600;color:#3b82f6;letter-spacing:0.6px;margin-bottom:0.5rem">0{num}</div>
                 <div style="font-weight:700;color:#0f172a;font-size:0.9rem;
                             margin-bottom:0.4rem">{title}</div>
                 <div style="color:#64748b;font-size:0.81rem;line-height:1.6">{desc}</div>
@@ -1633,31 +1633,31 @@ elif _page == "analysis":
                         padding-top:1.5rem">
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'JetBrains Mono',monospace">320+</div>
+                                font-family:var(--font-data)">320+</div>
                     <div style="color:#b0c4de;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Stocks Ranked Daily</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'JetBrains Mono',monospace">10Y</div>
+                                font-family:var(--font-data)">10Y</div>
                     <div style="color:#b0c4de;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Price History</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'JetBrains Mono',monospace">1,000</div>
+                                font-family:var(--font-data)">1,000</div>
                     <div style="color:#b0c4de;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Monte Carlo Paths</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'JetBrains Mono',monospace">5</div>
+                                font-family:var(--font-data)">5</div>
                     <div style="color:#b0c4de;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Crash Scenarios</div>
                 </div>
                 <div>
                     <div style="color:#ffffff;font-size:1.5rem;font-weight:700;
-                                font-family:'JetBrains Mono',monospace">Daily</div>
+                                font-family:var(--font-data)">Daily</div>
                     <div style="color:#b0c4de;font-size:0.75rem;text-transform:uppercase;
                                 letter-spacing:0.5px">Market Data</div>
                 </div>
@@ -1683,8 +1683,8 @@ elif _page == "analysis":
                     st.markdown(f"""
                     <div class="mover-card">
                         <span style="font-weight:700;color:#0f172a;font-size:0.88rem">{g['Ticker']}</span>
-                        <span style="font-family:'JetBrains Mono',monospace;font-size:0.83rem;color:#6b7a8d">{g['Price']}</span>
-                        <span style="color:#059669;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:0.88rem">{g['Change']}</span>
+                        <span style="font-family:var(--font-data);font-size:0.83rem;color:#6b7a8d">{g['Price']}</span>
+                        <span style="color:#059669;font-family:var(--font-data);font-weight:700;font-size:0.88rem">{g['Change']}</span>
                     </div>""", unsafe_allow_html=True)
             else:
                 st.markdown('<span style="color:#38bdf8;font-size:0.85rem">Market data unavailable right now.</span>', unsafe_allow_html=True)
@@ -1698,8 +1698,8 @@ elif _page == "analysis":
                     st.markdown(f"""
                     <div class="mover-card">
                         <span style="font-weight:700;color:#0f172a;font-size:0.88rem">{l['Ticker']}</span>
-                        <span style="font-family:'JetBrains Mono',monospace;font-size:0.83rem;color:#6b7a8d">{l['Price']}</span>
-                        <span style="color:#dc2626;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:0.88rem">{l['Change']}</span>
+                        <span style="font-family:var(--font-data);font-size:0.83rem;color:#6b7a8d">{l['Price']}</span>
+                        <span style="color:#dc2626;font-family:var(--font-data);font-weight:700;font-size:0.88rem">{l['Change']}</span>
                     </div>""", unsafe_allow_html=True)
             else:
                 st.markdown('<span style="color:#38bdf8;font-size:0.85rem">Market data unavailable right now.</span>', unsafe_allow_html=True)
@@ -2382,12 +2382,12 @@ elif _page == "analysis":
 <div class="stock-hero-stat-sub">Prev close ${_prev_close:,.2f}</div>
 </div>
 <div class="stock-hero-stat">
-<div class="stock-hero-stat-lbl">Day Range</div>
+<div class="stock-hero-stat-lbl">Day range</div>
 <div class="range-bar"><div class="range-bar-marker" style="left:{_day_pct:.1f}%"></div></div>
 <div class="range-bar-labels"><span>${_day_low:,.2f}</span><span>${_day_high:,.2f}</span></div>
 </div>
 <div class="stock-hero-stat">
-<div class="stock-hero-stat-lbl">52-Week Range</div>
+<div class="stock-hero-stat-lbl">52-week range</div>
 <div class="range-bar"><div class="range-bar-marker" style="left:{_w52_pct:.1f}%"></div></div>
 <div class="range-bar-labels"><span>${_w52_low:,.2f}</span><span>${_w52_high:,.2f}</span></div>
 </div>
@@ -2397,7 +2397,7 @@ elif _page == "analysis":
 {_vol_sub}
 </div>
 <div class="stock-hero-stat">
-<div class="stock-hero-stat-lbl">Period Return</div>
+<div class="stock-hero-stat-lbl">Period return</div>
 <div class="stock-hero-stat-val {_period_cls}">{period_ret:+.2f}%</div>
 <div class="stock-hero-stat-sub">{_ret_label}</div>
 </div>
@@ -2532,16 +2532,19 @@ elif _page == "analysis":
                 # bottom. It describes what the numbers did — deliberately not what to
                 # do about them; this platform states findings, it does not advise.
                 if summary_text:
+                    # A light ruled callout, not a navy slab. The dark gradient box
+                    # was the heaviest object on the page and sat above the data
+                    # it summarises, pulling the eye away from the price and the
+                    # chart. The figures are bolded so it can be skimmed the way
+                    # Yahoo's summary is: numbers first, prose around them.
+                    import html as _html
+                    _sum_html = re.sub(
+                        r"(\$[\d,]+(?:\.\d+)?|[+\-]?\d+(?:\.\d+)?%)",
+                        r"<b>\1</b>", _html.escape(summary_text))
                     st.markdown(
-                        f'<div style="background:linear-gradient(135deg,var(--brand-1) 0%,var(--brand-2) 100%);'
-                        f'border:1px solid rgba(59,130,246,0.3);border-radius:12px;'
-                        f'padding:1.2rem 1.5rem;margin:1.4rem 0 0.4rem;box-shadow:0 4px 16px rgba(15,23,42,0.09)">'
-                        f'<div style="font-size:0.66rem;font-weight:700;letter-spacing:1.2px;'
-                        f'text-transform:uppercase;color:#60a5fa;margin-bottom:0.5rem;'
-                        f'display:flex;align-items:center;gap:0.4rem">'
-                        f'<span class="material-symbols-outlined" style="font-size:1rem">lightbulb</span> What The Data Shows</div>'
-                        f'<div style="color:#cbd5e1;font-size:0.9rem;line-height:1.75;'
-                        f'font-family:var(--font-sans)">{summary_text}</div></div>',
+                        f'<div class="data-callout"><div class="data-callout-eyebrow">'
+                        f'What the data shows</div>'
+                        f'<div class="data-callout-body">{_sum_html}</div></div>',
                         unsafe_allow_html=True)
 
                 # ── Analyst View (Finnhub: consensus + earnings surprises) ────────
@@ -2606,7 +2609,7 @@ elif _page == "analysis":
                                     _rows += (f'<div style="display:flex;justify-content:space-between;'
                                               f'padding:0.3rem 0;border-bottom:1px solid #f1f5f9;font-size:0.76rem">'
                                               f'<span style="color:#64748b">{_fmt_month(_e.get("period"))}</span>'
-                                              f'<span style="font-family:\'JetBrains Mono\',monospace;color:#0f172a">'
+                                              f'<span style="color:#0f172a">'
                                               f'${_a:,.2f} vs ${_est:,.2f}</span>'
                                               f'<span style="color:{_col};font-weight:600">{_sps}</span></div>')
                                 if _rows:
@@ -3845,7 +3848,7 @@ color:var(--muted);background:var(--surface2)}
                               <div class="vf-row"><span>Dividend yield</span><b>{_dy_s}</b></div>
                               <div class="vf-group">Valuation</div>
                               <div class="vf-row"><span>Normal P/E</span><span class="vf-pill value">{_npe:g}x</span></div>
-                              <div class="vf-row"><span>Fair value</span><b>{_fair_s}</b></div>
+                              <div class="vf-row"><span>Fair value</span><b class="vf-linked-value">{_fair_s}</b></div>
                               <div class="vf-row"><span>Premium / discount</span><b>{_prem_s}</b></div>
                               <div class="vf-row"><span>Assessment</span><span class="vf-badge {_vcls}">{_verd}</span></div>
                               <div class="vf-group">Company</div>

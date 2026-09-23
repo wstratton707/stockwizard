@@ -659,7 +659,8 @@ def build_valuation_figure(data, years_back=None):
 
     # ── Band 5: fundamentals grid ───────────────────────────────────────────
     _text_row(fig, xyr, [f"FY{str(y)[-2:]}" for y in yrs], 3.5, 3, fs, color.ink_muted)
-    _text_row(fig, xyr, [_fmt(v) for v in data["eps"]], 2.5, 3, fs, color.ink)
+    # EPS is the row the whole chart is built from, so it carries the weight.
+    _text_row(fig, xyr, [f"<b>{_fmt(v)}</b>" for v in data["eps"]], 2.5, 3, fs, color.ink)
     _text_row(fig, xyr, [_fmt_pct(v) for v in data.get("eps_chg") or []], 1.5, 3, fs, color.ink_muted)
     _text_row(fig, xyr, [_fmt(v) for v in data["div"]], 0.5, 3, fs, color.ink)
     for lbl, yv in (("FY", 3.5), ("EPS", 2.5), ("Chg/Yr", 1.5), ("Div", 0.5)):

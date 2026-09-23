@@ -1,16 +1,17 @@
-/* Newsreader (display) + Public Sans (UI) + JetBrains Mono (numerics)
-   + IBM Plex Sans (charts).
-   Deliberately NOT DM Sans or Inter: those are the default fintech-SaaS pairing,
-   and a direct competitor (tradeframe.io) ships the identical DM Sans +
-   JetBrains Mono combination. An editorial serif for display is rare in retail
-   finance and matches what this product actually is — research, not a dashboard.
+/* Two families: Newsreader for display, IBM Plex Sans for everything else.
 
-   IBM Plex Sans carries chart text only. Charts need a face with true tabular
-   figures so digits sit in fixed-width columns — a data grid whose columns
-   shift as values change reads as broken. Every chart previously asked for
-   "DM Sans", which is never loaded here, so they were all silently falling back
-   to the browser default and did not match the surrounding UI. */
-@import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Public+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+   This used to be four - Newsreader, Public Sans for UI text, JetBrains Mono for
+   numbers, IBM Plex Sans for charts - and a design review read the result as
+   unresolved: a serif ticker, monospace prices and sans labels in one header.
+   The serif stays; it is the brand, on the Home headline and every ticker.
+   The monospace goes: it bought column alignment at the cost of a terminal
+   look, and tabular figures give the same alignment in a proportional face.
+   Plex was already the chart face precisely because it has true tabular
+   figures, so the page and its charts now speak one type.
+
+   Deliberately NOT DM Sans or Inter: those are the default fintech-SaaS pairing
+   (tradeframe.io ships DM Sans + JetBrains Mono). */
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap');
 
 /* Professional line-art icons (replaces emoji in custom HTML sections) */
@@ -98,8 +99,8 @@
      display = headlines and titles only. Keep it off labels, data and dense UI:
      a serif at 0.7rem uppercase reads as a mistake, and numbers belong in mono. */
   --font-display: 'Newsreader', Georgia, 'Times New Roman', serif;
-  --font-sans:  'Public Sans', system-ui, -apple-system, sans-serif;
-  --font-data:  'JetBrains Mono', ui-monospace, monospace;
+  --font-sans:  'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-data:  'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   /* Charts and anything column-aligned to them. Must match chart_tokens.font.data
      exactly, or the HTML fact panel and the Plotly grids will disagree. */
   --font-chart: 'IBM Plex Sans', system-ui, sans-serif;
@@ -2207,4 +2208,78 @@ section[data-testid="stMain"], .stMain { scroll-behavior: smooth; }
   .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat-cell:nth-child(3) { border-left: none; }
   .stat-cell:nth-child(n+3) { border-top: 1px solid var(--border); }
+}
+
+
+/* Tabular figures everywhere: prices, ranges and table columns line up digit
+   for digit without a monospace face. */
+html, body, .stApp, .stApp * { font-variant-numeric: tabular-nums; }
+
+
+/* ── Phase 3: one visual system ───────────────────────────────────────────────
+   Caps for section eyebrows only; field labels and tabs in sentence case. When
+   every label is small tracked caps in grey, none of them stands out. */
+.stock-hero-stat-lbl {
+  text-transform: none; letter-spacing: 0; font-size: 0.78rem;
+  font-weight: 500; color: var(--text3); margin-bottom: 0.3rem;
+}
+
+/* The section rail carries the page, so it gets weight and contrast. */
+.st-key-analysis-tabs [data-baseweb="button-group"] button {
+  text-transform: none !important; letter-spacing: 0 !important;
+  font-size: 0.95rem !important; opacity: 0.8;
+}
+
+/* st.tabs (e.g. Valuation / Earnings / Dividends) were a filled blue pill in a
+   bordered card, louder than the period control above them and competing with
+   it. Sub-navigation is now visibly subordinate: an underline, same language as
+   the section rail, one size down. */
+.stTabs [data-baseweb="tab-list"] {
+  background: transparent; border: none; border-radius: 0; box-shadow: none;
+  border-bottom: 1px solid var(--border); padding: 0; gap: 1.4rem;
+}
+.stTabs [data-baseweb="tab"] {
+  border-radius: 0; padding: 0.4rem 0.05rem; font-size: 0.86rem;
+  color: var(--text2); border-bottom: 2px solid transparent !important;
+}
+.stTabs [data-baseweb="tab"]:hover:not([aria-selected="true"]) {
+  background: transparent !important; color: var(--brand-1) !important;
+}
+.stTabs [aria-selected="true"] {
+  background: transparent !important; color: var(--brand-1) !important;
+  box-shadow: none !important; border-bottom: 2px solid var(--accent) !important;
+}
+.stTabs [aria-selected="true"] p,
+.stTabs [aria-selected="true"] [data-testid="stMarkdownContainer"] p {
+  color: var(--brand-1) !important;
+}
+
+/* What the data shows: a ruled callout on the white canvas. */
+.data-callout {
+  border-left: 3px solid var(--accent); background: var(--band);
+  padding: 0.95rem 1.25rem 1rem; margin: 1rem 0 0.5rem; border-radius: 0 6px 6px 0;
+}
+.data-callout-eyebrow {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: 0.4rem;
+}
+.data-callout-body { color: var(--text2); font-size: 0.93rem; line-height: 1.7; }
+.data-callout-body b { color: var(--brand-1); font-weight: 600; }
+
+/* Fair value is drawn as the amber line; the number in the panel is the same
+   amber, so the figure and the line read as one thing. */
+.vf-linked-value { color: #B86A12 !important; }
+
+/* Streamlit sets its own default face (Source Sans) on the markdown container,
+   and everything rendered through st.markdown inherited it - paragraphs, the
+   stat strip, the callout - so the page was quietly mixing a third sans with
+   the one it declares. Measured: 52 paragraphs, 20 spans and every stat-strip
+   cell. Setting the container restores inheritance; :where() keeps specificity
+   at zero, so a class that names its own face (the serif ticker, icon fonts)
+   still wins. */
+[data-testid="stMarkdownContainer"], [data-testid="stCaptionContainer"] {
+  font-family: var(--font-sans);
+}
+[data-testid="stMarkdownContainer"] :where(p, li, a, b, strong, em) {
+  font-family: inherit;
 }
