@@ -72,3 +72,74 @@ def test_partial_first_year_is_labelled(tmp_path):
     assert "partial" in str(first) and "23 Sep" in str(first), first
     assert ws.cell(row=3, column=5).value == "n/m", "a 3-month Sharpe must not be quoted"
     assert "YTD" in str(ws.cell(row=ws.max_row, column=1).value)
+
+
+# ── The Valuation sheet is live end to end ────────────────────────────────────
+
+def _live_workbook():
+    from openpyxl import load_workbook
+    import io as _io
+    from excel_builder import build_excel
+    periods = ["2025-09-27", "2024-09-28", "2023-09-30", "2022-09-24"]
+    fcf = [110e9, 100e9, 90e9, 80e9]
+    fin = {
+        "income_statement": pd.DataFrame(
+            [{"Period": p, "revenues": 400e9, "net_income_loss": 100e9,
+              "operating_income_loss": 120e9, "diluted_earnings_per_share": 6.0}
+             for p in periods]),
+        "balance_sheet": pd.DataFrame(
+            [{"Period": p, "equity": 70e9, "long_term_debt": 90e9, "cash": 70e9}
+             for p in periods]),
+        "cash_flow_statement": pd.DataFrame(
+            [{"Period": p, "net_cash_flow_from_operating_activities": x + 10e9,
+              "capex": 10e9} for p, x in zip(periods, fcf)]),
+        "ttm": {"flows_end": "2025-09-27", "fy_end": "2025-09-27",
+                "balance_end": "2025-09-27", "shares_outstanding": 15e9,
+                "shares_date": "2025-10-17"},
+    }
+    fund = A.compute_fundamentals(fin, market_cap=3000e9, price=200.0)
+    d = A.dcf_valuation(fund, 200.0, beta=1.1)
+    import pytest as _pt
+    with _pt.MonkeyPatch.context() as mp:
+        mp.setattr(D, "fetch_ohlcv", lambda *a, **k: _bars(0))
+        df = D.fetch_stock_data("TEST", "1y", (), "", log=lambda *a, **k: None)
+    buf = build_excel("TEST", df, "1Y", company_details={"Name": "Test"},
+                      fundamentals=fund, dcf=d, summary_text="x")
+    return load_workbook(_io.BytesIO(buf.getvalue())), d
+
+
+def test_sensitivity_grids_are_formulas_not_snapshots():
+    """Editing an input moved every figure on the sheet except the 25 grid
+    cells, which were numbers written at generation."""
+    wb, d = _live_workbook()
+    v = wb["Valuation"]
+    grids = [r for r in range(1, v.max_row + 1)
+             if str(v.cell(row=r, column=1).value or "").startswith("Sensitivity")]
+    assert len(grids) == 2, "WACC x terminal g and WACC x stage-1 g"
+    for r in grids:
+        for i in range(5):
+            for col in range(2, 7):
+                val = v.cell(row=r + 2 + i, column=col).value
+                assert isinstance(val, str) and val.startswith("=") and "SUMPRODUCT" in val
+    assert "sensitivity_growth" in d and len(d["sensitivity_growth"]["grid"]) == 5
+
+
+def test_wacc_is_built_up_and_feeds_the_input():
+    from excel_builder import _VAL_ROWS
+    wb, d = _live_workbook()
+    v = wb["Valuation"]
+    labels = {str(v.cell(row=r, column=1).value): r for r in range(1, 80)}
+    r_out = next(r for k, r in labels.items() if k.startswith("WACC used"))
+    assert v.cell(row=r_out, column=2).value.startswith("=ROUND(MAX(0.05,MIN(0.2,")
+    assert v.cell(row=labels["Discount rate (WACC)"], column=2).value == f"=B{r_out}"
+    assert v.cell(row=_VAL_ROWS["gmkt"], column=1).value.endswith("market-implied")
+
+
+def test_dashboard_links_to_the_live_valuation_cells():
+    wb, _ = _live_workbook()
+    dsh = wb["Dashboard"]
+    vals = {dsh.cell(row=r, column=1).value: dsh.cell(row=r, column=2).value
+            for r in range(1, dsh.max_row + 1)}
+    assert vals["DCF Fair Value / Share"] == "=Valuation!$B$9"
+    assert vals["Upside / Downside"] == "=Valuation!$B$11"
+    assert vals["DCF Verdict"] == "=Valuation!$B$12"

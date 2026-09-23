@@ -213,6 +213,9 @@ def estimate_wacc(fundamentals, beta, rf=None, erp=None, tax_rate=US_STATUTORY_T
         "cost_of_equity": re, "cost_of_debt": rd, "tax_rate": tax_rate,
         "equity_weight": e / v, "debt_weight": d / v,
         "clamped": abs(wacc_clamped - wacc) > 1e-9,
+        # The raw weights' inputs, so the workbook can rebuild the rate as
+        # formulas rather than print it.
+        "market_cap": e, "total_debt": d, "credit_spread": rd - r, "wacc_raw": wacc,
     }
 
 
@@ -941,6 +944,17 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
             row.append(fv)
         sensitivity.append(row)
 
+    # Stage-1 growth x WACC at the base terminal rate: the two inputs a reader
+    # is most likely to argue with, against each other.
+    g_axis = [g_base + d for d in (-0.04, -0.02, 0.0, 0.02, 0.04)]
+    sensitivity_growth = []
+    for w in wacc_axis:
+        row = []
+        for g in g_axis:
+            fv, _ = _fair_value(g, w=w)
+            row.append(fv)
+        sensitivity_growth.append(row)
+
     # Reverse-solve the stage-1 FCF growth the market is pricing in at today's price.
     implied_growth = None
     lo, hi = -0.20, 0.50
@@ -1001,6 +1015,8 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
         "projection": detail["projection"],
         "scenarios": scenarios,
         "sensitivity": {"wacc_axis": wacc_axis, "tg_axis": tg_axis, "grid": sensitivity},
+        "sensitivity_growth": {"wacc_axis": wacc_axis, "growth_axis": g_axis,
+                               "grid": sensitivity_growth},
     }
 
 

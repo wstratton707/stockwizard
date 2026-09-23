@@ -7,6 +7,7 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.formatting.rule import FormulaRule
 from openpyxl.chart import LineChart, BarChart, Reference
 from openpyxl.chart.marker import Marker
 from openpyxl.chart.axis import ChartLines
@@ -818,23 +819,32 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
         verdict, vcolor = (("Undervalued vs DCF", GREEN_OK) if up is not None and up > 0.15 else
                            ("Overvalued vs DCF",  RED_BAD)  if up is not None and up < -0.15 else
                            ("Fairly valued vs DCF", DARK_BLUE))
+        # Linked to the Valuation sheet's live cells rather than copied: edit an
+        # assumption there and the Dashboard follows, instead of contradicting it.
+        def _vlink(key):
+            return f"=Valuation!$B${_VAL_ROWS[key]}"
+
         if imp is not None:
-            kv(row_cursor, "Market-Implied FCF Growth", imp, fmt="0.0%")
+            kv(row_cursor, "Market-Implied FCF Growth (year 1)", _vlink("gmkt"))
+            ws.cell(row=row_cursor, column=2).number_format = "0.0%"
         else:
             kv(row_cursor, "Market-Implied FCF Growth", "Outside solvable range")
         row_cursor += 1
-        kv(row_cursor, "DCF Fair Value / Share", dcf["fair_value"], fmt='"$"#,##0.00')
+        kv(row_cursor, "DCF Fair Value / Share", _vlink("fv"))
+        ws.cell(row=row_cursor, column=2).number_format = '"$"#,##0.00'
         row_cursor += 1
         if up is not None:
-            kv(row_cursor, "Upside / Downside", up, fmt="+0.0%;-0.0%", rag=("gt", 0))
+            kv(row_cursor, "Upside / Downside", _vlink("up"))
+            ws.cell(row=row_cursor, column=2).number_format = "+0.0%;-0.0%"
             row_cursor += 1
         lc = ws.cell(row=row_cursor, column=1, value="DCF Verdict")
-        vc = ws.cell(row=row_cursor, column=2, value=verdict)
+        vc = ws.cell(row=row_cursor, column=2, value=_vlink("verd"))
         lc.font = Font(name="Calibri", size=10)
         vc.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
-        vc.fill = PatternFill("solid", fgColor=vcolor)
+        vc.fill = PatternFill("solid", fgColor=DARK_BLUE)
         vc.alignment = Alignment(horizontal="right")
         lc.border = vc.border = _border()
+        _verdict_colours(ws, f"B{row_cursor}", f"Valuation!$B${_VAL_ROWS['up']}")
         row_cursor += 1
         scn  = dcf.get("scenarios", {})
         bear, bull = scn.get("bear", {}), scn.get("bull", {})
@@ -1757,6 +1767,19 @@ _DCF_NO_MODEL_REASONS = {
 }
 
 
+# Rows on the Valuation sheet other sheets link to. Fixed, so the Dashboard can
+# be written before the Valuation sheet exists and still point at the live cells.
+_VAL_ROWS = {"fv": 9, "px": 10, "up": 11, "verd": 12, "gmkt": 30}
+
+
+def _verdict_colours(ws, cell, up_ref):
+    """Fill a formula verdict cell by its live value, not the value at generation."""
+    for cond, colour in ((f"{up_ref}>0.15", GREEN_OK), (f"{up_ref}<-0.15", RED_BAD)):
+        ws.conditional_formatting.add(cell, FormulaRule(
+            formula=[cond], fill=PatternFill("solid", bgColor=colour),
+            font=Font(color=WHITE, bold=True)))
+
+
 def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
     ws = wb.create_sheet("Valuation")
     ws.sheet_view.showGridLines = False
@@ -1829,31 +1852,51 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
     imp    = dcf.get("market_implied_growth")
 
     # ── Row plan (fixed up front so every formula can reference its inputs) ────
+    # The headline rows are module constants: the Dashboard links to them.
     R_HEAD_SEC = 4
     R_HEAD_BIG = 5                      # merged 5:6
     R_CONC_SEC = 8
-    R_FV, R_PX, R_UP, R_VERD = 9, 10, 11, 12
+    R_FV, R_PX, R_UP, R_VERD = (_VAL_ROWS[k] for k in ("fv", "px", "up", "verd"))
     R_SCN_SEC, R_SCN_HDR = 14, 15
-    R_SCN_BEAR, R_SCN_BASE, R_SCN_BULL, R_SCN_MKT = 16, 17, 18, 19
-    R_IN_SEC = 21
+    R_SCN_BEAR, R_SCN_BASE, R_SCN_BULL, R_SCN_MKT, R_SCN_CHK = 16, 17, 18, 19, 20
+    R_IN_SEC = 22
     (R_W, R_TG, R_YRS, R_FCF0, R_G1,
-     R_GBEAR, R_GBULL, R_ND, R_SH, R_P) = range(22, 32)
-    R_PROJ_SEC, R_PROJ_HDR = 33, 34
-    R_P0 = 35
+     R_GBEAR, R_GBULL, R_GMKT, R_ND, R_SH, R_P) = range(23, 34)
+    assert R_GMKT == _VAL_ROWS["gmkt"]
+    R_WB_SEC = 35
+    _wb = dcf.get("wacc_basis") if isinstance(dcf.get("wacc_basis"), dict) else {}
+    _wb_live = bool(_wb) and not _wb.get("fallback") and _wb.get("beta") is not None \
+        and _wb.get("market_cap") is not None
+    (R_RF, R_BETA, R_BADJ, R_ERP, R_KE, R_SPR, R_KD, R_TAX, R_KDAT,
+     R_E, R_D, R_WE, R_WD, R_WRAW, R_WOUT) = range(36, 51)
+    R_WB_END = R_WOUT if _wb_live else 36
+    R_PROJ_SEC = R_WB_END + 2
+    R_PROJ_HDR = R_PROJ_SEC + 1
+    R_P0 = R_PROJ_HDR + 1
     R_PN = R_P0 + max(n_yr - 1, 0)
     R_BR_SEC = R_PN + 2
     R_PVEXP, R_TV, R_PVTV, R_EV, R_NDB, R_EQ = (R_BR_SEC + i for i in range(1, 7))
     R_SENS_SEC = R_EQ + 2
-    R_SENS_HDR = R_SENS_SEC + 1
-    R_SENS0    = R_SENS_HDR + 1
+    # The market row runs its own projection only when there is a rate to run.
+    _mkt_live = imp is not None
+    # Workings for the two sensitivity grids, beside the projection: one FCF
+    # path per grid column (a path depends on the column's terminal or stage-1
+    # rate, not on the row's discount rate, so five paths cover 25 cells).
+    C_TGW0, C_GW0 = 16, 22               # P..T and V..Z
 
     # ── 1. The headline: what today's price implies ───────────────────────────
     sec(R_HEAD_SEC, "The Headline — What Today's Price Already Assumes")
     ws.merge_cells(f"A{R_HEAD_BIG}:B{R_HEAD_BIG + 1}")
+    # The big number is the AVERAGE along the fade - the figure the sentence
+    # beside it leads with. The year-one rate (twice as large for AAPL) sits in
+    # the inputs as the market-implied stage-1 growth.
+    _head_num = dcf.get("market_implied_cagr") if imp is not None else None
+    if _head_num is None:
+        _head_num = imp
     big = ws.cell(row=R_HEAD_BIG, column=1,
-                  value=(imp if imp is not None else "n/a"))
-    if imp is not None:
-        big.number_format = FMT_PCT1
+                  value=(_head_num if _head_num is not None else "n/a"))
+    if _head_num is not None:
+        big.number_format = '0.0%" a yr"'
     big.font      = Font(name="Calibri", size=30, bold=True, color=DARK_BLUE)
     big.alignment = Alignment(horizontal="center", vertical="center")
     big.fill      = PatternFill("solid", fgColor=TILE_BG)
@@ -1891,7 +1934,6 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
 
     # ── 2. Conclusion — fair value vs price (live off the bridge below) ───────
     sec(R_CONC_SEC, "Conclusion — Fair Value vs Price")
-    up = dcf.get("upside")
     # The note must not start with "=" — openpyxl stores it as a formula and
     # Excel renders a visible #NAME? error next to the headline fair value.
     kv2(R_FV, "Base-case fair value / share", f"=B{R_EQ}/B{R_SH}", fmt=FMT_USD,
@@ -1899,20 +1941,20 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
     kv2(R_PX, "Current price", f"=B{R_P}", fmt=FMT_USD)
     kv2(R_UP, "Upside / downside", f'=IF(B{R_PX}=0,"",B{R_FV}/B{R_PX}-1)',
         fmt=FMT_SIGNED)
-    verdict, vcol = (("Undervalued vs DCF", GREEN_OK) if up is not None and up > 0.15 else
-                     ("Overvalued vs DCF",  RED_BAD)  if up is not None and up < -0.15 else
-                     ("Fairly valued vs DCF", DARK_BLUE))
     ws.cell(row=R_VERD, column=1, value="Verdict").font = Font(name="Calibri", size=10)
     vc = ws.cell(row=R_VERD, column=2,
                  value=(f'=IF(B{R_UP}>0.15,"Undervalued vs DCF",'
                         f'IF(B{R_UP}<-0.15,"Overvalued vs DCF","Fairly valued vs DCF"))'))
     vc.font      = Font(name="Calibri", size=10, bold=True, color=WHITE)
-    vc.fill      = PatternFill("solid", fgColor=vcol)
+    vc.fill      = PatternFill("solid", fgColor=DARK_BLUE)
     vc.alignment = Alignment(horizontal="right")
     ws.cell(row=R_VERD, column=1).border = vc.border = _border()
     # "Fairly valued vs DCF" is wider than one 14-char column — unmerged it
     # rendered as "irly valued vs DCF".
     ws.merge_cells(f"B{R_VERD}:C{R_VERD}")
+    # The verdict is a formula, so its colour must be one too: a fill fixed at
+    # generation stayed red after an edit turned the text to "Undervalued".
+    _verdict_colours(ws, f"B{R_VERD}", f"$B${R_UP}")
 
     # ── 3. Scenarios — with the market itself as the fourth row ──────────────
     sec(R_SCN_SEC, "Scenarios — and What the Market Is Assuming")
@@ -1947,15 +1989,37 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
     _scn_row(R_SCN_BEAR, "Bear", f"=B{R_GBEAR}", _scn_fv("G", "H"))
     _scn_row(R_SCN_BASE, "Base", f"=B{R_G1}",    f"=B{R_FV}", highlight="D6E4F0")
     _scn_row(R_SCN_BULL, "Bull", f"=B{R_GBULL}", _scn_fv("J", "K"))
+    # The market row is a live model at the market-implied rate, not a copy of
+    # the price. At generation it lands on the price; edit an input and it
+    # moves, which is exactly the signal that the implied rate is now stale.
     _scn_row(R_SCN_MKT,  "Market (today's price)",
-             (imp if imp is not None else "n/a"), f"=B{R_P}", highlight=TILE_BG)
-    if imp is None:
+             (f"=B{R_GMKT}" if _mkt_live else "n/a"),
+             (_scn_fv("M", "N") if _mkt_live else f"=B{R_P}"), highlight=TILE_BG)
+    if not _mkt_live:
         ws.cell(row=R_SCN_MKT, column=2).number_format = "General"
+    else:
+        ck = ws.cell(row=R_SCN_CHK, column=1, value="Check: market row − price")
+        cv = ws.cell(row=R_SCN_CHK, column=3, value=f"=C{R_SCN_MKT}-B{R_P}")
+        cv.number_format = FMT_USD
+        ck.font = Font(name="Calibri", size=9, italic=True)
+        cv.font = Font(name="Calibri", size=9, bold=True)
+        ck.border = cv.border = _border()
+        nt = ws.cell(row=R_SCN_CHK, column=4,
+                     value=(f'=IF(ABS(C{R_SCN_CHK})<0.01,"Solved: the implied rate '
+                            f'reproduces today\'s price.","Inputs changed - re-solve with '
+                            f'Data > What-If Analysis > Goal Seek: set C{R_SCN_CHK} to 0 '
+                            f'by changing B{R_GMKT}.")'))
+        nt.font = Font(name="Calibri", size=9, italic=True, color="555555")
+        ws.merge_cells(f"D{R_SCN_CHK}:K{R_SCN_CHK}")
 
     # ── 4. Model inputs — the editable cells everything else hangs off ────────
     sec(R_IN_SEC, "Model Inputs — every shaded cell is editable")
-    kv2(R_W,    "Discount rate (WACC)", dcf["wacc"], fmt=FMT_PCT2, input_cell=True,
-        note="Company-specific cost of capital. Raise it and fair value falls.")
+    if _wb_live:
+        kv2(R_W, "Discount rate (WACC)", f"=B{R_WOUT}", fmt=FMT_PCT2, input_cell=True,
+            note=f"Linked to the build-up below (B{R_WOUT}). Type a rate here to override it.")
+    else:
+        kv2(R_W, "Discount rate (WACC)", dcf["wacc"], fmt=FMT_PCT2, input_cell=True,
+            note="Company-specific cost of capital. Raise it and fair value falls.")
     kv2(R_TG,   "Terminal growth rate", dcf["terminal_growth"], fmt=FMT_PCT2,
         input_cell=True, note="Growth forever after the explicit horizon. Must stay below WACC.")
     # Fixed, not an input. It was shaded as editable, but the projection table
@@ -1981,17 +2045,76 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
         g_bear if g_bear is not None else dcf["base_growth"], fmt=FMT_PCT1, input_cell=True)
     kv2(R_GBULL, "Stage-1 FCF growth — bull case",
         g_bull if g_bull is not None else dcf["base_growth"], fmt=FMT_PCT1, input_cell=True)
-    kv2(R_ND,   "Net debt (total debt − cash & short-term investments)", dcf["net_debt"], fmt=FMT_BN,
-        input_cell=True, note="Subtracted from enterprise value to reach equity value.")
+    kv2(R_GMKT, "Stage-1 FCF growth — market-implied",
+        imp if _mkt_live else "n/a", fmt=(FMT_PCT1 if _mkt_live else None),
+        input_cell=_mkt_live,
+        note=("Solved so the model reproduces today's price; the check under the "
+              "scenarios says when it needs re-solving." if _mkt_live
+              else "The price is outside the solvable range (−20% to +50%)."))
+    kv2(R_ND,   "Net debt", dcf["net_debt"], fmt=FMT_BN,
+        input_cell=True, note="Total debt − cash & short-term investments. Subtracted from "
+                              "enterprise value to reach equity value.")
+    _mcb = (fundamentals or {}).get("market_cap_basis")
+    _shd = (fundamentals or {}).get("shares_date")
     kv2(R_SH,   "Shares outstanding", dcf["shares"], fmt=FMT_SHARES, input_cell=True,
-        note="Derived as market cap ÷ price, so the model ties to the quoted price.")
+        note=(f"Latest 10-Q cover-page count ({pd.Timestamp(_shd):%d %b %Y})."
+              if (_mcb == "filing" and _shd)
+              else "Derived as market cap ÷ price, so the model ties to the quoted price."))
     kv2(R_P,    "Current price", dcf["price"], fmt=FMT_USD, input_cell=True)
 
+    # ── 4b. WACC build-up — the discount rate as formulas, not a number ───────
+    sec(R_WB_SEC, "Discount Rate Build-Up — CAPM cost of equity, blended with debt")
+    if _wb_live:
+        for row, label, val, fmt, is_in, note in [
+            (R_RF,   "Risk-free rate (10-year Treasury)", _wb["risk_free"], FMT_PCT2, True,
+             "Long rate: the cash flows being discounted run for years."),
+            (R_BETA, "Raw beta (regression on the benchmark)", _wb["beta"], "0.00", True,
+             "Measured from this report's daily returns."),
+            (R_BADJ, "Adjusted beta (Blume: ⅔ × raw + ⅓)", f"=2/3*B{R_BETA}+1/3", "0.00", False,
+             "Betas drift toward 1; the adjusted figure is the forward estimate."),
+            (R_ERP,  "Equity risk premium", _wb["erp"], FMT_PCT2, True, None),
+            (R_KE,   "Cost of equity", f"=B{R_RF}+B{R_BADJ}*B{R_ERP}", FMT_PCT2, False,
+             "Risk-free + adjusted beta × equity risk premium."),
+            (R_SPR,  "Credit spread over risk-free", _wb["credit_spread"], FMT_PCT2, True,
+             "Investment-grade spread unless debt exceeds the market value of equity."),
+            (R_KD,   "Pre-tax cost of debt", f"=B{R_RF}+B{R_SPR}", FMT_PCT2, False, None),
+            (R_TAX,  "Tax rate", _wb["tax_rate"], FMT_PCT2, True, "US statutory rate."),
+            (R_KDAT, "After-tax cost of debt", f"=B{R_KD}*(1-B{R_TAX})", FMT_PCT2, False,
+             "Interest is tax-deductible."),
+            (R_E,    "Market value of equity", _wb["market_cap"], FMT_BN, True,
+             ("Cover-page shares × price." if _mcb == "filing" else "Market capitalisation.")),
+            (R_D,    "Total debt (gross)", _wb["total_debt"], FMT_BN, True,
+             "Gross, not net: interest is paid on the debt outstanding."),
+            (R_WE,   "Equity weight", f"=B{R_E}/(B{R_E}+B{R_D})", FMT_PCT1, False, None),
+            (R_WD,   "Debt weight", f"=B{R_D}/(B{R_E}+B{R_D})", FMT_PCT1, False, None),
+            (R_WRAW, "WACC before bounds", f"=B{R_WE}*B{R_KE}+B{R_WD}*B{R_KDAT}", FMT_PCT2,
+             False, None),
+            (R_WOUT, "WACC used (bounded 5%–20%, to 4 dp)",
+             f"=ROUND(MAX(0.05,MIN(0.2,B{R_WRAW})),4)", FMT_PCT2, False,
+             "Feeds the discount-rate input above."),
+        ]:
+            kv2(row, label, val, fmt=fmt, input_cell=is_in, note=note,
+                bold=(row == R_WOUT))
+    else:
+        _why = ("No benchmark returns were available, so beta could not be measured and "
+                f"the model uses the default {dcf['wacc'] * 100:.1f}% discount rate."
+                if (_wb or {}).get("fallback") or not _wb
+                else f"The discount rate was set directly at {dcf['wacc'] * 100:.1f}%.")
+        c = ws.cell(row=36, column=1, value=_why + " Edit the WACC input above to test your own.")
+        c.font = Font(name="Calibri", size=10, italic=True)
+        c.alignment = Alignment(wrap_text=True, vertical="center")
+        ws.merge_cells("A36:K36")
+        ws.row_dimensions[36].height = 30
+
     # ── 5. Projection — live formulas, base / bear / bull side by side ────────
-    sec(R_PROJ_SEC, "Base-Case Projection  (bear and bull run alongside)")
-    for ci, h in enumerate(["Year", "Growth", "Projected FCF", "Discount factor",
-                            "PV of FCF", "Bear growth", "Bear FCF", "Bear PV",
-                            "Bull growth", "Bull FCF", "Bull PV"], 1):
+    sec(R_PROJ_SEC, "Base-Case Projection  (bear, bull and market run alongside)",
+        span=("N" if _mkt_live else "K"))
+    _hdrs = ["Year", "Growth", "Projected FCF", "Discount factor",
+             "PV of FCF", "Bear growth", "Bear FCF", "Bear PV",
+             "Bull growth", "Bull FCF", "Bull PV"]
+    if _mkt_live:
+        _hdrs += ["Market growth", "Market FCF", "Market PV"]
+    for ci, h in enumerate(_hdrs, 1):
         _hdr_cell(ws.cell(row=R_PROJ_HDR, column=ci, value=h), bg=MID_BLUE)
 
     def _fade(g_row, r):
@@ -1999,29 +2122,27 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
         return (f"=IF($B${R_YRS}<=1,$B${R_TG},$B${g_row}"
                 f"+($B${R_TG}-$B${g_row})*(A{r}-1)/($B${R_YRS}-1))")
 
+    _cols = [(2, 3, 5, R_G1), (6, 7, 8, R_GBEAR), (9, 10, 11, R_GBULL)]
+    if _mkt_live:
+        _cols.append((12, 13, 14, R_GMKT))
+    _last_col = 14 if _mkt_live else 11
     for i in range(n_yr):
         r     = R_P0 + i
         first = (i == 0)
         ws.cell(row=r, column=1, value=proj[i]["year"]).number_format = "0"
-        ws.cell(row=r, column=2, value=_fade(R_G1, r))
-        ws.cell(row=r, column=3,
-                value=(f"=$B${R_FCF0}*(1+B{r})" if first else f"=C{r-1}*(1+B{r})"))
         ws.cell(row=r, column=4, value=f"=1/(1+$B${R_W})^A{r}")
-        ws.cell(row=r, column=5, value=f"=C{r}*D{r}")
-        ws.cell(row=r, column=6, value=_fade(R_GBEAR, r))
-        ws.cell(row=r, column=7,
-                value=(f"=$B${R_FCF0}*(1+F{r})" if first else f"=G{r-1}*(1+F{r})"))
-        ws.cell(row=r, column=8, value=f"=G{r}*D{r}")
-        ws.cell(row=r, column=9, value=_fade(R_GBULL, r))
-        ws.cell(row=r, column=10,
-                value=(f"=$B${R_FCF0}*(1+I{r})" if first else f"=J{r-1}*(1+I{r})"))
-        ws.cell(row=r, column=11, value=f"=J{r}*D{r}")
-        for ci in range(1, 12):
+        for gcol, fcol, pvcol, g_row in _cols:
+            gl, fl = get_column_letter(gcol), get_column_letter(fcol)
+            ws.cell(row=r, column=gcol, value=_fade(g_row, r))
+            ws.cell(row=r, column=fcol,
+                    value=(f"=$B${R_FCF0}*(1+{gl}{r})" if first else f"={fl}{r-1}*(1+{gl}{r})"))
+            ws.cell(row=r, column=pvcol, value=f"={fl}{r}*D{r}")
+        for ci in range(1, _last_col + 1):
             c = ws.cell(row=r, column=ci)
             c.font   = Font(name="Calibri", size=10)
             c.border = _border()
             c.alignment = Alignment(horizontal="right")
-            if ci in (2, 6, 9):
+            if ci in (2, 6, 9, 12):
                 c.number_format = FMT_PCT1
             elif ci == 4:
                 c.number_format = "0.000"
@@ -2054,88 +2175,117 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
                                 f' nearly all the work"')
             _tv.font = Font(name="Calibri", size=9, italic=True, color="888888")
 
-    # ── 7. Sensitivity grid — green above today's price, red below ────────────
-    sec(R_SENS_SEC, "Sensitivity — Fair Value / Share  (WACC × Terminal Growth)"
-                    "  ·  snapshot computed at generation")
-    sens   = dcf.get("sensitivity") or {}
-    w_axis = sens.get("wacc_axis") or []
-    tg_axis = sens.get("tg_axis") or []
-    grid   = sens.get("grid") or []
-    if w_axis and tg_axis and grid:
-        corner = ws.cell(row=R_SENS_HDR, column=1, value="WACC ╲ Term. g")
-        corner.font   = Font(bold=True, size=9, name="Calibri")
-        corner.border = _border()
-        for cj, tg in enumerate(tg_axis, 2):
-            _hdr_cell(ws.cell(row=R_SENS_HDR, column=cj, value=f"{tg * 100:.1f}%"), bg=MID_BLUE)
-        for ri, w in enumerate(w_axis):
-            r = R_SENS0 + ri
-            _hdr_cell(ws.cell(row=r, column=1, value=f"{w * 100:.1f}%"), bg=MID_BLUE)
-            for cj, fv in enumerate(grid[ri], 2):
-                c = ws.cell(row=r, column=cj, value=(round(fv, 2) if fv else None))
+    # ── 7. Sensitivity grids — live, green above today's price, red below ─────
+    # Both used to be 25 numbers computed once in Python beside a sheet of live
+    # formulas, so editing the inputs moved everything except the grids. Each
+    # cell is now the same model: its column's FCF path (worked out beside the
+    # projection) discounted at its row's rate, plus the terminal value, less
+    # net debt, per share. SUMPRODUCT takes the array of discount factors
+    # natively, so no array-entered formula is needed in any Excel version.
+    _deltas_w  = (-0.02, -0.01, 0.0, 0.01, 0.02)
+    _deltas_tg = (-0.01, -0.005, 0.0, 0.005, 0.01)
+    _deltas_g  = (-0.04, -0.02, 0.0, 0.02, 0.04)
+    _yrs = f"$A${R_P0}:$A${R_PN}"
+
+    def _fv_cell(path_col, w_ref, tg_ref):
+        pl = get_column_letter(path_col)
+        rng = f"${pl}${R_P0}:${pl}${R_PN}"
+        return (f"=IF({w_ref}<={tg_ref},\"n/a\","
+                f"(SUMPRODUCT({rng},1/(1+{w_ref})^{_yrs})"
+                f"+${pl}${R_PN}*(1+{tg_ref})/({w_ref}-{tg_ref})/(1+{w_ref})^$B${R_YRS}"
+                f"-$B${R_ND})/$B${R_SH})")
+
+    def _path_block(c0, title, rate_refs, g_of, tg_of):
+        """Five FCF paths beside the projection, one per grid column."""
+        h = ws.cell(row=R_PROJ_SEC, column=c0, value=title)
+        h.font = Font(bold=True, color=WHITE, name="Calibri", size=10)
+        h.fill = PatternFill("solid", fgColor=DARK_BLUE)
+        ws.merge_cells(start_row=R_PROJ_SEC, start_column=c0,
+                       end_row=R_PROJ_SEC, end_column=c0 + 4)
+        for j, ref in enumerate(rate_refs):
+            col = c0 + j
+            _hdr_cell(ws.cell(row=R_PROJ_HDR, column=col, value=f'=TEXT({ref},"0.0%")'),
+                      bg=MID_BLUE)
+            g, tg = g_of(ref), tg_of(ref)
+            for i in range(n_yr):
+                r = R_P0 + i
+                grow = (f"IF($B${R_YRS}<=1,{tg},{g}+({tg}-{g})*($A{r}-1)/($B${R_YRS}-1))")
+                prev = f"$B${R_FCF0}" if i == 0 else f"{get_column_letter(col)}{r - 1}"
+                c = ws.cell(row=r, column=col, value=f"={prev}*(1+{grow})")
+                c.number_format = FMT_BN
+                c.font = Font(name="Calibri", size=9, color="555555")
+                c.border = _border()
+            ws.column_dimensions[get_column_letter(col)].width = 10
+
+    def _grid(r_sec, title, col_refs_fmt, row_note, path_c0, tg_for_col, bottom_note):
+        sec(r_sec, title)
+        r_hdr, r0 = r_sec + 1, r_sec + 2
+        corner = ws.cell(row=r_hdr, column=1, value=row_note)
+        corner.font, corner.border = Font(bold=True, size=9, name="Calibri"), _border()
+        for j, f in enumerate(col_refs_fmt):
+            c = ws.cell(row=r_hdr, column=2 + j, value=f)
+            _hdr_cell(c, bg=MID_BLUE)
+            c.number_format = FMT_PCT1
+        for i, d in enumerate(_deltas_w):
+            r = r0 + i
+            wc = ws.cell(row=r, column=1, value=f"=$B${R_W}{d:+.4f}" if d else f"=$B${R_W}")
+            _hdr_cell(wc, bg=MID_BLUE)
+            wc.number_format = FMT_PCT1
+            for j in range(5):
+                hdr_ref = f"{get_column_letter(2 + j)}${r_hdr}"
+                c = ws.cell(row=r, column=2 + j,
+                            value=_fv_cell(path_c0 + j, f"$A{r}", tg_for_col(hdr_ref)))
                 c.number_format = FMT_USD
                 c.font          = Font(name="Calibri", size=10)
                 c.border        = _border()
                 c.alignment     = Alignment(horizontal="right")
-        last_col  = get_column_letter(1 + len(tg_axis))
-        grid_rng  = f"B{R_SENS0}:{last_col}{R_SENS0 + len(w_axis) - 1}"
-        # Green = the model says it's worth more than the market is charging.
-        ws.conditional_formatting.add(grid_rng, CellIsRule(
-            operator="greaterThan", formula=[f"$B${R_P}"],
-            fill=PatternFill("solid", bgColor=GOOD_FILL),
-            font=Font(color=GOOD_TEXT, bold=True)))
-        ws.conditional_formatting.add(grid_rng, CellIsRule(
-            operator="lessThan", formula=[f"$B${R_P}"],
-            fill=PatternFill("solid", bgColor=BAD_FILL),
-            font=Font(color=BAD_TEXT)))
-        # A static grid sitting beside live formulas is a trap: edit B22 or B23 —
-        # the exact thing "every shaded cell is editable" invites — and every
-        # other number on the sheet moves while these 25 stay put. Recomputing
-        # the full ten-year growth fade inside one array formula per cell would
-        # make it live, but it is fragile across Excel versions for what it buys.
-        #
-        # Instead the sheet notices. This cell is a formula over the same input
-        # cells the grid was built from, so the moment they no longer match the
-        # axis it was generated at, it says so in the sheet itself rather than
-        # leaving the reader to spot it.
-        _w_mid  = w_axis[len(w_axis) // 2]
-        _tg_mid = tg_axis[len(tg_axis) // 2]
-        _stale = ws.cell(
-            row=R_SENS0 + len(w_axis),
-            column=1,
-            value=(f'=IF(AND(ROUND($B${R_W},4)={round(_w_mid, 4)},'
-                   f'ROUND($B${R_TG},4)={round(_tg_mid, 4)}),'
-                   f'"Grid matches the assumptions above.",'
-                   f'"Assumptions changed — this grid was computed at '
-                   f'{_w_mid*100:.1f}% WACC / {_tg_mid*100:.1f}% terminal growth '
-                   f'and no longer matches the inputs. Regenerate to refresh it.")'))
-        _stale.font      = Font(name="Calibri", size=9, italic=True)
-        _stale.alignment = Alignment(wrap_text=True, vertical="center")
-        ws.merge_cells(start_row=_stale.row, start_column=1,
-                       end_row=_stale.row, end_column=1 + len(tg_axis))
-        row_after = R_SENS0 + len(w_axis) + 1
-    else:
-        row_after = R_SENS_HDR + 1
+                if i == 2 and j == 2:
+                    c.font = Font(name="Calibri", size=10, bold=True)
+        rng = f"B{r0}:F{r0 + 4}"
+        ws.conditional_formatting.add(rng, FormulaRule(
+            formula=[f"AND(ISNUMBER(B{r0}),B{r0}>$B${R_P})"],
+            fill=PatternFill("solid", bgColor=GOOD_FILL), font=Font(color=GOOD_TEXT, bold=True)))
+        ws.conditional_formatting.add(rng, FormulaRule(
+            formula=[f"AND(ISNUMBER(B{r0}),B{r0}<$B${R_P})"],
+            fill=PatternFill("solid", bgColor=BAD_FILL), font=Font(color=BAD_TEXT)))
+        return _narrative_box(ws, r0 + 5, bottom_note, height=44, italic=True, bg=TILE_BG)
 
-    row_after = _narrative_box(
-        ws, row_after,
-        f"Each cell is base-case fair value per share at that discount rate and terminal "
-        f"growth rate. Green = above today's ${dcf['price']:,.2f} price, red = below. "
-        f"These 25 values are computed once when the report is generated; the rest of "
-        f"this sheet is live formulas, so editing the inputs above moves everything "
-        f"except this grid.",
-        height=44, italic=True, bg=TILE_BG)
+    # Grid 1: WACC x terminal growth, stage-1 growth at the base case.
+    _tg_refs = [f"$B${R_TG}{d:+.4f}" if d else f"$B${R_TG}" for d in _deltas_tg]
+    _path_block(C_TGW0, "Workings: FCF path at each terminal rate", _tg_refs,
+                g_of=lambda ref: f"$B${R_G1}", tg_of=lambda ref: f"({ref})")
+    row_after = _grid(
+        R_SENS_SEC, "Sensitivity — Fair Value / Share  (WACC × Terminal Growth)",
+        ["=" + x for x in _tg_refs], "WACC ╲ Term. g", C_TGW0,
+        tg_for_col=lambda hdr_ref: hdr_ref,
+        bottom_note=(f"Base-case fair value per share at each discount rate (rows) and "
+                     f"terminal growth rate (columns); the centre cell is the model above. "
+                     f"Green = above today's ${dcf['price']:,.2f} price, red = below. Live: "
+                     f"the axes and every cell recalculate when the inputs change."))
+
+    # Grid 2: WACC x stage-1 growth, terminal growth at the input.
+    _g_refs = [f"$B${R_G1}{d:+.4f}" if d else f"$B${R_G1}" for d in _deltas_g]
+    _path_block(C_GW0, "Workings: FCF path at each stage-1 rate", _g_refs,
+                g_of=lambda ref: f"({ref})", tg_of=lambda ref: f"$B${R_TG}")
+    row_after = _grid(
+        row_after + 1, "Sensitivity — Fair Value / Share  (WACC × Stage-1 FCF Growth)",
+        ["=" + x for x in _g_refs], "WACC ╲ Stage-1 g", C_GW0,
+        tg_for_col=lambda hdr_ref: f"$B${R_TG}",
+        bottom_note=("The two assumptions most worth arguing with, against each other: how "
+                     "fast free cash flow grows at first (columns, fading to the terminal "
+                     "rate) and what it is discounted at (rows)."))
 
     row_after = _narrative_box(
         ws, row_after + 1,
         "How to use this sheet: the reverse DCF is the headline — it converts today's "
-        "price into the growth rate you would have to believe. Change the discount rate "
-        "or the terminal growth rate in the shaded input cells and every projection, "
-        "bridge and scenario figure recalculates, so you can test your own assumptions "
-        "rather than accept ours. A DCF is a model, not a forecast: base FCF is "
-        "normalised over recent years, shares are derived from market cap ÷ price, and "
-        "small changes in WACC or terminal growth move fair value materially. "
+        "price into the growth rate you would have to believe. Change any shaded input - "
+        "the discount rate, its build-up, terminal growth, the growth paths - and every "
+        "projection, bridge, scenario and both sensitivity grids recalculate, so you can "
+        "test your own assumptions rather than accept ours. A DCF is a model, not a "
+        "forecast: base FCF is normalised over recent periods, and small changes in WACC "
+        "or terminal growth move fair value materially. "
         + DISCLAIMER_SHORT,
-        height=76, italic=True, bg="FFF8E1")
+        height=110, italic=True, bg="FFF8E1")
 
     # ── 8. Football-field chart, driven off the live scenario cells ───────────
     # Anchored at the foot of the sheet so the floating picture can't sit on top
@@ -2253,7 +2403,7 @@ def _build_methodology_sheet(wb, dcf=None):
          f"Discount rate {_w_txt}, terminal growth {_tg_txt}; base FCF {_base_fcf_how}; stage-1 growth fades linearly to the terminal rate. "
          "The Valuation sheet holds the whole model as live Excel formulas over a block of editable assumption cells — change the discount rate, the terminal growth rate or the growth path and every downstream figure recalculates. A model, not a price target."),
         ("Sensitivity Grid",
-         "Base-case fair value per share across a 5×5 grid of discount rates and terminal growth rates, on the Valuation sheet. Green cells sit above today's price, red below. "
+         "Base-case fair value per share across a 5×5 grid of discount rates and terminal growth rates, on the Valuation sheet, with a second grid of discount rate against stage-1 growth. Both are live formulas over the same inputs, with the FCF path behind each column shown beside the projection. Green cells sit above today's price, red below. "
          "The spread across that grid is the honest measure of how much confidence a DCF deserves for this company."),
     ])
     section("Quality Scores", [
