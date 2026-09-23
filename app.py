@@ -960,47 +960,16 @@ def _tape_nonblocking(api_key):
 # Supabase cache for 30 days, and shown from the next view on. Until then the
 # SIC industry label stands in, which is accurate, just less familiar.
 _SECTOR = _BG["sector"]
-_SECTOR_PENDING = _BG["sector_pending"]
 
 
 def _std_sector(ticker):
     """Familiar sector name if already known, else None. Never blocks."""
-    import threading
     tk = (ticker or "").upper()
     if not tk:
         return None
-    if tk in _SECTOR:
-        return _SECTOR[tk]
-    if tk not in _SECTOR_PENDING:
-        _SECTOR_PENDING.add(tk)
-
-        def _job():
-            try:
-                s = None
-                try:
-                    from database import cache_get
-                    hit = cache_get(f"sector_{tk}")
-                    s = hit.get("s") if isinstance(hit, dict) else None
-                except Exception:
-                    s = None
-                if not s:
-                    import yfinance as yf
-                    s = (yf.Ticker(tk).info or {}).get("sector")
-                    if s:
-                        try:
-                            from database import cache_set
-                            cache_set(f"sector_{tk}", {"s": s}, ttl_hours=24 * 30)
-                        except Exception:
-                            pass
-                if s:
-                    _SECTOR[tk] = s
-            except Exception:
-                pass
-            finally:
-                _SECTOR_PENDING.discard(tk)
-
-        threading.Thread(target=_job, daemon=True).start()
-    return None
+    if tk not in _SECTOR:
+        _yf_info_bg(tk)
+    return _SECTOR.get(tk)
 
 
 # ── Extended-hours price, off the critical path ──────────────────────────────
@@ -1017,44 +986,80 @@ _EXT_TTL = 300.0
 
 def _ext_hours(ticker):
     """{"label", "price", "pct", "time"} outside regular hours, else None."""
-    import threading
     tk = (ticker or "").upper()
     if not tk:
         return None
     hit = _EXT.get(tk)
-    fresh = hit and (_time.time() - hit[0]) < _EXT_TTL
-    if not fresh and tk not in _EXT_PENDING:
-        _EXT_PENDING.add(tk)
-
-        def _job():
-            val = None
-            try:
-                import yfinance as yf
-                info = yf.Ticker(tk).info or {}
-                if info.get("sector") and tk not in _SECTOR:
-                    _SECTOR[tk] = info["sector"]
-                state = str(info.get("marketState") or "").upper()
-                if state == "PRE" and info.get("preMarketPrice"):
-                    px, pct, ts, lbl = (info["preMarketPrice"], info.get("preMarketChangePercent"),
-                                        info.get("preMarketTime"), "Pre-market")
-                elif state in ("POST", "POSTPOST", "PREPRE", "CLOSED") and info.get("postMarketPrice"):
-                    px, pct, ts, lbl = (info["postMarketPrice"], info.get("postMarketChangePercent"),
-                                        info.get("postMarketTime"), "After hours")
-                else:
-                    px = None
-                if px:
-                    from market_data import _fmt_ts
-                    val = {"label": lbl, "price": float(px),
-                           "pct": float(pct) if pct is not None else None,
-                           "time": _fmt_ts(ts) if ts else ""}
-            except Exception:
-                val = None
-            finally:
-                _EXT[tk] = (_time.time(), val)
-                _EXT_PENDING.discard(tk)
-
-        threading.Thread(target=_job, daemon=True).start()
+    if not (hit and (_time.time() - hit[0]) < _EXT_TTL):
+        _yf_info_bg(tk)
     return hit[1] if hit else None
+
+
+def _yf_info_bg(tk):
+    """One background yfinance .info call per ticker, feeding both the sector
+    and the extended-hours line.
+
+    They used to fetch separately and at the same moment. yfinance shares one
+    session and crumb across threads, and on Render the second of two
+    simultaneous first calls failed: the sector arrived, the after-hours line
+    never did, and the failure was cached for the full five minutes. One call now
+    serves both; a failure is retried after 30 seconds and logged, so it shows
+    in the server log instead of as a silently missing line."""
+    import threading
+    if tk in _EXT_PENDING:
+        return
+    _EXT_PENDING.add(tk)
+
+    def _job():
+        val, ok = None, False
+        try:
+            import yfinance as yf
+            info = yf.Ticker(tk).info or {}
+            ok = bool(info.get("regularMarketPrice") or info.get("sector")
+                      or info.get("longName"))
+            sec = info.get("sector")
+            if sec:
+                if tk not in _SECTOR:
+                    try:
+                        from database import cache_set
+                        cache_set(f"sector_{tk}", {"s": sec}, ttl_hours=24 * 30)
+                    except Exception:
+                        pass
+                _SECTOR[tk] = sec
+            state = str(info.get("marketState") or "").upper()
+            if state == "PRE" and info.get("preMarketPrice"):
+                px, pct, ts, lbl = (info["preMarketPrice"], info.get("preMarketChangePercent"),
+                                    info.get("preMarketTime"), "Pre-market")
+            elif state in ("POST", "POSTPOST", "PREPRE", "CLOSED") and info.get("postMarketPrice"):
+                px, pct, ts, lbl = (info["postMarketPrice"], info.get("postMarketChangePercent"),
+                                    info.get("postMarketTime"), "After hours")
+            else:
+                px = None
+                if ok and state and state != "REGULAR":
+                    print(f"[bg] {tk}: marketState={state}, no extended-hours price "
+                          f"in the response", flush=True)
+            if px:
+                from market_data import _fmt_ts
+                val = {"label": lbl, "price": float(px),
+                       "pct": float(pct) if pct is not None else None,
+                       "time": _fmt_ts(ts) if ts else ""}
+        except Exception as e:
+            print(f"[bg] yfinance info failed for {tk}: {type(e).__name__}: {e}", flush=True)
+            ok = False
+        if not ok and tk not in _SECTOR:
+            # yfinance unavailable: a sector cached by an earlier success still helps.
+            try:
+                from database import cache_get
+                hit = cache_get(f"sector_{tk}")
+                if isinstance(hit, dict) and hit.get("s"):
+                    _SECTOR[tk] = hit["s"]
+            except Exception:
+                pass
+        # A failure is re-tried after 30s rather than cached for the full TTL.
+        _EXT[tk] = ((_time.time() if ok else _time.time() - _EXT_TTL + 30), val)
+        _EXT_PENDING.discard(tk)
+
+    threading.Thread(target=_job, daemon=True).start()
 
 
 @st.cache_data(ttl=60, max_entries=1, show_spinner=False)
