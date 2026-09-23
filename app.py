@@ -18,6 +18,28 @@ import time as _time
 # the question gets answered where it actually happens rather than here.
 _QW_PROFILE = os.getenv("QW_PROFILE") == "1"
 _RUN_T0 = _time.perf_counter()
+
+
+class _phase:
+    """Times one named step of a page render. No-op unless QW_PROFILE=1.
+
+    A page total says a page is slow; it does not say which fetch to attack.
+    These name the steps so the log reads like a bill of costs.
+    """
+    __slots__ = ("name", "t")
+
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        self.t = _time.perf_counter() if _QW_PROFILE else 0
+        return self
+
+    def __exit__(self, *exc):
+        if _QW_PROFILE:
+            print(f"[phase] {self.name:32} {(_time.perf_counter()-self.t)*1000:7.0f} ms",
+                  flush=True)
+        return False
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -836,7 +858,8 @@ def _cached_tape(_api_key):
 # Directly beneath the navbar, full-bleed, on every page. It used to sit inside
 # the Home page body below the hero, which meant the one element proving the
 # data is live was invisible everywhere else in the app.
-_tape_items = _cached_tape(POLYGON_API_KEY)
+with _phase("ticker tape quotes"):
+    _tape_items = _cached_tape(POLYGON_API_KEY)
 if _tape_items:
     with st.container(key="tapebar"):
         st.markdown(_tape_html(_tape_items), unsafe_allow_html=True)
@@ -1657,7 +1680,8 @@ elif _page == "analysis":
             st.stop()
 
         with st.spinner(f"Validating {ticker_input}..."):
-            valid, info = cached_validate_ticker(ticker_input, POLYGON_API_KEY)
+            with _phase("validate ticker"):
+                valid, info = cached_validate_ticker(ticker_input, POLYGON_API_KEY)
 
         if not valid:
             # Reference API may be rate-limited — try fetching price data directly
@@ -1668,7 +1692,8 @@ elif _page == "analysis":
             # Otherwise continue — fetch_stock_data will raise if the ticker is truly invalid
 
         # Detect asset type (stock / etf / crypto)
-        asset_type = cached_detect_asset_type(ticker_input, POLYGON_API_KEY)
+        with _phase("detect asset type"):
+            asset_type = cached_detect_asset_type(ticker_input, POLYGON_API_KEY)
         is_crypto  = asset_type == "crypto"
         is_etf     = asset_type == "etf"
         # For Polygon API calls, crypto needs the X: prefix
@@ -1712,7 +1737,8 @@ elif _page == "analysis":
                                                   end_override=date_end,
                                                   bar_size=bar_size)
                 else:
-                    df = cached_fetch_stock_data(ticker_input, tuple(benchmarks), POLYGON_API_KEY,
+                    with _phase("price history + benchmarks"):
+                        df = cached_fetch_stock_data(ticker_input, tuple(benchmarks), POLYGON_API_KEY,
                                                  start_override=date_start,
                                                  end_override=date_end,
                                                  bar_size=bar_size)
@@ -1723,11 +1749,16 @@ elif _page == "analysis":
                     crypto_details  = cached_fetch_crypto_details(ticker_input)
                     sector          = "Cryptocurrency"
                 else:
-                    company_details = cached_fetch_company_details(ticker_input, POLYGON_API_KEY)
+                    with _phase("company details"):
+                        company_details = cached_fetch_company_details(ticker_input, POLYGON_API_KEY)
                     crypto_details  = {}
                     sector          = company_details.get("Sector", "Unknown")
 
-                etf_details = cached_fetch_etf_details(ticker_input, FMP_API_KEY) if is_etf else {}
+                with _phase("etf details"):
+                    etf_details = cached_fetch_etf_details(ticker_input, FMP_API_KEY) if is_etf else {}
+                if _QW_PROFILE:
+                    print(f"[phase] {'-- through details':32} "
+                          f"{(_time.perf_counter()-_RUN_T0)*1000:7.0f} ms", flush=True)
 
                 # Peers, when the user hasn't named any. The checkbox above has
                 # always defaulted to on, but the fetch was gated on a manually
@@ -1737,11 +1768,15 @@ elif _page == "analysis":
                 # already refreshes daily.
                 peers_auto = False
                 if do_peers and not peers_list and not is_crypto:
+                    _sp_t = _time.perf_counter()
                     peers_list = suggest_peers(
                         ticker_input, sector=sector,
                         market_cap=float(company_details.get("Market Cap") or 0),
                         api_key=POLYGON_API_KEY)
                     peers_auto = bool(peers_list)
+                    if _QW_PROFILE:
+                        print(f"[phase] {'suggest_peers (EAGER)':32} "
+                              f"{(_time.perf_counter()-_sp_t)*1000:7.0f} ms", flush=True)
 
                 # ── Deferred groups ──────────────────────────────────────
                 # Peers, the sector ETF and the news feed used to be fetched
@@ -1847,10 +1882,14 @@ elif _page == "analysis":
                     # Volatility and beta come from the risk window, not the
                     # full pull — a decade of history would price today's
                     # forecast off regimes that are long gone.
-                    mc_sim_df, mc_summary = cached_run_monte_carlo(
-                        ticker_input, _mw_key, n_sims, n_horizon, dfm,
-                    )
+                    with _phase("monte carlo"):
+                        mc_sim_df, mc_summary = cached_run_monte_carlo(
+                            ticker_input, _mw_key, n_sims, n_horizon, dfm,
+                        )
 
+                if _QW_PROFILE:
+                    print(f"[phase] {'-- through monte carlo':32} "
+                          f"{(_time.perf_counter()-_RUN_T0)*1000:7.0f} ms", flush=True)
                 progress.progress(85, text="Generating summary...")
                 ret      = dfm["Daily_Return"].dropna()
                 ann_ret  = ret.mean() * 252
@@ -1875,19 +1914,21 @@ elif _page == "analysis":
                 _fund_report = {"ok": False}
                 if not is_crypto:
                     try:
-                        _fr = (cached_fetch_sec_financials(ticker_input)
-                               or cached_fetch_financials(ticker_input, POLYGON_API_KEY))
-                        _fund_report = compute_fundamentals(
-                            _fr, market_cap=company_details.get("Market Cap"),
-                            price=float(df["Close"].iloc[-1]),
-                            supplement=_cached_fin_supplement(ticker_input))
+                        with _phase("SEC financials + fundamentals"):
+                            _fr = (cached_fetch_sec_financials(ticker_input)
+                                   or cached_fetch_financials(ticker_input, POLYGON_API_KEY))
+                            _fund_report = compute_fundamentals(
+                                _fr, market_cap=company_details.get("Market Cap"),
+                                price=float(df["Close"].iloc[-1]),
+                                supplement=_cached_fin_supplement(ticker_input))
                     except Exception:
                         _fund_report = {"ok": False}
 
                 # Wall-Street consensus for the report (cached → the on-screen
                 # Analyst View below reuses the same call for free). {} for crypto
                 # or when no Finnhub key is configured.
-                _analyst_report = {} if is_crypto else cached_get_analyst_data(ticker_input)
+                with _phase("analyst data (eager)"):
+                    _analyst_report = {} if is_crypto else cached_get_analyst_data(ticker_input)
 
                 # Forward DCF fair value (FCF-based), and the reverse solve for
                 # what growth today's price implies. Reuses the fundamentals
@@ -1901,6 +1942,9 @@ elif _page == "analysis":
                 # the flat rate every company used to share. With no benchmark
                 # selected, dcf_valuation falls back to its default and says so
                 # in `wacc_basis`, instead of inventing a beta.
+                if _QW_PROFILE:
+                    print(f"[phase] {'-- through analyst data':32} "
+                          f"{(_time.perf_counter()-_RUN_T0)*1000:7.0f} ms", flush=True)
                 _dcf_report = {"ok": False}
                 if not is_crypto and _fund_report.get("ok"):
                     _beta = None
@@ -2336,6 +2380,9 @@ elif _page == "analysis":
             # EVERY tab on every rerun and only hides the inactive ones, which
             # here would run all the fetches to show one section. This renders
             # exactly the group that is selected.
+            if _QW_PROFILE:
+                print(f"[phase] {'== fetching done, now rendering':32} "
+                      f"{(_time.perf_counter()-_RUN_T0)*1000:7.0f} ms", flush=True)
             _ATABS = ["Overview", "Financials", "Valuation", "Forecast", "Peers"]
             _atab = st.session_state.get("analysis_tab", _ATABS[0])
             if _atab not in _ATABS:
@@ -2378,7 +2425,8 @@ elif _page == "analysis":
 
                 # ── Analyst View (Finnhub: consensus + earnings surprises) ────────
                 if not is_crypto:
-                    _adata = cached_get_analyst_data(ticker_input)
+                    with _phase("analyst data (Overview)"):
+                        _adata = cached_get_analyst_data(ticker_input)
                     _rec, _earn = _adata.get("recommendation"), _adata.get("earnings")
                     if _rec or _earn:
                         st.markdown(
