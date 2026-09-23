@@ -3116,6 +3116,25 @@ elif _page == "analysis":
                         showgrid=False, showticklabels=False,
                         range=[0, float(_cdf["Volume"].max() * 5)],
                     ))
+                # The selected range's return, pinned top-left of the plot, so
+                # picking a period shows its outcome in the same glance (Seeking
+                # Alpha puts it on the button). Over one session it is the day's
+                # change, measured from the previous close rather than the open.
+                try:
+                    _r0 = (float(_cdf["Close"].iloc[-2]) if _range_sel == "1D" and len(_cdf) > 1
+                           else float(_cdf["Close"].iloc[0]))
+                    _r1 = float(_cdf["Close"].iloc[-1])
+                    _rr = (_r1 / _r0 - 1) * 100 if _r0 else None
+                except Exception:
+                    _rr = None
+                if _rr is not None:
+                    fig.add_annotation(
+                        xref="paper", yref="paper", x=0, y=1.0, xanchor="left", yanchor="bottom",
+                        showarrow=False, yshift=4,
+                        text=(f"<b>{_range_sel}</b>  <span style='color:"
+                              f"{ct.color.positive if _rr >= 0 else ct.color.negative}'>"
+                              f"<b>{_rr:+.2f}%</b></span>"),
+                        font=dict(size=12, color=ct.color.ink, family=ct.font.data))
                 st.plotly_chart(fig, use_container_width=True, config={
                     "displaylogo": False,
                     "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
