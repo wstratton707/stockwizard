@@ -1453,3 +1453,51 @@ def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, 
             lines.append(s)
 
     return "  ".join(lines)
+
+
+# ── Peer comparison rows ──────────────────────────────────────────────────────
+PEER_COLUMNS = [
+    # (key, label, kind) - kind drives number formats in every renderer
+    ("market_cap", "Market cap ($B)", "bn"),
+    ("pe", "P/E", "x"), ("ev_ebitda", "EV/EBITDA", "x"), ("ps", "P/S", "x"),
+    ("fcf_yield", "FCF yield", "pct"), ("rev_growth", "Revenue growth (YoY)", "pct"),
+    ("gross_margin", "Gross margin", "pct"), ("op_margin", "Operating margin", "pct"),
+    ("net_margin", "Net margin", "pct"), ("roe", "ROE", "pct"),
+    ("div_yield", "Dividend yield", "pct"), ("shareholder_yield", "Shareholder yield", "pct"),
+]
+
+
+def peer_metrics(ticker, f):
+    """One comparable row from compute_fundamentals output, or None.
+
+    Percentages stay in the 4.9-style units compute_fundamentals uses; each
+    renderer formats them. The basis travels with the row, because a peer whose
+    latest 10-Q is a quarter older is a quarter less comparable."""
+    if not f or not f.get("ok"):
+        return None
+    v, m, r = f.get("valuation") or {}, f.get("margins") or {}, f.get("returns") or {}
+    g, fc, cr = f.get("growth") or {}, f.get("fcf") or {}, f.get("capital_return") or {}
+    return {
+        "ticker": ticker,
+        "market_cap": f.get("market_cap"),
+        "pe": v.get("pe"), "ev_ebitda": f.get("ev_ebitda"), "ps": v.get("ps"),
+        "fcf_yield": fc.get("fcf_yield"), "rev_growth": g.get("revenue_yoy"),
+        "gross_margin": m.get("gross"), "op_margin": m.get("operating"),
+        "net_margin": m.get("net"), "roe": r.get("roe"),
+        "div_yield": cr.get("dividend_yield"), "shareholder_yield": cr.get("shareholder_yield"),
+        "basis": fundamentals_basis_label(f, short=True),
+    }
+
+
+def peer_median(rows, skip=None):
+    """Median of each PEER_COLUMNS metric across `rows`, leaving out `skip`."""
+    out = {"ticker": "Peer median"}
+    for key, _label, _kind in PEER_COLUMNS:
+        xs = sorted(x[key] for x in rows
+                    if x.get("ticker") != skip and isinstance(x.get(key), (int, float)))
+        if not xs:
+            out[key] = None
+            continue
+        mid = len(xs) // 2
+        out[key] = xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) / 2
+    return out

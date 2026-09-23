@@ -1218,22 +1218,74 @@ def _build_news_sheet(wb, news_list):
 
 
 # ── Peer comparison sheet ─────────────────────────────────────────────────────
-def _build_peer_sheet(wb, peer_df):
-    if peer_df is None or peer_df.empty:
+def _build_peer_sheet(wb, peer_df, peer_fund=None, ticker=None, peer_group=None):
+    """Valuation and fundamentals against peers, then the company facts.
+
+    The sheet used to hold only name, exchange, market cap and headcount - no
+    multiple a reader could compare. Each peer is now on its own latest filings
+    and its own market cap, with the peer median beside the subject."""
+    has_fund = bool(peer_fund) and len(peer_fund) > 1
+    if (peer_df is None or peer_df.empty) and not has_fund:
         return
+    from analysis import PEER_COLUMNS, peer_median
     ws_peer = wb.create_sheet("Peer_Comparison")
-    for r in dataframe_to_rows(peer_df, index=False, header=True):
-        ws_peer.append(r)
-    style_header_row(ws_peer, bg=MID_BLUE)
-    auto_col_width(ws_peer)
-    ws_peer.freeze_panes = "A2"
-    ws_peer.auto_filter.ref = f"A1:{get_column_letter(ws_peer.max_column)}1"
-    for ri, row in enumerate(ws_peer.iter_rows(min_row=2), 2):
-        bg = "D6E4F0" if ri == 2 else (GREY_ROW if ri % 2 == 0 else WHITE)
-        for cell in row:
-            cell.font   = Font(name="Calibri", size=10, bold=(ri == 2))
-            cell.border = _border()
-            cell.fill   = PatternFill("solid", fgColor=bg)
+    row = 1
+    if has_fund:
+        t = ws_peer.cell(row=1, column=1, value="Valuation vs Peers")
+        t.font = Font(size=14, bold=True, color=DARK_BLUE, name="Calibri")
+        sub = ws_peer.cell(row=2, column=1, value=(
+            (f"Peer group: {peer_group}.  " if peer_group else "")
+            + "Each company on its own latest filings (trailing twelve months where a 10-Q "
+              "is newer than the 10-K) and its own market cap. Blank = not meaningful or "
+              "not filed."))
+        sub.font = Font(size=9, italic=True, color="666666", name="Calibri")
+        row = 4
+        hdrs = ["Ticker"] + [lab for _k, lab, _kd in PEER_COLUMNS] + ["Figures as of"]
+        for ci, h in enumerate(hdrs, 1):
+            _hdr_cell(ws_peer.cell(row=row, column=ci, value=h), bg=MID_BLUE)
+        fmts = {"bn": '$#,##0,,,"B"', "x": '0.0"x"', "pct": "0.0%"}
+        med = peer_median(peer_fund, skip=ticker)
+        med["basis"] = "median of peers"
+        for i, rec in enumerate(peer_fund + [med]):
+            r = row + 1 + i
+            is_subj = (rec.get("ticker") == ticker)
+            is_med = (rec is med)
+            ws_peer.cell(row=r, column=1, value=rec.get("ticker"))
+            for ci, (k, _lab, kind) in enumerate(PEER_COLUMNS, 2):
+                x = rec.get(k)
+                val = (x / 100 if (kind == "pct" and isinstance(x, (int, float)))
+                       else x if isinstance(x, (int, float)) else None)
+                c = ws_peer.cell(row=r, column=ci, value=val)
+                c.number_format = fmts[kind]
+            ws_peer.cell(row=r, column=len(hdrs), value=rec.get("basis"))
+            for ci in range(1, len(hdrs) + 1):
+                c = ws_peer.cell(row=r, column=ci)
+                c.font = Font(name="Calibri", size=10, bold=(is_subj or is_med),
+                              italic=is_med)
+                c.border = _border()
+                c.alignment = Alignment(horizontal="left" if ci in (1, len(hdrs)) else "right")
+                c.fill = PatternFill("solid", fgColor=("D6E4F0" if is_subj
+                                                       else TILE_BG if is_med
+                                                       else GREY_ROW if r % 2 == 0 else WHITE))
+        ws_peer.column_dimensions["A"].width = 13
+        for ci in range(2, len(hdrs)):
+            ws_peer.column_dimensions[get_column_letter(ci)].width = 13
+        ws_peer.column_dimensions[get_column_letter(len(hdrs))].width = 22
+        row = row + len(peer_fund) + 3
+    if peer_df is not None and not peer_df.empty:
+        top = row
+        for ci, h in enumerate(peer_df.columns, 1):
+            _hdr_cell(ws_peer.cell(row=top, column=ci, value=h), bg=MID_BLUE)
+        for ri, rec in enumerate(peer_df.itertuples(index=False), top + 1):
+            for ci, v in enumerate(rec, 1):
+                c = ws_peer.cell(row=ri, column=ci, value=v)
+                c.font   = Font(name="Calibri", size=10, bold=(ri == top + 1))
+                c.border = _border()
+                c.fill   = PatternFill("solid", fgColor=("D6E4F0" if ri == top + 1
+                                                         else GREY_ROW if ri % 2 == 0 else WHITE))
+        if not has_fund:
+            auto_col_width(ws_peer)
+    ws_peer.freeze_panes = "B5" if has_fund else "A2"
 
 
 # ── Sector comparison sheet ───────────────────────────────────────────────────
@@ -2432,7 +2484,7 @@ def build_excel(ticker, df, period,
                 corr_matrix=None,
                 resistance_levels=None, support_levels=None,
                 summary_text="", bar_size="day", fundamentals=None,
-                analyst_data=None, dcf=None):
+                analyst_data=None, dcf=None, peer_fund=None, peer_group=None):
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -2443,7 +2495,7 @@ def build_excel(ticker, df, period,
     ws_p, export_df = _build_price_sheet(wb, df, bar_size=bar_size)
     _build_annual_summary(wb, df)
     _build_news_sheet(wb, news_list)
-    _build_peer_sheet(wb, peer_df)
+    _build_peer_sheet(wb, peer_df, peer_fund, ticker, peer_group)
     ws_s       = _build_sector_sheet(wb, ticker, df, sector_df)
     _build_correlation_sheet(wb, corr_matrix, ticker)
     ws_mc_data = _build_monte_carlo_sheet(wb, mc_sim_df, mc_summary)

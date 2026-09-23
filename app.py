@@ -84,8 +84,10 @@ from portfolio_data import BOND_UNIVERSE, BOND_DURATION_MAP, suggest_peers
 from analysis import (
     detect_support_resistance, build_correlation_matrix,
     run_monte_carlo, generate_summary_paragraph,
-    compute_fundamentals, dcf_valuation, market_beta
+    compute_fundamentals, dcf_valuation, market_beta,
+    peer_metrics, peer_median, PEER_COLUMNS,
 )
+from peer_groups import peer_group_for
 # Report builders are imported at the point of use, not here.
 # Between them they pull in matplotlib, openpyxl, python-docx and python-pptx
 # — about 100 MB of resident memory that every visitor paid for even though
@@ -2081,6 +2083,38 @@ elif _page == "analysis":
                             pass
                     return _pdfr, _pdf_map
 
+                _pf_box = {}
+
+                def _peer_funds():
+                    """Comparable rows - subject first - on each company's own
+                    latest filings and price, so every multiple is computed the
+                    same way. [] when there are no peers."""
+                    if "v" not in _pf_box:
+                        _rows = []
+                        _pl = _peer_tickers()
+                        if _pl and not is_crypto:
+                            _me = peer_metrics(ticker_input, _fund())
+                            if _me:
+                                _rows.append(_me)
+                            _, _pxs = _load_peers()
+                            for _pt in _pl[:4]:
+                                try:
+                                    _pfin = cached_fetch_sec_financials(_pt)
+                                    if not _pfin:
+                                        continue
+                                    _ppx = (float(_pxs[_pt]["Close"].iloc[-1])
+                                            if _pt in _pxs and len(_pxs[_pt]) else None)
+                                    _pmc = (cached_fetch_company_details(_pt, POLYGON_API_KEY)
+                                            or {}).get("Market Cap")
+                                    _r = peer_metrics(_pt, compute_fundamentals(
+                                        _pfin, market_cap=_pmc, price=_ppx))
+                                    if _r:
+                                        _rows.append(_r)
+                                except Exception:
+                                    pass
+                        _pf_box["v"] = _rows if len(_rows) > 1 else []
+                    return _pf_box["v"]
+
                 def _load_sector():
                     if not (do_sector and not is_crypto):
                         return None
@@ -2441,6 +2475,10 @@ elif _page == "analysis":
                                         summary_text=_summary_win,
                                         bar_size=bar_size, fundamentals=_fund(),
                                         analyst_data=_analyst_report, dcf=_dcf(),
+                                        peer_fund=_peer_funds(),
+                                        peer_group=(peer_group_for(ticker_input)
+                                                    or ("same sector, nearest in size",))[0]
+                                        if _peers_are_auto() else "your peers",
                                     )
                                 elif _kind == "pptx":
                                     # dcf= was missing here while Excel and Word
@@ -3655,46 +3693,41 @@ elif _page == "analysis":
                         # Context for the metrics above: how this name stacks up against
                         # the entered peers on valuation, profitability and quality —
                         # same EDGAR-sourced compute_fundamentals, one row each.
-                        if _peer_tickers() and not is_crypto:
-                            def _peer_fund_row(_tk, _fd):
-                                if not _fd or not _fd.get("ok"):
-                                    return None
-                                return {
-                                    "Ticker":       _tk,
-                                    "P/E":          _fd["valuation"]["pe"],
-                                    "P/S":          _fd["valuation"]["ps"],
-                                    "Net Margin %": _fd["margins"]["net"],
-                                    "ROE %":        _fd["returns"]["roe"],
-                                    "Rev Grow %":   _fd["growth"]["revenue_yoy"],
-                                    "F-Score /9":   _fd["quality"]["f_score"],
-                                    "Z-Score":      _fd["quality"]["z_score"],
-                                }
-                            _frows = []
-                            _mrow = _peer_fund_row(ticker_input, fund)
-                            if _mrow:
-                                _frows.append(_mrow)
-                            for _pt in _peer_tickers()[:4]:
-                                try:
-                                    _pfin = cached_fetch_sec_financials(_pt)
-                                    if not _pfin:
-                                        continue
-                                    _pmc  = (cached_fetch_company_details(_pt, POLYGON_API_KEY) or {}).get("Market Cap")
-                                    _row  = _peer_fund_row(_pt, compute_fundamentals(_pfin, market_cap=_pmc))
-                                    if _row:
-                                        _frows.append(_row)
-                                except Exception:
-                                    pass
-                            if len(_frows) > 1:
-                                st.markdown('<div class="section-header">Fundamentals vs Peers</div>',
-                                            unsafe_allow_html=True)
-                                st.dataframe(pd.DataFrame(_frows).set_index("Ticker"),
-                                             use_container_width=True)
-                                st.markdown(
-                                    "<div style='font-size:0.72rem;color:#94a3b8;margin-top:0.25rem'>"
-                                    "Blanks mean a metric wasn't available for that peer (e.g. no market cap "
-                                    "for valuation multiples, or banks for margins). F-Score 8–9 = strong; "
-                                    "Z-Score &gt; 2.99 = safe zone.</div>",
-                                    unsafe_allow_html=True)
+                        _frows = _peer_funds() if (_peer_tickers() and not is_crypto) else []
+                        if _frows:
+                            _grp = peer_group_for(ticker_input)
+                            _how = (f"{_grp[0]}" if (_grp and _peers_are_auto())
+                                    else "chosen by sector and size" if _peers_are_auto()
+                                    else "your peers")
+                            st.markdown(
+                                '<div class="section-header">Valuation vs Peers '
+                                '<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
+                                f'text-transform:none;font-size:0.7rem">· {_how}</span></div>',
+                                unsafe_allow_html=True)
+                            _pm = peer_median(_frows, skip=ticker_input)
+                            _cols = [k for k, _l, _kd in PEER_COLUMNS if k != "shareholder_yield"]
+                            _lbl = {k: lab for k, lab, _kd in PEER_COLUMNS}
+                            _kind = {k: kd for k, _l, kd in PEER_COLUMNS}
+
+                            def _pfmt(k, x):
+                                if not isinstance(x, (int, float)):
+                                    return "—"
+                                if _kind[k] == "bn":
+                                    return f"${x / 1e9:,.0f}B"
+                                if _kind[k] == "x":
+                                    return f"{x:.1f}×"
+                                return f"{x:.1f}%"
+                            _tbl = pd.DataFrame(
+                                [{"Ticker": r["ticker"], **{_lbl[k]: _pfmt(k, r.get(k)) for k in _cols}}
+                                 for r in _frows + [_pm]]).set_index("Ticker")
+                            st.dataframe(_tbl, use_container_width=True)
+                            st.markdown(
+                                "<div style='font-size:0.72rem;color:#94a3b8;margin-top:0.25rem'>"
+                                "Every company on its own latest filings (trailing twelve months where "
+                                "a 10-Q is newer than the 10-K) and its own market cap. Growth is "
+                                "year on year. A dash means the figure isn't meaningful or wasn't "
+                                "filed - banks have no gross margin, a loss has no P/E.</div>",
+                                unsafe_allow_html=True)
 
                         # Revenue & net income trend with operating margin
                         _t = fund["trend"]

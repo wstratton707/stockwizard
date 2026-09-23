@@ -1022,6 +1022,21 @@ def suggest_peers(ticker: str, sector: str = "", n: int = 4, api_key: str = "",
         rankings = {}
 
     entry = rankings.get(t) or {}
+
+    # 0. Curated industry group, nearest in size first. Sector-and-size alone
+    #    gave Apple three chipmakers; the industry is what makes a comparable.
+    from peer_groups import peer_group_for
+    grp = peer_group_for(t)
+    if grp:
+        members = list(grp[1])
+        mc = market_cap or entry.get("mcap_est") or 0
+        if mc > 0 and rankings:
+            def _gap(m):
+                other = (rankings.get(m) or {}).get("mcap_est")
+                return abs(math.log(other / mc)) if other and other > 0 else float("inf")
+            members.sort(key=_gap)       # stable: unsized names keep list order
+        return members[:n]
+
     sec = entry.get("sector") or (sector or "")
     if not sec or str(sec).lower() in ("unknown", "cryptocurrency", ""):
         return []
