@@ -185,24 +185,69 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
     return df.sort_values("Date").reset_index(drop=True)
 
 
+def _company_details_yf(ticker, log=print):
+    """Company profile from yfinance. Same keys as the Polygon shape.
+
+    Used when Polygon returns nothing. That is not a rare case: the free tier
+    allows five calls a minute, so a busy moment, an expired key or an outage
+    all land here - and every one of them used to return {}, which took out the
+    whole valuation slide, every market-cap-derived ratio (P/E, P/S, P/B,
+    EV/EBITDA, FCF yield, Altman Z) and the entire company snapshot. Three of
+    thirteen slides reading "N/A" because one lookup failed is a bad trade for a
+    fallback this cheap.
+    """
+    try:
+        import yfinance as yf
+        info = yf.Ticker(ticker).info or {}
+    except Exception as e:
+        log(f"   yfinance company details failed for {ticker}: {type(e).__name__}")
+        return {}
+    if not info.get("longName") and not info.get("marketCap"):
+        return {}
+    _sector = info.get("sector") or info.get("industry") or "N/A"
+    return {
+        "Ticker":      ticker,
+        "Name":        info.get("longName") or info.get("shortName") or "N/A",
+        "Sector":      _sector,
+        "Industry":    info.get("industry") or _sector,
+        "Exchange":    info.get("exchange") or "N/A",
+        "Market Cap":  info.get("marketCap") or "N/A",
+        "Employees":   info.get("fullTimeEmployees") or "N/A",
+        "Description": info.get("longBusinessSummary") or "N/A",
+        "Website":     info.get("website") or "N/A",
+        "Country":     (info.get("country") or "N/A"),
+        "source":      "Yahoo Finance",
+    }
+
+
 def fetch_company_details(ticker, api_key, log=print):
     log(f"Fetching company details for {ticker}...")
     data = _get(f"/v3/reference/tickers/{ticker}", api_key)
     if not data:
-        return {}
+        log(f"   Polygon returned nothing for {ticker}; trying Yahoo Finance")
+        return _company_details_yf(ticker, log=log)
     r = data.get("results", {})
     # Polygon's sic_description arrives ALL-CAPS ("RUBBER & PLASTICS FOOTWEAR")
     # and reads like a data glitch in client-facing reports; locale is lowercase.
     _sic = r.get("sic_description") or "N/A"
     if _sic.isupper():
         _sic = _sic.title()
+    # A Polygon record with no market cap still breaks every valuation ratio,
+    # so top that one field up rather than discarding an otherwise good record.
+    _mcap = r.get("market_cap")
+    if not _mcap:
+        try:
+            import yfinance as yf
+            _mcap = (yf.Ticker(ticker).info or {}).get("marketCap")
+        except Exception:
+            _mcap = None
     return {
         "Ticker":      ticker,
         "Name":        r.get("name", "N/A"),
         "Sector":      _sic,
         "Industry":    _sic,
         "Exchange":    r.get("primary_exchange", "N/A"),
-        "Market Cap":  r.get("market_cap", "N/A"),
+        "Market Cap":  _mcap or "N/A",
         "Employees":   r.get("total_employees", "N/A"),
         "Description": r.get("description", "N/A"),
         "Website":     r.get("homepage_url", "N/A"),

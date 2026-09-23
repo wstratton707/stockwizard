@@ -55,6 +55,39 @@ def market_beta(stock_returns, market_returns):
         return None
 
 
+# MIC codes are what the data providers return and what nobody outside market
+# operations reads. "XNAS" on a client-facing slide looks like a data glitch;
+# the exchange's own name does not. Unknown codes pass through unchanged rather
+# than being guessed at.
+_EXCHANGE_NAMES = {
+    "XNAS": "Nasdaq",          "XNGS": "Nasdaq",        "XNMS": "Nasdaq",
+    "XNCM": "Nasdaq",          "NASDAQ": "Nasdaq",
+    "XNYS": "NYSE",            "NYSE": "NYSE",
+    "ARCX": "NYSE Arca",       "XASE": "NYSE American", "AMEX": "NYSE American",
+    "BATS": "Cboe BZX",        "XCBO": "Cboe",
+    "XLON": "London Stock Exchange",
+    "XTSE": "Toronto Stock Exchange",
+    "XETR": "Xetra",           "XPAR": "Euronext Paris",
+    "XAMS": "Euronext Amsterdam",
+    "XTKS": "Tokyo Stock Exchange",
+    "XHKG": "Hong Kong Stock Exchange",
+    "XSWX": "SIX Swiss Exchange",
+    # yfinance returns its own short codes rather than MICs.
+    "NMS": "Nasdaq",           "NGM": "Nasdaq",         "NCM": "Nasdaq",
+    "NYQ": "NYSE",             "ASE": "NYSE American",  "PCX": "NYSE Arca",
+    "BTS": "Cboe BZX",         "LSE": "London Stock Exchange",
+    "TOR": "Toronto Stock Exchange",
+}
+
+
+def exchange_name(code):
+    """Readable exchange name for a MIC code; the code itself if unrecognised."""
+    if not code:
+        return ""
+    c = str(code).strip()
+    return _EXCHANGE_NAMES.get(c.upper(), c)
+
+
 def blume_adjust(beta):
     """Blume-adjusted beta: 2/3 x raw + 1/3 x 1.0.
 
@@ -1122,22 +1155,46 @@ def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, 
     except Exception:
         rsi = np.nan
 
+    # Both averages or neither. Calling a stock "bullish" purely because it is
+    # above its 50-day, while it sits BELOW the 200-day, is the reading most
+    # readers weigh the other way - TSLA at $375.30 was above a $349.60 50-day
+    # and below a $397.06 200-day, and the report called that bullish without
+    # mentioning the longer average at all.
     ma50_sig = ""
-    if "MA50" in df.columns and pd.notna(latest.get("MA50")):
-        ma50_sig = ("above its 50-day moving average — bullish"
-                    if latest["Close"] > latest["MA50"]
-                    else "below its 50-day moving average — cautionary")
+    _c   = latest.get("Close")
+    _m50 = latest.get("MA50")  if "MA50"  in df.columns else None
+    _m200 = latest.get("MA200") if "MA200" in df.columns else None
+    if _c is not None and pd.notna(_m50):
+        _above50 = _c > _m50
+        if pd.notna(_m200):
+            _above200 = _c > _m200
+            if _above50 and _above200:
+                ma50_sig = "above both its 50- and 200-day moving averages — bullish"
+            elif _above50 and not _above200:
+                ma50_sig = ("above its 50-day but below its 200-day moving average "
+                            "— a recovering short-term trend inside a weaker long-term one")
+            elif not _above50 and _above200:
+                ma50_sig = ("below its 50-day but above its 200-day moving average "
+                            "— a pullback within an intact long-term uptrend")
+            else:
+                ma50_sig = "below both its 50- and 200-day moving averages — cautionary"
+        else:
+            ma50_sig = ("above its 50-day moving average — constructive" if _above50
+                        else "below its 50-day moving average — cautionary")
 
     # Same five zones as excel_builder._technical_posture — the dashboard bullet
     # and this paragraph once read the same RSI 51 as "positive momentum" and
     # "neutral territory" in one workbook.
     rsi_str = ""
     if pd.notna(rsi):
-        if   rsi > 70:  rsi_str = f"RSI {rsi:.0f} — overbought territory"
-        elif rsi < 30:  rsi_str = f"RSI {rsi:.0f} — oversold territory"
-        elif rsi > 55:  rsi_str = f"RSI {rsi:.0f} — positive momentum"
-        elif rsi >= 45: rsi_str = f"RSI {rsi:.0f} — neutral territory"
-        else:           rsi_str = f"RSI {rsi:.0f} — soft momentum"
+        # Each fragment terminates itself. Without the full stop the join below
+        # ran two sentences together - "RSI 59 - positive momentum  The stock
+        # sits 23.4% below..." - which reads as a typo in a paid report.
+        if   rsi > 70:  rsi_str = f"RSI {rsi:.0f} — overbought territory."
+        elif rsi < 30:  rsi_str = f"RSI {rsi:.0f} — oversold territory."
+        elif rsi > 55:  rsi_str = f"RSI {rsi:.0f} — positive momentum."
+        elif rsi >= 45: rsi_str = f"RSI {rsi:.0f} — neutral territory."
+        else:           rsi_str = f"RSI {rsi:.0f} — soft momentum."
 
     w52h = latest.get("52W_High", np.nan)
     w52l = latest.get("52W_Low", np.nan)
@@ -1148,7 +1205,11 @@ def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, 
                    f"{'below' if pct_from_high < 0 else 'above'} its 52-week high "
                    f"of ${w52h:,.2f} (52-week low: ${w52l:,.2f}).")
 
-    vol_str    = f"20-day annualised volatility: {vol_20d*100:.1f}%." if pd.notna(vol_20d) else ""
+    # The deck carries three volatilities and two drawdowns measured over
+    # different windows, and a reader comparing 59.6% on the cover with 47.0%
+    # here sees a contradiction rather than two windows. Both are named.
+    vol_str    = (f"Recent (20-day) annualised volatility: {vol_20d*100:.1f}%."
+                  if pd.notna(vol_20d) else "")
     sharpe_str = ""
     if sharpe and pd.notna(sharpe):
         q = "strong" if sharpe > 1 else ("modest" if sharpe > 0.5 else "weak")
@@ -1158,17 +1219,22 @@ def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, 
 
     mc_str = ""
     if mc_summary:
+        # P5 and P95 are the OUTER band. Calling P95 "bull" contradicted the
+        # forecast slide beside it, which labels P75 Bull ($549.09) and P95
+        # Best ($925.62) - the same number under two names in one deck. Use the
+        # percentile names here and let the slide's table carry the scenarios.
         mc_str = (f"{forecast_method} ({mc_summary['Simulations']:,} paths, "
-                  f"{mc_summary['Forecast Horizon (days)']} days): median "
-                  f"${mc_summary['Median (P50)']:,.2f} "
-                  f"(bear ${mc_summary['Bear Case (P5)']:,.2f} / "
-                  f"bull ${mc_summary['Best Case (P95)']:,.2f}), "
+                  f"{mc_summary['Forecast Horizon (days)']} trading days): median "
+                  f"${mc_summary['Median (P50)']:,.2f}, with a 5th-to-95th "
+                  f"percentile range of ${mc_summary['Bear Case (P5)']:,.2f} to "
+                  f"${mc_summary['Best Case (P95)']:,.2f}; "
                   f"{mc_summary['Prob. of Gain']} probability of gain.")
 
     company_str = ""
     if company_details:
+        _exch = exchange_name(company_details.get("Exchange"))
         company_str = (f"{ticker} ({company_details.get('Name', ticker)}) "
-                       f"trades on {company_details.get('Exchange', 'N/A')}.")
+                       f"trades on {_exch}." if _exch else "")
 
     lines = [
         f"{ticker} delivered a cumulative return of {period_ret:+.1f}% over the selected period, "
@@ -1177,9 +1243,13 @@ def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, 
     for s in [
         ma50_sig and f"Price is currently {ma50_sig}.",
         rsi_str, w52_str,
-        vol_str and f"{vol_str} Peak 60-day drawdown: {drawdown_60d:.1f}%.",
+        vol_str and f"{vol_str} Worst 60-day drawdown: {drawdown_60d:.1f}%.",
         sharpe_str, company_str, mc_str,
-        "This report is generated programmatically and does not constitute investment advice."
+        # No trailing disclaimer. Every slide already carries one in its footer
+        # and slide 13 is nothing but the disclaimer, so this third copy bought
+        # nothing - and it was the sentence that pushed the paragraph past the
+        # deck's 620-character box and got itself cut off mid-word, which is
+        # the one thing worse than not saying it.
     ]:
         if s:
             lines.append(s)

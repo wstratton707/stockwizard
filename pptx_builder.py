@@ -21,7 +21,6 @@ try:
     from pptx.util import Inches, Pt, Emu
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN
-    from pptx.util import Inches, Pt
     PPTX_AVAILABLE = True
 except ImportError:
     PPTX_AVAILABLE = False
@@ -604,13 +603,25 @@ def _build_fundamentals_slide(prs, ticker, fundamentals, page_num, total):
     v, m, r, l, g = f["valuation"], f["margins"], f["returns"], f["leverage"], f["growth"]
     q, fc = f.get("quality", {}), f.get("fcf", {})
 
-    def pc(x, suffix=""):
-        return f"{x}{suffix}" if x is not None else "N/A"
+    def pc(x, suffix="", undefined=False):
+        """Format, or say WHY there is no number.
+
+        "N/A" was doing two jobs: data we do not have, and a quantity that does
+        not exist. A growth rate from a loss year to a profit is genuinely
+        undefined - no data source would fix it - so it reads "n/m" (not
+        meaningful) while a gap in the data keeps reading "N/A"."""
+        if x is not None:
+            return f"{x}{suffix}"
+        return "n/m" if undefined else "N/A"
 
     s = _blank_slide(prs)
     _slide_header(s, f"{ticker} — Fundamentals & Valuation",
                   f"Source: {f.get('source','—')}   ·   FY ending {f.get('as_of','—')}")
 
+    # Rows with nothing in them are dropped below rather than printed as a
+    # column of "N/A", which is the single loudest thing on the slide and says
+    # only that a lookup failed. "n/m" stays: it is a statement about the
+    # quantity, not about the data.
     left = [
         ("P/E", pc(v["pe"], "x")), ("P/S", pc(v["ps"], "x")), ("P/B", pc(v["pb"], "x")),
         ("EV / EBITDA", pc(f.get("ev_ebitda"), "x")), ("FCF Yield", pc(fc.get("fcf_yield"), "%")),
@@ -621,14 +632,24 @@ def _build_fundamentals_slide(prs, ticker, fundamentals, page_num, total):
     right = [
         ("Revenue YoY", pc(g["revenue_yoy"], "%"), (g["revenue_yoy"] or 0) >= 0),
         ("EPS YoY", pc(g["eps_yoy"], "%"), (g["eps_yoy"] or 0) >= 0),
-        ("Revenue CAGR", pc(g["revenue_cagr"], "%")), ("EPS CAGR", pc(g["eps_cagr"], "%")),
+        ("Revenue CAGR", pc(g["revenue_cagr"], "%")),
+        # A CAGR spanning a sign change has no value; that is arithmetic, not a
+        # missing feed. TSLA lost money ten years ago and earns money now.
+        ("EPS CAGR", pc(g["eps_cagr"], "%",
+                        undefined=(g.get("eps_cagr") is None
+                                   and g.get("eps_yoy") is not None))),
         ("Current Ratio", pc(l["current_ratio"])), ("Debt / Equity", pc(l["debt_to_equity"])),
         ("Free Cash Flow", f"${fc['fcf']/1e9:,.1f}B" if fc.get("fcf") is not None else "N/A"),
+        # Piotroski reads 8-9 strong, 5-7 middling, 0-4 weak. Colouring
+        # anything under 7 red painted a perfectly ordinary 6 as a failure.
         ("Piotroski F-Score", f"{_fs} / 9" if _fs is not None else "N/A",
-         (_fs >= 7) if _fs is not None else None),
+         None if _fs is None else (True if _fs >= 7 else (False if _fs <= 4 else None))),
         ("Altman Z-Score", f"{_z} ({_zone})" if _z is not None else "N/A",
          (_zone == "safe") if _z is not None else None),
     ]
+    left  = [r for r in left  if r[1] != "N/A"] or left
+    right = [r for r in right if r[1] != "N/A"] or right
+
     _text_box(s, "Valuation & Profitability", 0.5, 1.4, 5.9, 0.35,
               font_size=13, bold=True, color=C_NAVY)
     _kv_block(s, left, 0.5, 1.85, 5.95, col_w=3.1, row_h=0.52)
@@ -675,9 +696,20 @@ def build_stock_pptx(ticker, df, period_label,
                   if len(_cum) else float("nan"))
 
     def _fmt_pct(v):
+        """Signed percentage - for quantities that can go either way."""
         if v is None or (isinstance(v, float) and math.isnan(v)):
             return "N/A"
         return f"{v:+.2f}%"
+
+    def _fmt_pct_abs(v):
+        """Unsigned percentage - for magnitudes that have no direction.
+
+        Volatility printed as "+59.62%" invites the reader to ask what a
+        negative volatility would be. It cannot be negative, so it carries no
+        sign."""
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            return "N/A"
+        return f"{v:.2f}%"
 
     def _fmt_ratio(v):
         if v is None or (isinstance(v, float) and math.isnan(v)):
@@ -722,7 +754,11 @@ def build_stock_pptx(ticker, df, period_label,
               font_size=15, italic=True, color=C_ACCENT, align=PP_ALIGN.LEFT)
 
     sector   = cd.get("Sector", "")
-    exchange = cd.get("Exchange", "")
+    # MIC / yfinance codes are operations plumbing, not something to print on a
+    # client-facing slide: "XNAS" reads as a data glitch where "Nasdaq" reads as
+    # a fact.
+    from analysis import exchange_name as _exch_name
+    exchange = _exch_name(cd.get("Exchange", ""))
     meta_str = "   ·   ".join(filter(None, [sector.title() if sector else "", exchange, f"Period: {period_label}"]))
     _text_box(sl, meta_str, 0.9, 3.9, 12, 0.35,
               font_size=11, color=RGBColor(0x94, 0xA3, 0xB8), align=PP_ALIGN.LEFT)
@@ -752,13 +788,19 @@ def build_stock_pptx(ticker, df, period_label,
     _slide_header(sl, "The Bottom Line", ticker)
     _slide_footer(sl, _next_page(), total_slides)
 
-    _rect(sl, 0.3, 1.45, 12.7, 2.15, fill_rgb=C_LIGHT)
-    _rect(sl, 0.3, 1.45, 0.09, 2.15, fill_rgb=C_ACCENT)
+    # The panel runs to the KPI row at y=4.05 rather than stopping at 3.60 and
+    # leaving the gap empty. The old 620-character cap cut the paragraph
+    # mid-sentence - a verdict that stops at "Monte Carlo (1,000 paths, 252
+    # trading days): median…" is worse than no verdict, because the reader can
+    # see the number was there and got lost. The cap now sits above what the
+    # generator can produce, and the box has the height to hold it.
+    _rect(sl, 0.3, 1.45, 12.7, 2.50, fill_rgb=C_LIGHT)
+    _rect(sl, 0.3, 1.45, 0.09, 2.50, fill_rgb=C_ACCENT)
     _text_box(sl, "VERDICT", 0.55, 1.62, 11, 0.3, font_size=11, bold=True, color=C_NAVY)
     _bl_text = summary_text or f"{ticker} analysis generated by QuantWizard."
-    if len(_bl_text) > 620:
-        _bl_text = _bl_text[:620].rsplit(" ", 1)[0] + "…"
-    _text_box(sl, _bl_text, 0.55, 1.98, 12.2, 1.55, font_size=12, color=C_DARK_TEXT)
+    if len(_bl_text) > 1000:
+        _bl_text = _bl_text[:1000].rsplit(" ", 1)[0] + "…"
+    _text_box(sl, _bl_text, 0.55, 1.98, 12.2, 1.90, font_size=11.5, color=C_DARK_TEXT)
 
     _bl_kpis = [
         ("Current Price", f"${latest['Close']:,.2f}", None),
@@ -821,7 +863,7 @@ def build_stock_pptx(ticker, df, period_label,
         ("Ticker",    ticker),
         ("Company",   cd.get("Name",     "N/A")),
         ("Sector",    cd.get("Sector",   "N/A")),
-        ("Exchange",  cd.get("Exchange", "N/A")),
+        ("Exchange",  _exch_name(cd.get("Exchange")) or "N/A"),
         ("Market Cap", mc_str),
         ("Employees", emp_str),
         ("Country",   country),
@@ -831,7 +873,7 @@ def build_stock_pptx(ticker, df, period_label,
 
     # ── Slide 3: Key Metrics ──────────────────────────────────────────────────
     sl = _blank_slide(prs)
-    _slide_header(sl, "Key Performance Metrics", f"{ticker}  ·  {period_label}")
+    _slide_header(sl, "Range, Risk & Technical Levels", f"{ticker}  ·  {period_label}")
     _slide_footer(sl, _next_page(), total_slides)
 
     rsi_val = latest.get("RSI14")
@@ -843,20 +885,24 @@ def build_stock_pptx(ticker, df, period_label,
     rsi_str = f"{rsi_val:.1f}" if rsi_val is not None else "N/A"
     rsi_pos = (rsi_val < 70) if rsi_val is not None else None
 
+    # Current Price, Period Return, Sharpe, Ann. Volatility and Max Drawdown all
+    # already appear on the cover and again on The Bottom Line. Printing them a
+    # third time made this slide read as filler and buried the things that ARE
+    # only here: the 52-week range and the technical levels. Each figure now
+    # appears once, and every window is named so the reader is not comparing a
+    # 10-year volatility on the cover with a 20-day one in the verdict and
+    # concluding the deck contradicts itself.
     col1 = [
-        ("Current Price",       f"${latest['Close']:,.2f}"),
-        ("Period Return",       _fmt_pct(period_ret),    period_ret >= 0),
         ("52-Week High",        f"${latest.get('52W_High', 0):,.2f}" if latest.get('52W_High') else "N/A"),
         ("52-Week Low",         f"${latest.get('52W_Low', 0):,.2f}"  if latest.get('52W_Low')  else "N/A"),
         ("% From 52W High",     _fmt_pct((latest.get("Pct_From_52W_High") or 0) * 100),
                                 (latest.get("Pct_From_52W_High") or -1) > -0.05),
+        (f"Ann. Return ({period_label})", _fmt_pct(ann_ret * 100), ann_ret >= 0),
     ]
     col2 = [
-        ("Sharpe Ratio",        _fmt_ratio(sharpe),  sharpe > 1 if not math.isnan(sharpe) else None),
         ("Sortino Ratio",       _fmt_ratio(sortino), sortino > 1 if not math.isnan(sortino) else None),
-        ("Ann. Return",         _fmt_pct(ann_ret * 100), ann_ret >= 0),
-        ("Ann. Volatility",     _fmt_pct(ann_std * 100)),
-        ("Max Drawdown",        _fmt_pct(max_dd),    max_dd > -20),
+        (f"Ann. Volatility ({period_label})", _fmt_pct_abs(ann_std * 100)),
+        (f"Max Drawdown ({period_label})",    _fmt_pct(max_dd),    max_dd > -20),
     ]
     col3 = [
         ("20-Day MA",   f"${latest.get('MA20', 0):,.2f}"  if latest.get('MA20')  else "N/A"),
@@ -866,7 +912,7 @@ def build_stock_pptx(ticker, df, period_label,
         ("BB %B",       f"{latest.get('BB_Pct', 0):.2f}"  if latest.get('BB_Pct') is not None else "N/A"),
     ]
 
-    _text_box(sl, "Price & Returns",   0.3,  1.5, 4.1, 0.28, font_size=11, bold=True, color=C_NAVY)
+    _text_box(sl, "Range & Returns",   0.3,  1.5, 4.1, 0.28, font_size=11, bold=True, color=C_NAVY)
     _text_box(sl, "Risk Metrics",      4.65, 1.5, 4.1, 0.28, font_size=11, bold=True, color=C_NAVY)
     _text_box(sl, "Technical Levels",  9.0,  1.5, 4.1, 0.28, font_size=11, bold=True, color=C_NAVY)
 
@@ -927,12 +973,19 @@ def build_stock_pptx(ticker, df, period_label,
         if buf_mc:
             _add_image(sl, buf_mc, 0.6, 1.25, 8.5, 5.0)
 
+        # run_monte_carlo stores these as rounded floats, so passing them
+        # straight through printed "375.3" - no currency, no cents - beside
+        # percentages that were already formatted strings.
+        def _money(key):
+            v = mc_summary.get(key)
+            return f"${v:,.2f}" if isinstance(v, (int, float)) else (v or "N/A")
+
         mc_pairs = [
-            ("Last Price",      mc_summary.get("Last Price", "N/A")),
-            ("Median (P50)",    mc_summary.get("Median (P50)", "N/A")),
-            ("Bear (P5)",       mc_summary.get("Bear Case (P5)", "N/A")),
-            ("Bull (P75)",      mc_summary.get("Bull Case (P75)", "N/A")),
-            ("Best (P95)",      mc_summary.get("Best Case (P95)", "N/A")),
+            ("Last Price",      _money("Last Price")),
+            ("Median (P50)",    _money("Median (P50)")),
+            ("Bear (P5)",       _money("Bear Case (P5)")),
+            ("Bull (P75)",      _money("Bull Case (P75)")),
+            ("Best (P95)",      _money("Best Case (P95)")),
             ("Prob. of Gain",   mc_summary.get("Prob. of Gain", "N/A")),
             ("Ann. Volatility", mc_summary.get("Ann. Volatility", "N/A")),
         ]
