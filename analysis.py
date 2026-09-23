@@ -340,10 +340,18 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
         return round((cur / prev - 1) * 100, 1) if (cur and prev and prev > 0) else None
 
     def cagr(field):
+        """Annualised growth, or None when a CAGR is not defined.
+
+        BOTH endpoints must be positive. A fractional power of a negative
+        number is complex in Python, and round() then raises TypeError rather
+        than returning anything — so a single loss year took the whole
+        fundamentals block down instead of blanking one cell. Guarding `old`
+        alone was not enough: `cur` is the one that goes negative when a
+        profitable company posts a loss in the latest year."""
         cur = _fin_val(inc, field, 0)
         n   = len(inc) - 1
         old = _fin_val(inc, field, n)
-        if cur and old and old > 0 and n >= 1:
+        if cur and old and cur > 0 and old > 0 and n >= 1:
             return round(((cur / old) ** (1 / n) - 1) * 100, 1)
         return None
 
@@ -402,7 +410,13 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
         if not (cur and old and n >= 1):
             return None
         old_adj = old / _split_factor_to_oldest()
-        if old_adj <= 0:
+        # Both endpoints must be positive — see cagr() above. This is the site
+        # that actually crashed: INTC (latest diluted EPS -0.06, oldest 2.12)
+        # and F (-2.06 from 1.15) both raised TypeError here, which reached the
+        # Financials tab as a raw traceback and silently blanked fundamentals in
+        # every exported report. A company whose earnings went from positive to
+        # negative has no meaningful CAGR; say so by returning None.
+        if old_adj <= 0 or cur <= 0:
             return None
         return round(((cur / old_adj) ** (1 / n) - 1) * 100, 1)
 
@@ -455,9 +469,37 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
     cash_bal   = _fin_val(bal, "cash")
     if cash_bal is None:
         cash_bal = _sup("cash")
-    debt_cur   = _fin_val(bal, "debt_current")
-    total_debt = (sum(v for v in (ltd, debt_cur) if v is not None)
-                  if (ltd is not None or debt_cur is not None) else None)
+    # Short-term investments are cash for net-debt purposes - liquid claims that
+    # could retire debt today. Added to the cash side rather than netted against
+    # debt so `cash_bal` keeps meaning "cash and equivalents" wherever else it
+    # is read. Absent on the Polygon path, where it degrades to None and the
+    # figure is simply cash, as before.
+    _sti = _fin_val(bal, "short_term_investments")
+    if _sti is not None:
+        cash_bal = (cash_bal or 0.0) + _sti
+
+    # Current debt: prefer the roll-up when the filer reports one, otherwise sum
+    # the components. Mixing the two double-counts - DebtCurrent already
+    # contains the current portion of long-term debt and any commercial paper.
+    _dc_total = _fin_val(bal, "debt_current_total")
+    if _dc_total is not None:
+        # The roll-up already contains commercial paper and other short-term
+        # borrowing; adding them again would double-count.
+        debt_cur = _dc_total
+    else:
+        _parts = [_fin_val(bal, k) for k in
+                  ("debt_current", "commercial_paper", "short_term_borrowings")]
+        _parts = [v for v in _parts if v is not None]
+        debt_cur = sum(_parts) if _parts else None
+
+    # Total debt, most complete source first. A filer stating its whole debt in
+    # one fact (Verizon, GM) is believed over anything reassembled from parts,
+    # because for those filers the parts are incomplete - the non-current tag
+    # this code looks for is simply not among the ones they file.
+    total_debt = _fin_val(bal, "debt_total_incl_current")
+    if total_debt is None:
+        total_debt = (sum(v for v in (ltd, debt_cur) if v is not None)
+                      if (ltd is not None or debt_cur is not None) else None)
     if total_debt is None:
         total_debt = _sup("total_debt")
     ebitda     = (oi + da) if (oi is not None and da is not None) else None
@@ -587,8 +629,14 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
 
     # Base FCF: average of up to the last 3 positive annual FCF values (the trend
     # array is oldest→newest); fall back to the single latest FCF.
-    _fcf_all  = [x for x in (fundamentals.get("trend", {}).get("fcf") or [])
-                 if isinstance(x, (int, float))]
+    # `_fcf_raw` keeps every slot so position == fiscal year; `_fcf_pos` carries
+    # (position, value) for the positive ones. Collapsing straight to a list of
+    # values loses the time axis, which is what made the growth rate below span
+    # the wrong number of years.
+    _fcf_raw  = list(fundamentals.get("trend", {}).get("fcf") or [])
+    _fcf_pos  = [(i, x) for i, x in enumerate(_fcf_raw)
+                 if isinstance(x, (int, float)) and x > 0]
+    _fcf_all  = [x for x in _fcf_raw if isinstance(x, (int, float))]
     fcf_hist  = [x for x in _fcf_all if x > 0]
     _n_neg    = sum(1 for x in _fcf_all if x <= 0)
     base_fcf = (sum(fcf_hist[-3:]) / len(fcf_hist[-3:])) if fcf_hist else None
@@ -642,10 +690,20 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
 
     # Base-case stage-1 growth: FCF CAGR if it's sane, else revenue CAGR, else 8%.
     # Clamped so the model can't assume implausible decade-long hyper-growth.
+    # The exponent is the number of years BETWEEN the first and last positive
+    # observation, not the count of observations that survived filtering. Two
+    # separate filters above collapse the time axis - non-numeric entries, then
+    # negative ones - and using the surviving count compresses the span and
+    # inflates the rate. Goldman Sachs: 4 positive years spread across a 6-year
+    # span read as 22.56% a year when the elapsed-time figure is 10.71%, an
+    # 11.86pp overstatement feeding straight into stage-1 growth. Boeing was
+    # -13.41% against a true -7.90%.
     fcf_cagr = None
-    if len(fcf_hist) >= 2 and fcf_hist[0] > 0:
-        n = len(fcf_hist) - 1
-        fcf_cagr = (fcf_hist[-1] / fcf_hist[0]) ** (1 / n) - 1
+    if len(_fcf_pos) >= 2:
+        (i0, v0), (i1, v1) = _fcf_pos[0], _fcf_pos[-1]
+        n = i1 - i0                             # elapsed periods, not entries
+        if n >= 1 and v0 > 0:
+            fcf_cagr = (v1 / v0) ** (1 / n) - 1
     rev_cagr = fundamentals.get("growth", {}).get("revenue_cagr")
     g_base = (fcf_cagr if fcf_cagr is not None
               else (rev_cagr / 100.0 if isinstance(rev_cagr, (int, float)) else 0.08))

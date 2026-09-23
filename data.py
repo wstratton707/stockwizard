@@ -271,10 +271,56 @@ _SEC_TAGS = {
     "current_liabilities": ["LiabilitiesCurrent"],
     "equity": ["StockholdersEquity",
                "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
-    "long_term_debt": ["LongTermDebtNoncurrent", "LongTermDebt"],
-    "debt_current": ["LongTermDebtCurrent", "DebtCurrent"],
+    "long_term_debt": ["LongTermDebtNoncurrent",
+                       "LongTermDebtAndCapitalLeaseObligations",
+                       "LongTermDebt"],
+    # Current debt comes in two shapes and they must not be mixed. DebtCurrent
+    # is the ROLL-UP - when a filer reports it, it already contains the current
+    # portion of long-term debt, commercial paper and any other short-term
+    # borrowing, so it is used alone. Filers that do not report it (Apple is
+    # one) report the pieces separately, and the pieces must be SUMMED.
+    #
+    # The old single list had LongTermDebtCurrent first and DebtCurrent second
+    # as a fallback, which is backwards twice over: it preferred the narrow tag
+    # to the roll-up, and a first-match-wins list can never add two co-existing
+    # components. Apple's FY2025 commercial paper - $7.979B, 8.8% of its total
+    # debt - was silently dropped, understating gross debt in the WACC weight
+    # and net debt in the DCF bridge.
+    # A filer that reports one of these has stated its ENTIRE interest-bearing
+    # debt in a single fact, current maturities included. Verizon tags it
+    # LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities
+    # ($157.7B at FY2025) and General Motors the same ($131.6B); neither reports
+    # LongTermDebtNoncurrent at all, so before this both had their entire
+    # non-current debt dropped - Verizon's total read $18.6B against a true
+    # ~$158B, an 88% understatement straight into the WACC weight and the DCF
+    # bridge.
+    "debt_total_incl_current": ["LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities",
+                                "DebtLongtermAndShorttermCombinedAmount"],
+    "debt_current_total": ["DebtCurrent"],
+    # Pick-one, broadest first: these OVERLAP rather than add. Verizon reports
+    # LongTermDebtCurrent 18,618 and LongTermDebtAndCapitalLeaseObligationsCurrent
+    # 18,177 for the same debt; summing them would double-count.
+    "debt_current": ["LongTermDebtAndCapitalLeaseObligationsCurrent",
+                     "LongTermDebtCurrent"],
+    # Genuinely additive - a separate instrument, not a different label for the
+    # same one. Only added when the DebtCurrent roll-up is absent, since that
+    # roll-up already contains it.
+    "commercial_paper": ["CommercialPaper"],
+    "short_term_borrowings": ["ShortTermBorrowings", "OtherShortTermBorrowings",
+                              "ShortTermNonBankLoansAndNotesPayable"],
     "cash": ["CashAndCashEquivalentsAtCarryingValue",
              "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
+    # Short-term investments count toward cash in a net-debt calculation: they
+    # are liquid claims available to retire debt, which is what net debt is
+    # asking about. Excluding them was not a decision, it was an omission -
+    # Apple carries $18.763B of them at FY2025 against $35.934B of cash, so net
+    # debt was overstated by more than half the cash balance. Non-current
+    # marketable securities are deliberately NOT included: they are not
+    # short-term claims and including them is a more aggressive convention than
+    # this model should adopt silently.
+    "short_term_investments": ["MarketableSecuritiesCurrent",
+                               "ShortTermInvestments",
+                               "AvailableForSaleSecuritiesDebtSecuritiesCurrent"],
     "retained_earnings": ["RetainedEarningsAccumulatedDeficit"],
     "net_cash_flow_from_operating_activities":
         ["NetCashProvidedByUsedInOperatingActivities",
@@ -532,7 +578,13 @@ def fetch_sec_financials(ticker, years=10, log=print):
             "liabilities": col("liabilities", fy),
             "current_liabilities": col("current_liabilities", fy),
             "equity": col("equity", fy), "long_term_debt": col("long_term_debt", fy),
-            "debt_current": col("debt_current", fy), "cash": col("cash", fy),
+            "debt_current": col("debt_current", fy),
+            "debt_total_incl_current": col("debt_total_incl_current", fy),
+            "debt_current_total": col("debt_current_total", fy),
+            "commercial_paper": col("commercial_paper", fy),
+            "short_term_borrowings": col("short_term_borrowings", fy),
+            "cash": col("cash", fy),
+            "short_term_investments": col("short_term_investments", fy),
             "retained_earnings": col("retained_earnings", fy),
         })
         cf_rows.append({

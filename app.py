@@ -3051,11 +3051,28 @@ elif _page == "analysis":
                     _fin_raw = cached_fetch_sec_financials(ticker_input)
                     if not _fin_raw:
                         _fin_raw = cached_fetch_financials(ticker_input, POLYGON_API_KEY)
-                    fund = compute_fundamentals(
-                        _fin_raw, market_cap=company_details.get("Market Cap"),
-                        price=float(df["Close"].iloc[-1]),
-                        supplement=_cached_fin_supplement(ticker_input),
-                    )
+                    # Guarded because this is the only unguarded consumer of
+                    # compute_fundamentals, and an exception here reaches the
+                    # page as a raw Python traceback. That is exactly what
+                    # happened for INTC and F: a negative latest EPS raised
+                    # TypeError deep in the CAGR, and the Financials tab
+                    # rendered the stack trace. The underlying defect is fixed,
+                    # but the section should degrade to a sentence rather than
+                    # a traceback for whatever the next one turns out to be.
+                    try:
+                        fund = compute_fundamentals(
+                            _fin_raw, market_cap=company_details.get("Market Cap"),
+                            price=float(df["Close"].iloc[-1]),
+                            supplement=_cached_fin_supplement(ticker_input),
+                        )
+                    except Exception as _fund_err:
+                        import traceback as _fund_tb
+                        print(_fund_tb.format_exc())      # server log, not the page
+                        fund = {"ok": False, "reason": str(_fund_err)}
+                        st.info(
+                            f"Fundamentals couldn't be assembled for **{ticker_input}** "
+                            f"from its filings. The price history, technicals and "
+                            f"forecast above are unaffected.")
                     if fund.get("ok"):
 
                         _n_yrs = len(_fin_raw["income_statement"]) if isinstance(_fin_raw, dict) and _fin_raw.get("income_statement") is not None else 0
