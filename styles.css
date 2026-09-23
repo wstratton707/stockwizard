@@ -1278,7 +1278,11 @@ button[kind^="primary"]:active,
   max-width: none !important;
 }
 /* Both columns start below the fixed chrome. */
-section.stMain .block-container { padding-top: var(--chrome-h) !important; }
+/* Minus 40px: four zero-height elements precede the first real content on
+   every page (injected CSS, the fixed nav, the fixed tape, a marker), and
+   Streamlit puts its 16px flex gap between each - 64px of dead white under
+   the chrome, measured, before the search box. Same count on every page. */
+section.stMain .block-container { padding-top: calc(var(--chrome-h) - 40px) !important; }
 [data-testid="stSidebar"] > div:first-child { padding-top: var(--chrome-h); }
 
 .ticker-tape-wrap {
@@ -2154,4 +2158,53 @@ section[data-testid="stMain"], .stMain { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) {
   .ticker-tape-wrap:not(.ticker-tape-empty) { animation: none; }
   .ticker-tape { animation: none; }
+}
+
+
+/* ── Header metadata: text, not buttons ───────────────────────────────────────
+   Sector, exchange and quote state were drawn as rounded pills, which is the
+   shape of a filter chip - they looked clickable and did nothing. They are
+   facts about the stock, so they read as a line of metadata separated by
+   middots. The quote state keeps its colour because it carries meaning. */
+.stock-hero-tags { gap: 0; margin-top: 0.35rem; align-items: baseline; }
+.stock-hero-tag,
+.stock-hero-tag.crypto, .stock-hero-tag.etf, .stock-hero-tag.live {
+  background: none; border: none; border-radius: 0;
+  padding: 0; font-size: 0.82rem; font-weight: 500;
+  color: var(--text2); letter-spacing: 0;
+}
+.stock-hero-tag + .stock-hero-tag::before {
+  content: "·"; margin: 0 0.55rem; color: var(--text3); font-weight: 400;
+}
+.stock-hero-tag.live { color: var(--green); font-weight: 600; }
+
+
+/* ── Risk stat strip ──────────────────────────────────────────────────────────
+   Replaces four equal bordered cards. One band, hairline dividers, the number
+   as the hero of each cell and a one-line interpretation under it. Values are
+   ink: colour on this page means direction, not "this is a metric". */
+.stat-strip {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  margin: 1.25rem 0 0.5rem;
+}
+.stat-cell { padding: 0.85rem 1.1rem 0.9rem; min-width: 0; }
+.stat-cell + .stat-cell { border-left: 1px solid var(--border); }
+.stat-label {
+  font-size: 0.8rem; font-weight: 500; color: var(--text2);
+  display: flex; align-items: baseline; gap: 0.35rem;
+}
+.stat-win {
+  font-size: 0.68rem; font-weight: 600; color: var(--text3);
+  letter-spacing: 0.04em;
+}
+.stat-value {
+  font-size: 1.6rem; font-weight: 650; color: var(--brand-1);
+  font-variant-numeric: tabular-nums; line-height: 1.2; margin-top: 0.2rem;
+}
+.stat-note { font-size: 0.76rem; color: var(--text3); margin-top: 0.15rem; min-height: 1em; }
+@media (max-width: 760px) {
+  .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-cell:nth-child(3) { border-left: none; }
+  .stat-cell:nth-child(n+3) { border-top: 1px solid var(--border); }
 }

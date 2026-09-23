@@ -1,7 +1,6 @@
 import os
 import re
 import sys
-import csv
 import time as _time
 
 # ── Rerun profiler ────────────────────────────────────────────────────────────
@@ -1054,54 +1053,11 @@ with st.sidebar:
         """, unsafe_allow_html=True)
 
 
-    # ── Waitlist ──────────────────────────────────────────────────────────────
-    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
-    st.markdown('<div class="sidebar-group">Stay Updated</div>', unsafe_allow_html=True)
-    email_input = st.text_input("", placeholder="your@email.com",
-                                key="waitlist_email", label_visibility="collapsed")
-    # The consent notice sits at the point of collection, not only in the footer —
-    # this form is the first place we ask anyone for personal data.
-    st.markdown(
-        '<div style="font-size:0.68rem;color:#94a3b8;line-height:1.5;'
-        'margin:-0.35rem 0 0.5rem">By joining you agree to our '
-        '<a href="?page=terms" target="_self" style="color:#64748b">Terms</a> and '
-        '<a href="?page=privacy" target="_self" style="color:#64748b">Privacy '
-        'Policy</a>. We will not share your address.</div>',
-        unsafe_allow_html=True)
-    if st.button("Join Waitlist", use_container_width=True):
-        # Was: append to a local waitlist.csv. Streamlit Community Cloud runs on
-        # an ephemeral container that is rebuilt on every push and recycled when
-        # the app sleeps, so every address collected since the last restart was
-        # thrown away — we were destroying the one asset this form exists to build.
-        _wl_email = (email_input or "").strip().lower()
-        if not re.match(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$", _wl_email):
-            # `"@" in email` accepted "@" itself. Not RFC-complete, deliberately —
-            # just enough to reject the obvious typos that make an address dead.
-            st.error("Please enter a valid email.")
-        else:
-            from database import save_waitlist_email
-            if not save_waitlist_email(_wl_email, source=_page):
-                # Supabase unconfigured or unreachable. Never drop the signup on
-                # the floor: stderr reaches the Streamlit Cloud app log (Manage
-                # app → logs; greppable for WAITLIST-FALLBACK), and the CSV is a
-                # second chance if someone reads it before the container recycles.
-                print(f"[WAITLIST-FALLBACK] {_wl_email} "
-                      f"{datetime.now().isoformat()} source={_page}",
-                      file=sys.stderr, flush=True)
-                try:
-                    _wl_path = os.path.join(os.path.dirname(__file__), "waitlist.csv")
-                    _wl_new  = not os.path.exists(_wl_path)
-                    with open(_wl_path, "a", newline="", encoding="utf-8") as _f:
-                        _w = csv.writer(_f)
-                        if _wl_new:
-                            _w.writerow(["email", "timestamp", "source"])
-                        _w.writerow([_wl_email, datetime.now().isoformat(), _page])
-                except Exception:
-                    pass
-            # Same message either way: from the visitor's side it worked, and it
-            # did — we captured the address. Showing an error would lose the
-            # signup and look broken for a problem that isn't theirs.
-            st.success("Thanks! We'll be in touch.")
+    # The waitlist form that lived here was removed: it held a fifth of the
+    # screen width on every page for a sign-up box, and the Analysis page needs
+    # that width for the report. save_waitlist_email() in database.py is kept,
+    # so a form can come back somewhere deliberate (the Home page) without
+    # rebuilding the storage path.
 
 # ── Payment modal ─────────────────────────────────────────────────────────────
 # DEV_MODE_FREE: modal never shown — Stripe checkout logic preserved, not deleted.
@@ -1541,13 +1497,18 @@ elif _page == "analysis":
         if _compact:
             # Same widget key in both branches, so the value survives the switch
             # from the empty state to the results state.
-            _c_field, _c_go = st.columns([8, 1], vertical_alignment="bottom")
+            # Advanced options ride in a popover on the same row once results are
+            # showing. As an expander it was a second full-width row between the
+            # search box and the report - one more thing pushing the stock header
+            # down the page for settings most readers never open.
+            _c_field, _c_go, _c_opt = st.columns([8, 1, 1.15], vertical_alignment="bottom")
             with _c_field:
                 ticker_input = st.text_input("", **_tick_kw).strip().upper()
             with _c_go:
                 run_btn = st.button(
                     "Search", type="secondary", use_container_width=True,
                     on_click=lambda: st.session_state.update(analysis_ran=True))
+            _adv_box = _c_opt.popover("Options", use_container_width=True)
         else:
             st.markdown('<div class="field-label">Ticker</div>', unsafe_allow_html=True)
             ticker_input = st.text_input("", **_tick_kw).strip().upper()
@@ -1558,10 +1519,13 @@ elif _page == "analysis":
             # is the explanation.
             st.caption("Financial analysis, valuation, peer comparison, risk metrics, "
                        "technicals and a price forecast.")
+            _adv_box = None
 
         # ── Advanced options ─────────────────────────────────────────
         # Only things that cost a network call or genuinely change the answer.
-        with st.expander("Advanced options", expanded=False):
+        # Same widgets and keys in both states; only the container differs.
+        with (_adv_box if _adv_box is not None
+              else st.expander("Advanced options", expanded=False)):
             st.markdown('<div class="field-label">Benchmarks</div>',
                         unsafe_allow_html=True)
             _b1, _b2 = st.columns(2)
@@ -2476,24 +2440,56 @@ elif _page == "analysis":
                 f"Sortino Ratio ({_mwin})":   "Like Sharpe but only penalises downside volatility. Higher is better." + _mw_note,
                 f"Ann. Volatility ({_mwin})": "Annualized standard deviation of daily returns. Higher = more price swings. S&P 500 averages ~15%." + _mw_note,
             }
-            _row_items = [
-                (f"Sharpe Ratio ({_mwin})",    f"{sharpe:.2f}"  if pd.notna(sharpe)  else "N/A",
-                                    pos_neg(sharpe)  if pd.notna(sharpe)  else "neutral"),
-                (f"Sortino Ratio ({_mwin})",   f"{sortino:.2f}" if pd.notna(sortino) else "N/A",
-                                    pos_neg(sortino) if pd.notna(sortino) else "neutral"),
-                (f"Ann. Volatility ({_mwin})", f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A", "neutral"),
-                (extra_label,       extra_value,                                            "neutral"),
+            # One stat strip instead of four bordered cards. The cards each held a
+            # small number floating in a large box, coloured green or blue for no
+            # reason a reader could name. Here every value is in ink - green and
+            # red are reserved for direction elsewhere on the page - and carries
+            # one line saying what it means, which is the part people actually
+            # need from a Sharpe ratio.
+            def _sharpe_note(v):
+                if pd.isna(v):  return ""
+                if v >= 1:      return "Strong return for the risk taken"
+                if v >= 0.5:    return "Moderate return for the risk taken"
+                if v >= 0:      return "Weak return for the risk taken"
+                return "Trailed the risk-free rate"
+
+            def _sortino_note(v):
+                if pd.isna(v):  return ""
+                if v >= 1.5:    return "Downside well contained"
+                if v >= 1:      return "Moderate downside"
+                return "Large downside moves"
+
+            _spy_vol = None
+            try:
+                if "SPY_Return" in dfm.columns:
+                    _spy_vol = float(dfm["SPY_Return"].dropna().std() * np.sqrt(252))
+            except Exception:
+                _spy_vol = None
+            if pd.notna(vol_val) and _spy_vol:
+                _vr = vol_val / _spy_vol
+                _vol_note = ("About the S&P 500's swings" if 0.85 <= _vr <= 1.15
+                             else f"{_vr:.1f}x the S&P 500's swings")
+            else:
+                _vol_note = "S&P 500 averages ~15%"
+
+            _cells = [
+                ("Sharpe ratio", _mwin, f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A",
+                 _sharpe_note(sharpe), _TOOLTIPS.get(f"Sharpe Ratio ({_mwin})", "")),
+                ("Sortino ratio", _mwin, f"{sortino:.2f}" if pd.notna(sortino) else "N/A",
+                 _sortino_note(sortino), _TOOLTIPS.get(f"Sortino Ratio ({_mwin})", "")),
+                ("Volatility", _mwin, f"{vol_val*100:.1f}%" if pd.notna(vol_val) else "N/A",
+                 _vol_note, _TOOLTIPS.get(f"Ann. Volatility ({_mwin})", "")),
+                (extra_label[:1] + extra_label[1:].lower(), "", extra_value, "", ""),
             ]
-            row_cols = st.columns(len(_row_items))
-            for col, (label, value, cls) in zip(row_cols, _row_items):
-                tip = _TOOLTIPS.get(label, "")
-                tip_html = f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{tip}</span></span>' if tip else ""
-                with col:
-                    st.markdown(f"""
-                    <div class="metric-card">
-                        <div class="metric-label">{label}{tip_html}</div>
-                        <div class="metric-value {cls}">{value}</div>
-                    </div>""", unsafe_allow_html=True)
+            _strip = ""
+            for _lbl, _win, _val, _note, _tip in _cells:
+                _tip_html = (f'<span class="tooltip-wrap"> ⓘ<span class="tooltip-text">{_tip}</span></span>'
+                             if _tip else "")
+                _win_html = f'<span class="stat-win">{_win}</span>' if _win else ""
+                _strip += (f'<div class="stat-cell"><div class="stat-label">{_lbl}{_win_html}{_tip_html}</div>'
+                           f'<div class="stat-value">{_val}</div>'
+                           f'<div class="stat-note">{_note}</div></div>')
+            st.markdown(f'<div class="stat-strip">{_strip}</div>', unsafe_allow_html=True)
 
             # ── Sections ─────────────────────────────────────────────────────
             # One report became five views. The page rendered every section on
@@ -2736,26 +2732,6 @@ elif _page == "analysis":
                 # for themselves — the jump rail still needs a target, hence the
                 # zero-height anchor rather than a heading.
                 _jump_anchor("sec-chart", "Price Chart")
-                _ctrl1, _ctrl2, _ctrl3, _ctrl4, _ctrl5, _ctrl6, _ctrl7 = \
-                    st.columns([1.6, 0.7, 0.7, 0.8, 0.8, 0.6, 0.9])
-                with _ctrl1:
-                    _chart_type = st.selectbox("Type", ["Area", "Line", "Candlestick"],
-                                               index=0, key="main_chart_type")
-                with _ctrl2:
-                    _show_ma20  = st.checkbox("MA 20",  value=False, key="main_show_ma20")
-                with _ctrl3:
-                    _show_ma50  = st.checkbox("MA 50",  value=True,  key="main_show_ma50")
-                with _ctrl4:
-                    _show_ma200 = st.checkbox("MA 200", value=True,  key="main_show_ma200")
-                with _ctrl5:
-                    _show_vol   = st.checkbox("Volume", value=False, key="main_show_volume")
-                with _ctrl6:
-                    # Support/Resistance is an opt-in overlay now (off by default) —
-                    # it cluttered the default chart and most investors don't use it.
-                    _show_sr    = st.checkbox("S/R",    value=False, key="main_show_sr")
-                with _ctrl7:
-                    _show_tag   = st.checkbox("Marker", value=True, key="main_show_tag")
-
                 # ── Range control ────────────────────────────────────────────
                 # This used to be Plotly's in-plot `rangeselector`, which changes the
                 # x-range CLIENT-side and leaves the y-range alone. On a 15-year
@@ -2785,11 +2761,45 @@ elif _page == "analysis":
                 # honour before the widget is built.
                 if st.session_state.get("main_chart_range") not in _range_opts:
                     st.session_state.pop("main_chart_range", None)
-                st.markdown('<div class="field-label" style="margin-top:0.35rem">Range</div>',
-                            unsafe_allow_html=True)
-                _range_sel = st.radio("Range", _range_opts,
-                                      index=len(_range_opts) - 1, horizontal=True,
-                                      key="main_chart_range", label_visibility="collapsed")
+
+                # ── Chart toolbar ────────────────────────────────────────────
+                # One row: range, chart type, overlays. It was a dropdown, six
+                # checkboxes and a row of radio buttons stacked over ~180px - form
+                # controls, which is what made the chart read like a settings page.
+                # The same keys are reused, so a choice survives the switch.
+                _OVERLAYS = ["MA 20", "MA 50", "MA 200", "Volume", "S/R", "Marker"]
+                if "main_overlays" not in st.session_state:
+                    st.session_state["main_overlays"] = [
+                        o for o, k, d in (("MA 20", "main_show_ma20", False),
+                                          ("MA 50", "main_show_ma50", True),
+                                          ("MA 200", "main_show_ma200", True),
+                                          ("Volume", "main_show_volume", False),
+                                          ("S/R", "main_show_sr", False),
+                                          ("Marker", "main_show_tag", True))
+                        if st.session_state.get(k, d)]
+                if st.session_state.get("main_chart_type") not in ("Area", "Line", "Candlestick"):
+                    st.session_state["main_chart_type"] = "Area"
+
+                _tb1, _tb2, _tb3 = st.columns([3.4, 2.0, 3.6], vertical_alignment="center")
+                with _tb1:
+                    _range_pick = st.segmented_control(
+                        "Range", _range_opts, default=_range_opts[-1],
+                        key="main_chart_range", label_visibility="collapsed")
+                with _tb2:
+                    _type_pick = st.segmented_control(
+                        "Chart type", ["Area", "Line", "Candlestick"],
+                        key="main_chart_type", label_visibility="collapsed")
+                with _tb3:
+                    _ov = st.pills("Overlays", _OVERLAYS, selection_mode="multi",
+                                   key="main_overlays", label_visibility="collapsed") or []
+                # Clicking the active segment deselects it; treat that as "stay".
+                _range_sel = _range_pick or st.session_state.get("_main_range_last",
+                                                                 _range_opts[-1])
+                st.session_state["_main_range_last"] = _range_sel
+                _chart_type = _type_pick or "Area"
+                _show_ma20, _show_ma50, _show_ma200 = ("MA 20" in _ov, "MA 50" in _ov,
+                                                       "MA 200" in _ov)
+                _show_vol, _show_sr, _show_tag = "Volume" in _ov, "S/R" in _ov, "Marker" in _ov
                 _range_days = dict(_RANGES)[_range_sel]
                 if _range_days is None:
                     _cdf = df
@@ -4221,9 +4231,10 @@ color:var(--muted);background:var(--surface2)}
             _jump_anchor("sec-report", "Download Report")
             _stock_exports("bottom")
 
-            # Rendered last so it lists exactly the sections this run produced;
-            # it is position:fixed, so where it sits in the DOM doesn't matter.
-            _render_jump_rail()
+            # The "On this page" jump rail that rendered here predates the tabs.
+            # It listed only Overview's sections, sat unlabelled as a row of
+            # lines on the left edge, and duplicated what the sticky tab rail now
+            # does. Not called any more; _render_jump_rail() is left defined.
 
         st.markdown(render_section("Data & Methodology", _disc.DIVIDENDS), unsafe_allow_html=True)
         st.markdown(render_inline(_disc.SHORT), unsafe_allow_html=True)
