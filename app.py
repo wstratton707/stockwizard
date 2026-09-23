@@ -834,9 +834,9 @@ with st.container(key="topnav"):
         st.query_params["ticker"] = _v
 
     with _nc[1]:
-        st.text_input("Search a ticker", key="nav_search",
-                      placeholder="Search a ticker", label_visibility="collapsed",
-                      on_change=_nav_search_go)
+        st.text_input("Search a stock by ticker", key="nav_search",
+                      placeholder="Search a stock, e.g. AAPL",
+                      label_visibility="collapsed", on_change=_nav_search_go)
     for _i, (_lbl, _pg) in enumerate(
             [("Home", "home"), ("Analysis", "analysis"), ("Research", "research"),
              ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=2):

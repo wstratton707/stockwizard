@@ -2378,3 +2378,27 @@ html, body, .stApp, .stApp * { font-variant-numeric: tabular-nums; }
   }
   .stock-hero-price-block { text-align: left; }
 }
+
+/* ── Header search, legible as search ─────────────────────────────────────────
+   The first version was a translucent field on the dark bar with a grey hint,
+   and it read as part of the bar rather than as a place to type - Wyatt found
+   it hard to tell it was for a ticker at all. It is now what Yahoo and Seeking
+   Alpha use in the same position: a white field with a magnifier and a hint
+   that says what to enter. The contrast is what makes it read as an input. */
+.st-key-nav_search input {
+  background-color: #ffffff !important; color: var(--brand-1) !important;
+  border: 1px solid #ffffff !important; border-radius: 999px !important;
+  padding-left: 2.1rem !important; font-weight: 500;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.4' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><line x1='16.5' y1='16.5' x2='21' y2='21'/></svg>") !important;
+  background-repeat: no-repeat !important;
+  background-position: 0.75rem 50% !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+}
+.st-key-nav_search input::placeholder { color: #64748b !important; opacity: 1; }
+.st-key-nav_search input:focus {
+  background-color: #ffffff !important; border-color: var(--accent3) !important;
+  box-shadow: 0 0 0 3px rgba(56,189,248,0.35) !important;
+}
+@media (max-width: 640px) {
+  .st-key-topnav .st-key-nav_search { width: 11rem; }
+}
