@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
 from datetime import datetime, timedelta
 
 from constants import get_risk_free_rate
@@ -311,6 +310,10 @@ def optimise_portfolio(returns_df, risk_tolerance=5, target_return=None,
     max_sector_weight: maximum combined weight for any single sector (default 40%).
     max_weight       : maximum weight per individual position (default 30%).
     """
+    # Imported here, not at module level: scipy.optimize costs ~0.5-1.2s to
+    # import and only this optimiser needs it, while the Analysis page imports
+    # this module for its metrics - so every cold start paid for it.
+    from scipy.optimize import minimize
     n      = len(returns_df.columns)
     cols   = list(returns_df.columns)
     # Clamp max_weight so n * max_weight >= 1 (otherwise the budget constraint

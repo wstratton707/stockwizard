@@ -501,7 +501,9 @@ def _fmt_day(v):
         return str(v or "")[:10]
 import auth
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
-from portfolio_builder import render_portfolio_builder
+# portfolio_builder is imported on its own route, not here: it pulls in
+# scipy.optimize, measured at 1.2s of import, and every page paid that at cold
+# start (each deploy, each restart) to serve the one page that uses it.
 from your_portfolios import render_your_portfolios
 from legal import render_terms, render_privacy, render_legal_links
 from constants import DEV_MODE_FREE, get_risk_free_rate
@@ -803,7 +805,10 @@ with st.container(key="topnav"):
     # Column 4 was 0.95, sized for "News". "Research" is as long as "Analysis"
     # and wrapped to "Resear / ch", so it gets Analysis's width and the slack
     # comes off the brand column and the spacer.
-    _nc = st.columns([2.2, 0.4, 0.95, 1.25, 1.3, 2.0, 1.85, 1.5],
+    # Column 1 was an empty spacer; it now holds the ticker search, so a stock
+    # can be looked up from any page the way Yahoo and Seeking Alpha put search
+    # in the header. The brand and the two long links give up the width.
+    _nc = st.columns([1.9, 2.1, 0.95, 1.25, 1.3, 1.8, 1.7, 1.5],
                      vertical_alignment="center")
     _brand_mark = (
         f'<img class="topnav-mark-img" src="data:image/png;base64,{_MARK_B64}" alt="QuantWizard">'
@@ -814,6 +819,24 @@ with st.container(key="topnav"):
         '<div class="topnav-brand">' + _brand_mark +
         '<span class="topnav-word">Quant<b>Wizard</b></span></div>',
         unsafe_allow_html=True)
+    def _nav_search_go():
+        """Enter in the header search: open Analysis on that ticker."""
+        _v = re.sub(r"[^A-Za-z0-9.^=-]", "",
+                    st.session_state.get("nav_search") or "").upper()
+        st.session_state["nav_search"] = ""
+        if not _v:
+            return
+        # Runs before the script, so setting the Analysis widget's value here is
+        # allowed and the page renders on the new ticker in this same run.
+        st.session_state["analysis_ticker"] = _v
+        st.session_state["analysis_ran"] = True
+        _goto("analysis")
+        st.query_params["ticker"] = _v
+
+    with _nc[1]:
+        st.text_input("Search a ticker", key="nav_search",
+                      placeholder="Search a ticker", label_visibility="collapsed",
+                      on_change=_nav_search_go)
     for _i, (_lbl, _pg) in enumerate(
             [("Home", "home"), ("Analysis", "analysis"), ("Research", "research"),
              ("Portfolio Builder", "builder"), ("Your Portfolios", "portfolios")], start=2):
@@ -884,7 +907,21 @@ def _tape_html(items):
 # wrapper: a background thread has no ScriptRunContext, and Streamlit's cache
 # complains when touched from one. live_data.py keeps its own module-level dict,
 # so the work is not wasted.
-_TAPE = {"items": None, "ts": 0.0, "running": False}
+# State for the background fetches below. It must NOT be a plain module-level
+# dict: Streamlit re-executes this script on every interaction, which re-creates
+# every global, so a thread writing its result into one was writing into a dict
+# the next run had already replaced. The tape only ever appeared to work because
+# its underlying fetch was cached and the thread won a race to fill the old dict
+# before the next line read it. cache_resource is one object per process.
+@st.cache_resource(show_spinner=False)
+def _bg_store():
+    return {"tape": {"items": None, "ts": 0.0, "running": False},
+            "sector": {}, "sector_pending": set(),
+            "ext": {}, "ext_pending": set()}
+
+
+_BG = _bg_store()
+_TAPE = _BG["tape"]
 _TAPE_TTL = 300.0            # 5 minutes; a decorative strip does not need 60s
 
 
@@ -912,6 +949,112 @@ def _tape_nonblocking(api_key):
     # Stale quotes beat no quotes: a strip that is a few minutes old still shows
     # the market is live, and the refresh above will land shortly.
     return _TAPE["items"]
+
+
+# ── Standard sector name, resolved off the critical path ─────────────────────
+# Polygon labels a company by its SEC SIC code ("Electronic Computers" for Apple),
+# which reads as government jargon next to the sector names every other finance
+# site uses ("Technology"). yfinance has the familiar name, but fetching it
+# inline adds ~0.5s to every lookup, and a sector never changes - so it is
+# resolved once per ticker on a background thread, kept in memory and in the
+# Supabase cache for 30 days, and shown from the next view on. Until then the
+# SIC industry label stands in, which is accurate, just less familiar.
+_SECTOR = _BG["sector"]
+_SECTOR_PENDING = _BG["sector_pending"]
+
+
+def _std_sector(ticker):
+    """Familiar sector name if already known, else None. Never blocks."""
+    import threading
+    tk = (ticker or "").upper()
+    if not tk:
+        return None
+    if tk in _SECTOR:
+        return _SECTOR[tk]
+    if tk not in _SECTOR_PENDING:
+        _SECTOR_PENDING.add(tk)
+
+        def _job():
+            try:
+                s = None
+                try:
+                    from database import cache_get
+                    hit = cache_get(f"sector_{tk}")
+                    s = hit.get("s") if isinstance(hit, dict) else None
+                except Exception:
+                    s = None
+                if not s:
+                    import yfinance as yf
+                    s = (yf.Ticker(tk).info or {}).get("sector")
+                    if s:
+                        try:
+                            from database import cache_set
+                            cache_set(f"sector_{tk}", {"s": s}, ttl_hours=24 * 30)
+                        except Exception:
+                            pass
+                if s:
+                    _SECTOR[tk] = s
+            except Exception:
+                pass
+            finally:
+                _SECTOR_PENDING.discard(tk)
+
+        threading.Thread(target=_job, daemon=True).start()
+    return None
+
+
+# ── Extended-hours price, off the critical path ──────────────────────────────
+# The header showed only the regular-session price, so after the close it said
+# nothing about where the stock had moved since - Yahoo shows the after-hours
+# print beside the close. yfinance carries it, but the call is ~0.5s, so it runs
+# on a background thread and refreshes every 5 minutes; the first view of a
+# ticker shows the close alone and the next view adds the extended-hours line.
+# The same response carries the familiar sector name, so it feeds _SECTOR too.
+_EXT = _BG["ext"]         # ticker -> (fetched_at, dict | None)
+_EXT_PENDING = _BG["ext_pending"]
+_EXT_TTL = 300.0
+
+
+def _ext_hours(ticker):
+    """{"label", "price", "pct", "time"} outside regular hours, else None."""
+    import threading
+    tk = (ticker or "").upper()
+    if not tk:
+        return None
+    hit = _EXT.get(tk)
+    fresh = hit and (_time.time() - hit[0]) < _EXT_TTL
+    if not fresh and tk not in _EXT_PENDING:
+        _EXT_PENDING.add(tk)
+
+        def _job():
+            val = None
+            try:
+                import yfinance as yf
+                info = yf.Ticker(tk).info or {}
+                if info.get("sector") and tk not in _SECTOR:
+                    _SECTOR[tk] = info["sector"]
+                state = str(info.get("marketState") or "").upper()
+                if state == "PRE" and info.get("preMarketPrice"):
+                    px, pct, ts, lbl = (info["preMarketPrice"], info.get("preMarketChangePercent"),
+                                        info.get("preMarketTime"), "Pre-market")
+                elif state in ("POST", "POSTPOST", "PREPRE", "CLOSED") and info.get("postMarketPrice"):
+                    px, pct, ts, lbl = (info["postMarketPrice"], info.get("postMarketChangePercent"),
+                                        info.get("postMarketTime"), "After hours")
+                else:
+                    px = None
+                if px:
+                    from market_data import _fmt_ts
+                    val = {"label": lbl, "price": float(px),
+                           "pct": float(pct) if pct is not None else None,
+                           "time": _fmt_ts(ts) if ts else ""}
+            except Exception:
+                val = None
+            finally:
+                _EXT[tk] = (_time.time(), val)
+                _EXT_PENDING.discard(tk)
+
+        threading.Thread(target=_job, daemon=True).start()
+    return hit[1] if hit else None
 
 
 @st.cache_data(ttl=60, max_entries=1, show_spinner=False)
@@ -2265,14 +2408,26 @@ elif _page == "analysis":
                              if not is_crypto else "Crypto")
             _sector_lbl   = sector if sector and sector != "Unknown" else ""
             # Sector strings from Polygon are SHOUTY ALL-CAPS sometimes — soften
-            # to Title Case and truncate so the tag stays readable.
-            if _sector_lbl and _sector_lbl.isupper():
-                _sector_lbl = _sector_lbl.title().replace("&", "&amp;")
+            # to sentence case (it is an industry description, not a name) and
+            # truncate so the tag stays readable.
+            if _sector_lbl and (_sector_lbl.isupper() or _sector_lbl.istitle()):
+                _sector_lbl = _sector_lbl[:1].upper() + _sector_lbl[1:].lower()
+            _sector_lbl = _sector_lbl.replace("&", "&amp;")
             if len(_sector_lbl) > 36:
                 _sector_lbl = _sector_lbl[:33] + "…"
+            # The familiar sector leads when known; the SIC industry follows it.
+            _std_sec = None
+            if not is_crypto and not is_etf:
+                _std_sec = (company_details.get("Sector")
+                            if company_details.get("source") == "Yahoo Finance"
+                            else _std_sector(ticker_input))
+            if _std_sec and _std_sec.lower() == _sector_lbl.lower():
+                _std_sec = None
 
             # Tag chips (sector, exchange, asset-type, live)
             _tags = []
+            if _std_sec:
+                _tags.append(f'<span class="stock-hero-tag">{_std_sec}</span>')
             if _sector_lbl:
                 _tags.append(f'<span class="stock-hero-tag">{_sector_lbl}</span>')
             if _exchange:
@@ -2320,6 +2475,17 @@ elif _page == "analysis":
                 _live_meta = f'<div class="stock-hero-meta">Last close · {_close_dt}</div>'
             else:
                 _live_meta = ""
+            # Extended-hours print, when there is one (never for crypto, which
+            # has no session to be outside of).
+            _eh = None if is_crypto else _ext_hours(ticker_input)
+            if _eh and abs(_eh["price"] - _price_now) > 1e-9:
+                _eh_pct = _eh.get("pct")
+                _eh_cls = "pos" if (_eh_pct or 0) >= 0 else "neg"
+                _eh_pct_s = (f' <span class="stock-hero-ext-chg {_eh_cls}">{_eh_pct:+.2f}%</span>'
+                             if _eh_pct is not None else "")
+                _eh_t = f' · {_eh["time"]}' if _eh.get("time") else ""
+                _live_meta = (f'<div class="stock-hero-ext">{_eh["label"]} '
+                              f'<b>${_eh["price"]:,.2f}</b>{_eh_pct_s}{_eh_t}</div>') + _live_meta
 
             # Day range fill % (where current price sits between today's low and high)
             _day_open  = float(latest.get("Open",  _price_now))
@@ -3854,7 +4020,8 @@ color:var(--muted);background:var(--surface2)}
                         _eps_s  = f"{_epsyield:.1f}%"  if _epsyield else "—"
                         _dy_s   = f"{_dyield:.1f}%"    if _dyield else "—"
                         _fair_s = f"${_fair_last:,.2f}" if _fair_last else "—"
-                        _sector = company_details.get("Sector") or "—"
+                        _sector = (_std_sector(ticker_input)
+                                   or company_details.get("Sector") or "—")
 
                         _prem_s = f"{_disc_pct:+.0f}%" if _disc_pct is not None else "—"
                         _fcol, _mcol = st.columns([1, 3.2])
@@ -4320,6 +4487,7 @@ elif _page == "research":
 # PORTFOLIO BUILDER
 # ═════════════════════════════════════════════════════════════════════════════
 elif _page == "builder":
+    from portfolio_builder import render_portfolio_builder
     render_portfolio_builder(POLYGON_API_KEY, is_pro=st.session_state.get("is_pro", False))
 
 # =============================================================================

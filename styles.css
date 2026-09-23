@@ -2283,3 +2283,98 @@ html, body, .stApp, .stApp * { font-variant-numeric: tabular-nums; }
 [data-testid="stMarkdownContainer"] :where(p, li, a, b, strong, em) {
   font-family: inherit;
 }
+
+
+/* ── Header search ────────────────────────────────────────────────────────────
+   A ticker search in the nav, on every page. On the dark bar it is a quiet
+   translucent field, not a white form box. */
+.st-key-nav_search [data-baseweb="input"],
+.st-key-nav_search [data-baseweb="base-input"] {
+  background: transparent !important; border: none !important;
+}
+.st-key-nav_search input {
+  background: rgba(255,255,255,0.09) !important; color: #ffffff !important;
+  border: 1px solid rgba(255,255,255,0.20) !important; border-radius: 8px !important;
+  height: 36px !important; font-size: 0.88rem !important; padding: 0 0.8rem !important;
+  font-family: var(--font-sans) !important; letter-spacing: 0.02em;
+}
+.st-key-nav_search input::placeholder { color: rgba(255,255,255,0.58) !important; }
+.st-key-nav_search input:focus {
+  border-color: rgba(56,189,248,0.6) !important; background: rgba(255,255,255,0.13) !important;
+}
+.st-key-nav_search [data-testid="InputInstructions"] { display: none; }
+
+/* With search in the header, the Analysis page's own ticker box is redundant
+   once results are showing. The widget stays rendered (it holds the ticker's
+   state) but is hidden, leaving the Options control at the top right of the
+   report. The landing state keeps its full search panel. */
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stHorizontalBlock"] {
+  justify-content: flex-end;
+}
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stHorizontalBlock"]
+  > [data-testid="stColumn"]:nth-child(-n+2) { display: none; }
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stHorizontalBlock"]
+  > [data-testid="stColumn"]:nth-child(3) { flex: 0 0 9rem !important; width: 9rem !important; }
+
+/* Extended-hours line under the price: smaller than the close, so the two
+   sessions read as distinct at a glance. */
+.stock-hero-ext { font-size: 0.82rem; color: var(--text2); margin-top: 0.35rem; }
+.stock-hero-ext b { color: var(--brand-1); font-weight: 600; }
+.stock-hero-ext-chg.pos { color: var(--green); font-weight: 600; }
+.stock-hero-ext-chg.neg { color: var(--red); font-weight: 600; }
+
+/* ── Mobile nav: one swipeable row, not a stack ───────────────────────────────
+   Below 640px Streamlit stacks columns vertically, so the fixed nav became a
+   column of eight full-width rows - measured 312px tall on a 390px phone,
+   pinned over the top third of every page. Held to a single row here; the page
+   links scroll sideways the way a mobile tab bar does, and the brand shrinks
+   to its mark so the search field keeps usable width. */
+@media (max-width: 640px) {
+  .st-key-topnav [data-testid="stHorizontalBlock"] {
+    flex-wrap: nowrap !important; overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none; gap: 0.35rem !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .st-key-topnav [data-testid="stHorizontalBlock"]::-webkit-scrollbar { display: none; }
+  .st-key-topnav [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;
+  }
+  .st-key-topnav .topnav-word { display: none; }
+  .st-key-topnav .st-key-nav_search { width: 9.5rem; }
+  .st-key-topnav button { padding: 0 0.6rem !important; }
+  .st-key-topnav [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {
+    border-left: none; padding-left: 0;
+  }
+}
+
+/* ── No sideways wobble on phones ─────────────────────────────────────────────
+   Two things let the page scroll 37px sideways at 390px. A hidden tooltip is
+   still laid out, so the Volatility tooltip - centred on an icon near the right
+   edge, 210px wide - reached x=418 while invisible. Hidden tooltips now take no
+   space, and on narrow screens they open from the icon's right edge inward.
+   And the fixed tape strip was sized to 100vw, which includes the scrollbar,
+   so it ran 10px past the content box. */
+.tooltip-wrap .tooltip-text { display: none; }
+.tooltip-wrap:hover .tooltip-text { display: block; }
+@media (max-width: 640px) {
+  .stat-cell:nth-child(2n) .tooltip-wrap .tooltip-text { left: auto; right: -0.5rem; transform: none; }
+  .tooltip-wrap .tooltip-text { width: min(210px, 70vw); }
+}
+.st-key-tapebar, .st-key-tapebar .ticker-tape-wrap { max-width: 100%; }
+
+/* Narrow screens: the header's stats sit in two columns, so the left column
+   loses its indent and the right one its divider - the desktop rule only
+   zeroed the FIRST cell, which left row two and three stepped in. */
+@media (max-width: 900px) {
+  .stock-hero-stat:nth-child(odd)  { padding-left: 0; }
+  .stock-hero-stat:nth-child(even) { border-right: none; padding-right: 0; }
+}
+/* Options stays a compact control at the right, not a full-width bar. */
+@media (max-width: 640px) {
+  .st-key-analysis-inputs:has(.ai-compact) [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:nth-child(3) {
+    flex: 0 0 8.5rem !important; width: 8.5rem !important; min-width: 0 !important;
+    margin-left: auto;
+  }
+  .stock-hero-price-block { text-align: left; }
+}

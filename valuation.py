@@ -651,10 +651,35 @@ def build_valuation_figure(data, years_back=None):
     # Price last, on top, unsmoothed and marker-free. The jaggedness is the
     # point — smoothing a price series is the clearest tell of a chart built by
     # someone who does not work with market data.
+    # The tooltip carries that year's row of the table above and below the plot,
+    # so hovering a point reads the year's range and earnings without dropping
+    # the eye to the grid - the link FAST Graphs makes with a synced crosshair,
+    # which Plotly can only do across subplots by rebuilding the figure on one
+    # shared axis.
+    _hi = dict(zip(yrs, data.get("high") or []))
+    _lo = dict(zip(yrs, data.get("low") or []))
+    _ep = dict(zip(yrs, data.get("eps") or []))
+    _ytd = data.get("ytd") or {}
+    if _ytd:
+        _hi.setdefault(_ytd["year"], _ytd["high"])
+        _lo.setdefault(_ytd["year"], _ytd["low"])
+
+    def _yr_note(d):
+        y = d.year
+        parts = []
+        if _hi.get(y) is not None and _lo.get(y) is not None:
+            parts.append(f"range ${_lo[y]:,.1f}-${_hi[y]:,.1f}")
+        if _ep.get(y) is not None:
+            parts.append(f"FY EPS ${_ep[y]:,.2f}")
+        return f"{y}: " + " · ".join(parts) if parts else ""
+
     fig.add_trace(go.Scatter(
         x=data["price_dates"], y=data["price_vals"], mode="lines", name="Price",
         line=dict(color=color.ink, width=stroke.price, shape="linear"),
-        hovertemplate="%{x|%b %Y}<br>$%{y:,.2f}<extra>Price</extra>"),
+        customdata=[_yr_note(d) for d in data["price_dates"]],
+        hovertemplate="%{x|%b %Y}<br><b>$%{y:,.2f}</b>"
+                      "<br><span style='color:#64748b'>%{customdata}</span>"
+                      "<extra>Price</extra>"),
         row=2, col=1)
 
     # ── Band 5: fundamentals grid ───────────────────────────────────────────
