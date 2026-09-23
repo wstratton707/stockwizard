@@ -68,7 +68,7 @@ def _cum_split_factor(splits, when):
     return f or 1.0
 
 
-def _sec_quarterly_eps(facts, tags, unit="USD/shares"):
+def _sec_quarterly_eps(facts, tags, unit="USD/shares", splits=None):
     """{period_end -> EPS} for single quarters, as filed.
 
     Selected by period DURATION rather than by `fp`, because a Q3 10-Q reports
@@ -78,6 +78,15 @@ def _sec_quarterly_eps(facts, tags, unit="USD/shares"):
     Q4 is almost never filed on its own (it lands inside the 10-K), so it is
     derived per fiscal year as FY minus the three quarters that fall inside it.
     Later filings win on a restatement, since EDGAR lists entries oldest-first.
+
+    Every value is put on TODAY's share basis here, using the split factor as of
+    its FILING date - not its period end. A filing made after a split restates
+    everything in it to the post-split basis, so a quarter's basis is decided by
+    when it was filed. Converting by period end divided those restated figures a
+    second time, and deriving Q4 as FY minus three quarters then subtracted
+    pre-split quarters from a post-split year: Apple's derived Q4 FY2014 came out
+    hugely negative and TTM EPS read $0.20 in Sep 2013 and $0.74 in Sep 2019,
+    which is why the fair-value line collapsed to the floor around both splits.
     """
     gaap = facts.get("facts", {}).get("us-gaap", {})
     quarters, annuals = {}, {}
@@ -94,6 +103,11 @@ def _sec_quarterly_eps(facts, tags, unit="USD/shares"):
                 s, d = pd.Timestamp(start), pd.Timestamp(end)
             except Exception:
                 continue
+            try:
+                basis_date = pd.Timestamp(e.get("filed")) if e.get("filed") else d
+            except Exception:
+                basis_date = d
+            val = float(val) / _cum_split_factor(splits, basis_date)
             days = (d - s).days
             # Entries are oldest-first, so a later one is a restatement and wins.
             if 80 <= days <= 100:
@@ -255,8 +269,10 @@ def get_valuation_data(ticker, min_years=6):
     # Quarterly trailing-twelve-month EPS. Optional: every consumer falls back
     # to the annual anchors when a filer doesn't give us clean quarters.
     try:
+        # Values arrive already on today's basis (see _sec_quarterly_eps), so
+        # _ttm_series must not divide again: it gets no split history.
         ttm_dates, ttm_eps = _ttm_series(
-            _sec_quarterly_eps(facts, _SEC_TAGS_EPS), splits)
+            _sec_quarterly_eps(facts, _SEC_TAGS_EPS, splits=splits), None)
     except Exception:
         ttm_dates, ttm_eps = [], []
     if ttm_dates:
@@ -284,10 +300,26 @@ def get_valuation_data(ticker, min_years=6):
         "normal_pe": round(normal_pe, 1),
         "current_price": round(cur, 2),
         "blended_pe": (round(cur / cur_eps, 1) if cur_eps else None),
+        # The range table ran out at the last fiscal year, so the current price
+        # sat above every column shown - AAPL at $339 against a 2025 high of
+        # $288.6, with nothing to say the stock had moved since. The current
+        # calendar year's range, to date, is its own column.
+        "ytd": _ytd_range(high_by_y, low_by_y, years),
     }
 
 
 # ── Figure construction ──────────────────────────────────────────────────────
+
+def _ytd_range(high_by_y, low_by_y, years):
+    """{"year", "high", "low"} for the current calendar year if it has no FY yet."""
+    try:
+        y = pd.Timestamp.today().year
+        if years and y > years[-1] and y in high_by_y and y in low_by_y:
+            return {"year": y, "high": high_by_y[y], "low": low_by_y[y]}
+    except Exception:
+        pass
+    return None
+
 
 def _fy_anchors(years):
     """Mid-year timestamps — annual figures belong at the centre of their year,
@@ -519,6 +551,12 @@ def build_valuation_figure(data, years_back=None):
     _text_row(fig, xyr, [_fmt(v, 1) for v in data.get("low") or []], 0.5, 1, fs, color.ink)
     for lbl, yv in (("Year", 2.5), ("High", 1.5), ("Low", 0.5)):
         _row_label(fig, lbl, yv, "y", fs)
+    _ytd = data.get("ytd")
+    if _ytd:
+        _xy = [pd.Timestamp(f"{_ytd['year']}-06-30")]
+        _text_row(fig, _xy, [f"<b>{_ytd['year']} YTD</b>"], 2.5, 1, fs, color.ink)
+        _text_row(fig, _xy, [f"<b>{_fmt(_ytd['high'], 1)}</b>"], 1.5, 1, fs, color.ink)
+        _text_row(fig, _xy, [f"<b>{_fmt(_ytd['low'], 1)}</b>"], 0.5, 1, fs, color.ink)
 
     # ── Band 4: the plot ────────────────────────────────────────────────────
     # z-order runs bottom to top: context, then bands, then lines.
@@ -598,6 +636,18 @@ def build_valuation_figure(data, years_back=None):
                           "<br>Core EPS $%{customdata:.2f}<extra></extra>"),
             row=2, col=1)
 
+    # Legend swatches for the two shaded zones. They are drawn without legend
+    # entries (a filled area's own entry is a line, which reads as a series), so
+    # without these the light-blue band was the one element on the chart with
+    # nothing to say what it meant.
+    for _nm, _fc in ((f"Up to {npe:g}x earnings (normal P/E)", color.corridor_base_fill),
+                     (f"Up to {npe * PREMIUM_MULTIPLE:.1f}x earnings "
+                      f"(+{(PREMIUM_MULTIPLE - 1) * 100:.0f}% premium)", color.corridor_high_fill)):
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers", name=_nm,
+            marker=dict(symbol="square", size=11, color=_fc, line=dict(width=0)),
+            hoverinfo="skip"), row=2, col=1)
+
     # Price last, on top, unsmoothed and marker-free. The jaggedness is the
     # point — smoothing a price series is the clearest tell of a chart built by
     # someone who does not work with market data.
@@ -624,7 +674,11 @@ def build_valuation_figure(data, years_back=None):
         # Margin is back to the token default: widening it does NOT fix the
         # label clipping (the position/clip gap is a constant 33px that does not
         # move with the margin) — the x-range padding above is what handles it.
-        margin=dict(l=layout.plot_padding["left"], r=layout.plot_padding["right"],
+        # Right margin wide enough for the pinned end labels ("$339.75",
+        # "Fair $150"), which sit just past the last point and were clipped at
+        # the default margin.
+        margin=dict(l=layout.plot_padding["left"],
+                    r=max(layout.plot_padding["right"], 78),
                     t=layout.plot_padding["top"], b=42),
     )
     # `legend_inline("bottom")` offsets by 16% of the plot area, which is tuned
@@ -644,6 +698,28 @@ def build_valuation_figure(data, years_back=None):
     fig.layout.xaxis2.update(showticklabels=False, showgrid=False, showline=False,
                              range=_x_range, **ct.spike_config())
     fig.layout.yaxis2.update(ct.value_axis())
+
+    # Headroom, and the latest values pinned at the right edge. The price line
+    # ran into the top of the plot with nothing above it, and the two numbers a
+    # reader most wants - where the price is and where fair value is - had to be
+    # read off the axis. 8% above the highest thing drawn keeps the latest point
+    # clear of the frame.
+    _pv = [v for v in (data.get("price_vals") or []) if v]
+    _ov = [v for v in over_band if v] if over_band else []
+    _top = max(_pv + _ov) if (_pv or _ov) else None
+    if _top:
+        fig.layout.yaxis2.update(range=[0, _top * 1.08], autorange=False)
+    _ends = []
+    if _pv:
+        _ends.append((data["price_dates"][-1], _pv[-1], f"${_pv[-1]:,.2f}", color.ink))
+    _fvv = [v for v in fair_band if v] if fair_band else []
+    if _fvv:
+        _ends.append((x_band[-1], _fvv[-1], f"Fair ${_fvv[-1]:,.0f}", color.value_line))
+    for _x, _y, _txt, _c in _ends:
+        fig.add_annotation(x=_x, y=_y, xref="x2", yref="y2", text=_txt,
+                           showarrow=False, xanchor="left", xshift=6,
+                           font=dict(size=11, color="#ffffff", family=ct.font.data),
+                           bgcolor=_c, borderpad=3)
 
     # Hairline rules separating the three bands.
     for y_pos in (fig.layout.yaxis.domain[0], fig.layout.yaxis3.domain[1]):

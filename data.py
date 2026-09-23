@@ -106,8 +106,14 @@ def _enrich_ohlcv(df, w52_min_periods=21):
     df["Volatility_20d"]     = df["Daily_Return"].rolling(20).std() * np.sqrt(252)
     df["Drawdown_20d"]       = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(20).max() - 1
     df["Drawdown_60d"]       = df["Cumulative_Index"] / df["Cumulative_Index"].rolling(60).max() - 1
-    df["52W_High"]           = df["Close"].rolling(252, min_periods=w52_min_periods).max()
-    df["52W_Low"]            = df["Close"].rolling(252, min_periods=w52_min_periods).min()
+    # From the daily High and Low, not the close. Every other platform quotes
+    # the 52-week range intraday, and a closes-only range put AAPL's "52-week
+    # high" at $339.79 on a page whose own day range showed $345.34 - a
+    # range that the price had already been outside of.
+    _hi = df["High"] if "High" in df.columns else df["Close"]
+    _lo = df["Low"]  if "Low"  in df.columns else df["Close"]
+    df["52W_High"]           = _hi.rolling(252, min_periods=w52_min_periods).max()
+    df["52W_Low"]            = _lo.rolling(252, min_periods=w52_min_periods).min()
     df["Pct_From_52W_High"]  = df["Close"] / df["52W_High"] - 1
     df["Pct_From_52W_Low"]   = df["Close"] / df["52W_Low"]  - 1
     return df
@@ -136,12 +142,9 @@ def _attach_risk_ratios(df):
     return df
 
 
-def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print,
-                     start_override=None, end_override=None, bar_size="day"):
-    df = fetch_ohlcv(ticker, period, api_key, log=log,
-                     start_override=start_override, end_override=end_override, bar_size=bar_size)
-    _enrich_ohlcv(df)
-
+def _add_indicators(df, log=print):
+    """RSI, MACD and Bollinger columns, in place. Shared by the initial fetch and
+    by append_live_session, so an appended bar gets the same indicators."""
     try:
         import ta
         df["RSI14"]       = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
@@ -157,6 +160,71 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
         df["BB_Pct"]      = bb.bollinger_pband()
     except Exception as e:
         log(f"   Technical indicators skipped: {e}")
+
+
+_OHLCV_BASE = ("Date", "Open", "High", "Low", "Close", "Volume")
+
+
+def append_live_session(df, live):
+    """Add the live quote's session as a bar when the daily feed hasn't got it yet.
+
+    The daily feed lags the quote by a session: after the close, AAPL's quote
+    read $339.75 while the newest daily bar was the previous day's $338.98. The
+    header used the quote and everything else used the bar, so one page showed
+    two current prices - the verdict said "most recently closing at $338.98",
+    the chart label said $338.98, and the day range topped out below the price
+    in the header. Appending the session here makes every consumer agree.
+
+    Only a quote carrying its own timestamp and open/high/low is used, and only
+    when it is from a LATER session than the last bar. Volume is not in the
+    quote, so the new bar's volume is NaN; readers of volume fall back to the
+    last session that has one. Benchmark columns carry NaN returns for the new
+    bar and a forward-filled cumulative level.
+    """
+    try:
+        if df is None or df.empty or not live:
+            return df
+        ep = live.get("epoch")
+        if not ep or not (live.get("open") and live.get("high") and live.get("low")):
+            return df
+        q_day = (pd.Timestamp(int(ep), unit="s", tz="UTC")
+                 .tz_convert("America/New_York").normalize().tz_localize(None))
+        dates = pd.to_datetime(df["Date"])
+        last = dates.iloc[-1]
+        last = (last.tz_convert("America/New_York").tz_localize(None)
+                if getattr(last, "tzinfo", None) else last).normalize()
+        if q_day <= last:
+            return df
+        base = [c for c in _OHLCV_BASE if c in df.columns]
+        extra = [c for c in df.columns if c.endswith("_Return") or c.endswith("_Cumulative")]
+        raw = df[base + extra].copy()
+        new = {"Date": q_day if not getattr(dates.iloc[-1], "tzinfo", None)
+                        else q_day.tz_localize(dates.iloc[-1].tzinfo),
+               "Open": float(live["open"]), "High": float(live["high"]),
+               "Low": float(live["low"]), "Close": float(live["price"]),
+               "Volume": np.nan}
+        raw = pd.concat([raw, pd.DataFrame([{k: new.get(k, np.nan) for k in raw.columns}])],
+                        ignore_index=True)
+        for c in extra:
+            if c.endswith("_Cumulative"):
+                raw[c] = raw[c].ffill()
+        _enrich_ohlcv(raw)
+        _add_indicators(raw, log=lambda m: None)
+        # Rolling beta and anything else fetch_stock_data derived afterwards
+        for c in df.columns:
+            if c not in raw.columns:
+                raw[c] = list(df[c]) + [np.nan]
+        return raw
+    except Exception:
+        return df
+
+
+def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", log=print,
+                     start_override=None, end_override=None, bar_size="day"):
+    df = fetch_ohlcv(ticker, period, api_key, log=log,
+                     start_override=start_override, end_override=end_override, bar_size=bar_size)
+    _enrich_ohlcv(df)
+    _add_indicators(df, log=log)
 
     if benchmark_tickers:
         for bench in benchmark_tickers:

@@ -61,10 +61,22 @@ def to_finnhub_symbol(ticker: str) -> str:
 
 
 def _fmt_ts(ts) -> str:
+    """Quote time in New York, labelled - e.g. "4:00 PM ET".
+
+    fromtimestamp() formats in the SERVER's zone. Render runs on UTC, so the
+    4:00 PM close printed as "20:00:00" with nothing to say which zone that was.
+    US equities are quoted in Eastern time, so that is what the reader gets."""
     try:
-        return _dt.datetime.fromtimestamp(int(ts)).strftime("%H:%M:%S")
+        from zoneinfo import ZoneInfo
+        t = _dt.datetime.fromtimestamp(int(ts), tz=ZoneInfo("America/New_York"))
     except Exception:
-        return _dt.datetime.now().strftime("%H:%M:%S")
+        try:
+            from zoneinfo import ZoneInfo
+            t = _dt.datetime.now(tz=ZoneInfo("America/New_York"))
+        except Exception:
+            return ""
+    # %I then strip the leading zero: "%-I" is glibc-only and fails on Windows.
+    return t.strftime("%I:%M %p ET").lstrip("0")
 
 
 # ── Live quote ────────────────────────────────────────────────────────────────
@@ -106,6 +118,7 @@ def _finnhub_quote(ticker: str, key: str) -> dict | None:
                     "high":   float(d.get("h") or 0),
                     "low":    float(d.get("l") or 0),
                     "time":   _fmt_ts(d.get("t")),
+                    "epoch":  int(d.get("t") or 0),
                     "source": "finnhub",
                 }
     except Exception:

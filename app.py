@@ -482,6 +482,24 @@ def _render_stock_news(ticker, company_name=None):
 
     st.markdown(_news_feed_html(arts, 12), unsafe_allow_html=True)
 from live_data import get_live_price, get_top_movers, get_tape_prices
+from data import append_live_session
+from analysis import exchange_name
+
+
+def _fmt_month(v):
+    """"2026-06-30" -> "Jun 2026". Falls back to the raw text if unparseable."""
+    try:
+        return pd.to_datetime(str(v)).strftime("%b %Y")
+    except Exception:
+        return str(v or "")[:7]
+
+
+def _fmt_day(v):
+    """"2026-07-31" -> "Jul 31, 2026"."""
+    try:
+        return pd.to_datetime(str(v)[:10]).strftime("%b %d, %Y").replace(" 0", " ")
+    except Exception:
+        return str(v or "")[:10]
 import auth
 from payments import render_pricing_section, create_checkout_session, verify_session, check_subscription
 from portfolio_builder import render_portfolio_builder
@@ -1795,6 +1813,12 @@ elif _page == "analysis":
                                                  start_override=date_start,
                                                  end_override=date_end,
                                                  bar_size=bar_size)
+                    # The daily feed lags the quote by a session after the close,
+                    # which put two different "current" prices on one page. Only
+                    # when the user hasn't pinned an end date - a custom range
+                    # asks for history, not for today.
+                    if not custom_range:
+                        df = append_live_session(df, live)
 
                 progress.progress(25, text="Fetching details...")
                 if is_crypto:
@@ -2273,7 +2297,8 @@ elif _page == "analysis":
             _company_name = (company_details.get("Name") if not is_crypto
                              else crypto_details.get("name", ticker_input))
             _company_name = _company_name or ticker_input
-            _exchange     = company_details.get("Exchange", "") if not is_crypto else "Crypto"
+            _exchange     = (exchange_name(company_details.get("Exchange", ""))
+                             if not is_crypto else "Crypto")
             _sector_lbl   = sector if sector and sector != "Unknown" else ""
             # Sector strings from Polygon are SHOUTY ALL-CAPS sometimes — soften
             # to Title Case and truncate so the tag stays readable.
@@ -2346,8 +2371,14 @@ elif _page == "analysis":
             _w52_pct   = max(0.0, min(100.0, (_price_now - _w52_low) / _w52_span * 100))
 
             # Volume vs 20d average
-            _vol       = float(latest.get("Volume", 0))
-            _vol_avg   = float(latest.get("Vol_MA20", 0)) if pd.notna(latest.get("Vol_MA20")) else 0
+            # A bar appended from the live quote carries no volume (the quote
+            # has none), so read the most recent session that does, with its own
+            # 20-day average, rather than printing "nan".
+            _vrows     = df[df["Volume"].notna()] if "Volume" in df.columns else df
+            _vlatest   = _vrows.iloc[-1] if len(_vrows) else latest
+            _vol       = float(_vlatest.get("Volume", 0) or 0)
+            _vol_avg   = (float(_vlatest.get("Vol_MA20", 0))
+                          if pd.notna(_vlatest.get("Vol_MA20")) else 0)
             _vol_ratio = (_vol / _vol_avg - 1) * 100 if _vol_avg > 0 else None
             # Below-average volume isn't bad; use neutral muted color, only highlight
             # green when volume is meaningfully above average (>+10%).
@@ -2427,7 +2458,8 @@ elif _page == "analysis":
             else:
                 earnings_date = cached_fetch_next_earnings(ticker_input, POLYGON_API_KEY)
                 extra_label = "Last Earnings"
-                extra_value = earnings_date[:10] if earnings_date and earnings_date != "N/A" else "N/A"
+                extra_value = (_fmt_day(earnings_date)
+                               if earnings_date and earnings_date != "N/A" else "N/A")
 
             # Use the full-period annualised volatility (same series feeding the
             # Sharpe ratio and the Monte Carlo summary) so return, volatility and
@@ -2551,9 +2583,18 @@ elif _page == "analysis":
                                     f'<div style="display:flex;height:9px;border-radius:5px;overflow:hidden;'
                                     f'background:#f1f5f9">{_bar}</div>'
                                     f'<div style="display:flex;gap:1rem;margin-top:0.6rem;font-size:0.72rem;flex-wrap:wrap">'
-                                    f'<span style="color:#059669">● {_sb + _bb} Buy</span>'
-                                    f'<span style="color:#94a3b8">● {_hh} Hold</span>'
-                                    f'<span style="color:#dc2626">● {_sl + _ssl} Sell</span></div></div>',
+                                    # One entry per segment, each in its segment's
+                                    # colour. The bar drew five bands and the legend
+                                    # named three, so two colours on it meant nothing.
+                                    + "".join(
+                                        f'<span style="color:#475569"><span style="color:{_c}">●</span> {_n} {_l}</span>'
+                                        for _n, _c, _l in ((_sb, "#059669", "Strong buy"),
+                                                           (_bb, "#34d399", "Buy"),
+                                                           (_hh, "#94a3b8", "Hold"),
+                                                           (_sl, "#f59e0b", "Sell"),
+                                                           (_ssl, "#dc2626", "Strong sell"))
+                                        if _n)
+                                    + '</div></div>',
                                     unsafe_allow_html=True)
                         with _ac2:
                             if _earn:
@@ -2568,9 +2609,9 @@ elif _page == "analysis":
                                     _sps  = f"{_sp:+.1f}%" if isinstance(_sp, (int, float)) else ""
                                     _rows += (f'<div style="display:flex;justify-content:space-between;'
                                               f'padding:0.3rem 0;border-bottom:1px solid #f1f5f9;font-size:0.76rem">'
-                                              f'<span style="color:#64748b">{str(_e.get("period",""))[:7]}</span>'
+                                              f'<span style="color:#64748b">{_fmt_month(_e.get("period"))}</span>'
                                               f'<span style="font-family:\'JetBrains Mono\',monospace;color:#0f172a">'
-                                              f'${_a} vs ${_est}</span>'
+                                              f'${_a:,.2f} vs ${_est:,.2f}</span>'
                                               f'<span style="color:{_col};font-weight:600">{_sps}</span></div>')
                                 if _rows:
                                     st.markdown(
@@ -3746,7 +3787,14 @@ color:var(--muted);background:var(--surface2)}
                         _eps_basis = "TTM EPS" if _ttm_e else "core (3-yr median) EPS"
                         _fair_last = _core_last * _vdata["normal_pe"] if _core_last else None
                         _cur       = _vdata.get("current_price")
-                        _bpe       = _vdata.get("blended_pe")
+                        # Same EPS basis as the fair value beside it. "Blended P/E"
+                        # was price over the last FISCAL year's EPS (AAPL: 339.75 /
+                        # 7.46 = 45.5x) while the fair value used TTM EPS - two bases
+                        # on one panel, and the label claimed a blend that wasn't one.
+                        _bpe       = (round(_cur / _core_last, 1)
+                                      if (_cur and _core_last and _core_last > 0)
+                                      else _vdata.get("blended_pe"))
+                        _pe_lbl    = "P/E (TTM)" if _ttm_e else "P/E (core EPS)"
                         _npe       = _vdata["normal_pe"]
                         # NB: not `_disc` — that name is the `disclaimers` module alias
                         # (see the import block); rebinding it here is module-scope in a
@@ -3782,7 +3830,7 @@ color:var(--muted);background:var(--surface2)}
                             st.markdown(f"""<div class="val-facts">
                               <div class="vf-group">Fast facts</div>
                               <div class="vf-row"><span>Current price</span><b>{_cur_s}</b></div>
-                              <div class="vf-row"><span>Blended P/E</span><b>{_bpe_s}</b></div>
+                              <div class="vf-row"><span>{_pe_lbl}</span><b>{_bpe_s}</b></div>
                               <div class="vf-row"><span>EPS yield</span><b>{_eps_s}</b></div>
                               <div class="vf-row"><span>Dividend yield</span><b>{_dy_s}</b></div>
                               <div class="vf-group">Valuation</div>
