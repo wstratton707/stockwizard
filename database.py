@@ -56,6 +56,85 @@ def supabase_project_url() -> str:
     return SUPABASE_URL or "(no SUPABASE_URL configured)"
 
 
+# ── Round-trip profiler ───────────────────────────────────────────────────────
+# Off unless QW_PROFILE_DB=1. Every call here crosses the public internet to
+# Supabase and measures ~1.2s from this project, so a page that makes three
+# without noticing has spent 3.6 seconds before rendering anything. Counting
+# them is the only way to tell a slow page from a chatty one.
+_DB_PROFILE = os.getenv("QW_PROFILE_DB") == "1"
+_db_stats = {"calls": 0, "seconds": 0.0}
+
+
+def db_profile_reset():
+    _db_stats["calls"] = 0
+    _db_stats["seconds"] = 0.0
+
+
+def db_profile_read() -> dict:
+    return dict(_db_stats)
+
+
+def _timed(label):
+    """Context manager recording one Supabase round-trip."""
+    import contextlib, time as _t
+
+    @contextlib.contextmanager
+    def _cm():
+        if not _DB_PROFILE:
+            yield
+            return
+        _s = _t.perf_counter()
+        try:
+            yield
+        finally:
+            _d = _t.perf_counter() - _s
+            _db_stats["calls"] += 1
+            _db_stats["seconds"] += _d
+            print(f"[db] {label:28} {_d*1000:7.0f} ms   "
+                  f"(call #{_db_stats['calls']}, {_db_stats['seconds']:.2f}s total)")
+    return _cm()
+
+
+class _TimedRequests:
+    """Wraps the requests module so every Supabase call is timed and counted.
+
+    Installed only under QW_PROFILE_DB=1, and it replaces the module-level name
+    rather than each call site, so no request can be added later that quietly
+    escapes the count.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    @staticmethod
+    def _label(args):
+        u = args[0] if args else ""
+        return str(u).rsplit("/rest/v1/", 1)[-1][:28] or "?"
+
+    def get(self, *a, **k):
+        with _timed("GET  " + self._label(a)):
+            return self._inner.get(*a, **k)
+
+    def post(self, *a, **k):
+        with _timed("POST " + self._label(a)):
+            return self._inner.post(*a, **k)
+
+    def patch(self, *a, **k):
+        with _timed("PATCH " + self._label(a)):
+            return self._inner.patch(*a, **k)
+
+    def delete(self, *a, **k):
+        with _timed("DEL  " + self._label(a)):
+            return self._inner.delete(*a, **k)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+if _DB_PROFILE:
+    requests = _TimedRequests(requests)          # noqa: F811 - deliberate
+
+
 def _headers() -> dict:
     return {
         "apikey":        SUPABASE_KEY,

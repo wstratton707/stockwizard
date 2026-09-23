@@ -2,6 +2,22 @@ import os
 import re
 import sys
 import csv
+import time as _time
+
+# ── Rerun profiler ────────────────────────────────────────────────────────────
+# Off unless QW_PROFILE=1, and the whole cost when off is reading one env var.
+#
+# It exists because tab-switch slowness cannot be reasoned about from the code.
+# Measured locally, navigation costs 0.45-0.66s and makes ZERO Supabase calls,
+# and a rerun re-imports nothing (Python caches sys.modules: a second import of
+# this module measures 2 microseconds). So a 3-5s switch in production is not
+# imports and not the database - it is either the host's CPU, the network, or a
+# cold start paying the ~15-19s module-graph import once.
+#
+# Set QW_PROFILE=1 on the host and every rerun prints its page and wall time, so
+# the question gets answered where it actually happens rather than here.
+_QW_PROFILE = os.getenv("QW_PROFILE") == "1"
+_RUN_T0 = _time.perf_counter()
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -4103,3 +4119,14 @@ elif _page == "privacy":
 # Outside the routing chain so there is exactly one place the legal documents are
 # linked from, and no page can be built that forgets them.
 st.markdown(render_legal_links(), unsafe_allow_html=True)
+
+# ── End of the script run ─────────────────────────────────────────────────────
+if _QW_PROFILE:
+    _elapsed = _time.perf_counter() - _RUN_T0
+    try:
+        from database import db_profile_read as _dbp
+        _db = _dbp()
+        _db_note = f"   db: {_db['calls']} calls, {_db['seconds']:.2f}s"
+    except Exception:
+        _db_note = ""
+    print(f"[rerun] page={_page:<12} {_elapsed*1000:7.0f} ms{_db_note}", flush=True)
