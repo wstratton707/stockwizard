@@ -325,6 +325,38 @@ def _altman_z(rev, ebit, ca, cl, assets, total_liab, retained, mcap):
     return round(z, 2), zone
 
 
+def fundamentals_basis_label(f, short=False):
+    """Which period the fundamentals describe, in one line for every renderer.
+
+    "Trailing 12 months to 27 Jun 2026 · balance sheet 27 Jun 2026 · growth on
+    CAGRs on fiscal years to 27 Sep 2025", or "FY ending 27 Sep 2025" when no quarterly
+    filing is newer than the 10-K."""
+    f = f or {}
+    b = f.get("basis") or {}
+
+    def _d(s):
+        try:
+            return pd.Timestamp(s).strftime("%d %b %Y").lstrip("0")
+        except Exception:
+            return str(s or "latest")
+
+    if b.get("kind") != "ttm":
+        return f"FY ending {_d(b.get('fy_end') or f.get('as_of'))}"
+    if short:
+        return f"TTM to {_d(b['flows_end'])}"
+    out = f"Trailing 12 months to {_d(b['flows_end'])}"
+    if b.get("balance_end"):
+        out += f" · balance sheet {_d(b['balance_end'])}"
+    if b.get("fy_end"):
+        out += f" · CAGRs on fiscal years to {_d(b['fy_end'])}"
+    return out
+
+
+def yoy_label(f):
+    """"TTM" or "FY" - the basis of the year-on-year growth figures."""
+    return "TTM" if ((f or {}).get("growth") or {}).get("yoy_basis") == "ttm" else "FY"
+
+
 def compute_fundamentals(financials, market_cap=None, price=None, supplement=None):
     """
     Turn raw Polygon statements (from data.fetch_financials) + market cap into a
@@ -346,19 +378,63 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
         return {"ok": False}
 
     mcap = float(market_cap) if isinstance(market_cap, (int, float)) else None
+    # Market cap = shares on the latest cover page x the price this report uses,
+    # so the price, the market cap and the DCF's share count come from one
+    # moment. A vendor's market cap arrived with its own price and share
+    # definition: Apple read $4,958B beside a $336.95 price that implies $4,918B.
+    # Checked against the vendor figure before it is trusted - a multi-class
+    # filer's cover page can list one class only.
+    _t0 = (financials or {}).get("ttm") or {}
+    _sh = _t0.get("shares_outstanding")
+    mcap_basis = "vendor" if mcap else None
+    if _sh and price and price > 0:
+        _mc_f = float(_sh) * float(price)
+        if mcap is None or 0.8 <= _mc_f / mcap <= 1.25:
+            mcap, mcap_basis = _mc_f, "filing"
 
-    rev   = _fin_val(inc, "revenues")
-    gp    = _fin_val(inc, "gross_profit")
-    oi    = _fin_val(inc, "operating_income_loss")
-    ni    = _fin_val(inc, "net_income_loss")
+    # ── The latest figures, where "now" is what the number means ────────────
+    # Margins, multiples, yields, net debt and leverage describe the business
+    # TODAY, so they read the trailing twelve months and the latest balance
+    # sheet when the filings are newer than the last 10-K. Growth rates, the
+    # ten-year history and Piotroski's year-on-year tests keep using complete
+    # fiscal years - comparing like with like is what they are for.
+    _ttm = (financials or {}).get("ttm") or {}
+    _flows_new = bool(_ttm.get("flows_end") and _ttm.get("fy_end")
+                      and _ttm["flows_end"] > _ttm["fy_end"])
+    _bal_new = bool(_ttm.get("balance_end") and _ttm.get("fy_end")
+                    and _ttm["balance_end"] > _ttm["fy_end"])
+
+    def _overlay(frame, values, keep_missing):
+        """Row 0 of `frame` with `values` laid over it. keep_missing=False sets a
+        field the new source lacks to None, so no ratio mixes two dates."""
+        if frame is None or len(frame) == 0 or not values:
+            return frame
+        row = frame.iloc[[0]].copy().reset_index(drop=True)
+        for k, v in values.items():
+            if v is not None:
+                row[k] = v
+            elif not keep_missing:
+                row[k] = None
+        return row
+
+    inc_now = _overlay(inc, _ttm.get("income"), True) if _flows_new else inc
+    cf_now  = _overlay(cf, _ttm.get("cash_flow"), True) if _flows_new else cf
+    bal_now = _overlay(bal, _ttm.get("balance"), False) if _bal_new else bal
+
+    rev   = _fin_val(inc_now, "revenues")
+    gp    = _fin_val(inc_now, "gross_profit")
+    oi    = _fin_val(inc_now, "operating_income_loss")
+    ni    = _fin_val(inc_now, "net_income_loss")
     eps   = _fin_val(inc, "diluted_earnings_per_share")
-    rnd   = _fin_val(inc, "research_and_development")
-    eq    = _fin_val(bal, "equity")
-    asts  = _fin_val(bal, "assets")
-    ca    = _fin_val(bal, "current_assets")
-    cl    = _fin_val(bal, "current_liabilities")
-    ltd   = _fin_val(bal, "long_term_debt")
-    ocf   = _fin_val(cf, "net_cash_flow_from_operating_activities")
+    if _flows_new and isinstance((_ttm.get("income") or {}).get("eps_diluted"), (int, float)):
+        eps = _ttm["income"]["eps_diluted"]
+    rnd   = _fin_val(inc_now, "research_and_development")
+    eq    = _fin_val(bal_now, "equity")
+    asts  = _fin_val(bal_now, "assets")
+    ca    = _fin_val(bal_now, "current_assets")
+    cl    = _fin_val(bal_now, "current_liabilities")
+    ltd   = _fin_val(bal_now, "long_term_debt")
+    ocf   = _fin_val(cf_now, "net_cash_flow_from_operating_activities")
 
     def pct(n, d):   return round(n / d * 100, 1) if (n is not None and d) else None
     def ratio(n, d): return round(n / d, 2) if (n is not None and d) else None
@@ -455,7 +531,31 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
 
     growth = {"revenue_yoy": yoy("revenues"), "net_income_yoy": yoy("net_income_loss"),
               "eps_yoy": yoy("diluted_earnings_per_share"),
-              "revenue_cagr": cagr("revenues"), "eps_cagr": eps_cagr_adjusted()}
+              "revenue_cagr": cagr("revenues"), "eps_cagr": eps_cagr_adjusted(),
+              "yoy_basis": "fy"}
+    # With quarters newer than the 10-K, year-on-year compares the latest twelve
+    # months with the twelve before. Apple's fiscal-year figure was +6.4% while
+    # its last three quarters each grew about 16%.
+    _pr = _ttm.get("prior") or {}
+    if _flows_new and _pr:
+        def _g(now, before):
+            return (round((now / before - 1) * 100, 1)
+                    if (isinstance(now, (int, float)) and isinstance(before, (int, float))
+                        and before > 0) else None)
+        _ti = _ttm.get("income") or {}
+        _rg = _g(_ti.get("revenues"), _pr.get("revenues"))
+        _ng = _g(_ti.get("net_income_loss"), _pr.get("net_income_loss"))
+        _eg = _g(_ti.get("eps_diluted"), _pr.get("eps_diluted"))
+        # EPS is as filed; a split inside the eight quarters shows up as EPS
+        # growth wildly out of line with net-income growth. Buybacks explain a
+        # few points of gap, not a quarter of the figure.
+        if _eg is not None and _ng is not None and \
+                abs((1 + _eg / 100) / (1 + _ng / 100) - 1) > 0.25:
+            _eg = None
+        if _rg is not None:
+            growth.update({"revenue_yoy": _rg, "net_income_yoy": _ng,
+                           "eps_yoy": _eg if _eg is not None else growth["eps_yoy"],
+                           "yoy_basis": "ttm" if _eg is not None else "ttm_eps_fy"})
 
     valuation = {
         "pe": ratio(mcap, ni) if (mcap and ni and ni > 0) else None,
@@ -473,7 +573,7 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
         vals = (supplement or {}).get(field) or []
         return vals[i] if i < len(vals) and vals[i] is not None else None
 
-    capex = _fin_val(cf, "capex")
+    capex = _fin_val(cf_now, "capex")
     fcf   = (ocf - capex) if (ocf is not None and capex is not None) else None
     if fcf is None:
         # Polygon's cash-flow endpoint has no capex line at all, so this is the
@@ -485,21 +585,38 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
             _ocf, _cx = _sup("operating_cf"), _sup("capex")
             if _ocf is not None and _cx is not None:
                 fcf = _ocf + _cx if _cx < 0 else _ocf - _cx
+    sbc       = _fin_val(cf_now, "sbc")
+    buybacks  = _fin_val(cf_now, "buybacks")
+    dividends = _fin_val(cf_now, "dividends_paid")
     fcf_block = {
         "fcf":        fcf,
         "fcf_margin": pct(fcf, rev),
         "fcf_yield":  pct(fcf, mcap) if (fcf is not None and mcap) else None,
+        # Operating cash flow adds stock pay back as non-cash; to a shareholder
+        # it is dilution, a real cost. Shown beside FCF rather than replacing it.
+        "sbc":           sbc,
+        "fcf_after_sbc": (fcf - sbc) if (fcf is not None and sbc is not None) else None,
+        "fcf_yield_after_sbc": (pct(fcf - sbc, mcap)
+                                if (fcf is not None and sbc is not None and mcap) else None),
+    }
+    capital_return = {
+        "buybacks": buybacks, "dividends": dividends,
+        "dividend_yield": pct(dividends, mcap) if (dividends is not None and mcap) else None,
+        "buyback_yield":  pct(buybacks, mcap) if (buybacks is not None and mcap) else None,
+        "shareholder_yield": (pct((dividends or 0) + (buybacks or 0), mcap)
+                              if mcap and (dividends is not None or buybacks is not None) else None),
+        "dps": ((dividends / (mcap / price)) if (dividends is not None and mcap and price) else None),
     }
 
     # ── EV / EBITDA ───────────────────────────────────────────────────────────
-    da         = _fin_val(inc, "depreciation_amortization")
+    da         = _fin_val(inc_now, "depreciation_amortization")
     # Polygon's balance sheet has NO cash column. Left to fall through, cash
     # reads as None and net debt below silently becomes GROSS debt — for NKE
     # that was $7.96B against a true $0.38B, an error the size of the entire
     # cash balance, which inflates enterprise value and understates fair value
     # per share in the DCF. The SEC path does carry `cash`; the supplement is
     # what keeps the Polygon fallback from being quietly wrong.
-    cash_bal   = _fin_val(bal, "cash")
+    cash_bal   = _fin_val(bal_now, "cash")
     if cash_bal is None:
         cash_bal = _sup("cash")
     # Short-term investments are cash for net-debt purposes - liquid claims that
@@ -507,20 +624,20 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
     # debt so `cash_bal` keeps meaning "cash and equivalents" wherever else it
     # is read. Absent on the Polygon path, where it degrades to None and the
     # figure is simply cash, as before.
-    _sti = _fin_val(bal, "short_term_investments")
+    _sti = _fin_val(bal_now, "short_term_investments")
     if _sti is not None:
         cash_bal = (cash_bal or 0.0) + _sti
 
     # Current debt: prefer the roll-up when the filer reports one, otherwise sum
     # the components. Mixing the two double-counts - DebtCurrent already
     # contains the current portion of long-term debt and any commercial paper.
-    _dc_total = _fin_val(bal, "debt_current_total")
+    _dc_total = _fin_val(bal_now, "debt_current_total")
     if _dc_total is not None:
         # The roll-up already contains commercial paper and other short-term
         # borrowing; adding them again would double-count.
         debt_cur = _dc_total
     else:
-        _parts = [_fin_val(bal, k) for k in
+        _parts = [_fin_val(bal_now, k) for k in
                   ("debt_current", "commercial_paper", "short_term_borrowings")]
         _parts = [v for v in _parts if v is not None]
         debt_cur = sum(_parts) if _parts else None
@@ -529,7 +646,7 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
     # one fact (Verizon, GM) is believed over anything reassembled from parts,
     # because for those filers the parts are incomplete - the non-current tag
     # this code looks for is simply not among the ones they file.
-    total_debt = _fin_val(bal, "debt_total_incl_current")
+    total_debt = _fin_val(bal_now, "debt_total_incl_current")
     if total_debt is None:
         total_debt = (sum(v for v in (ltd, debt_cur) if v is not None)
                       if (ltd is not None or debt_cur is not None) else None)
@@ -553,8 +670,8 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
                                  ca   if ca   is not None else _sup("current_assets"),
                                  cl   if cl   is not None else _sup("current_liabilities"),
                                  asts if asts is not None else _sup("total_assets"),
-                                 _fin_val(bal, "liabilities") or _sup("total_liabilities"),
-                                 _fin_val(bal, "retained_earnings") or _sup("retained_earnings"),
+                                 _fin_val(bal_now, "liabilities") or _sup("total_liabilities"),
+                                 _fin_val(bal_now, "retained_earnings") or _sup("retained_earnings"),
                                  mcap)
     quality = {"f_score": f_score, "f_basis": f_basis,
                "z_score": z_score, "z_zone": z_zone}
@@ -584,13 +701,24 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
         "fcf":              [_fcf_at(i) for i in order],
     }
 
+    _fy_end = str(inc.iloc[0]["Period"])[:10] if "Period" in inc.columns else None
+    _basis = {
+        "kind": "ttm" if _flows_new else "fy",
+        "flows_end": _ttm["flows_end"] if _flows_new else _fy_end,
+        "balance_end": _ttm["balance_end"] if _bal_new else _fy_end,
+        "fy_end": _fy_end,
+    }
     return {
         "ok": True,
+        "basis": _basis,
+        # Three non-overlapping trailing-twelve-month FCF windows, oldest first,
+        # for the DCF's normalised base; None when the filings don't support it.
+        "fcf_windows": (_ttm.get("fcf_windows") or None) if _flows_new else None,
         "as_of": str(inc.iloc[0]["Period"])[:10] if "Period" in inc.columns else "latest",
         "market_cap": mcap, "price": price,
         "income": {"revenue": rev, "gross_profit": gp, "operating_income": oi,
                    "net_income": ni, "eps_diluted": eps, "rnd": rnd},
-        "balance": {"assets": asts, "liabilities": _fin_val(bal, "liabilities"),
+        "balance": {"assets": asts, "liabilities": _fin_val(bal_now, "liabilities"),
                     "equity": eq, "current_assets": ca, "current_liabilities": cl,
                     "long_term_debt": ltd,
                     # `cash` belongs here: estimate_wacc reads it, and its absence
@@ -603,6 +731,11 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
         "growth": growth, "valuation": valuation,
         "fcf": fcf_block, "ev_ebitda": ev_ebitda, "quality": quality,
         "implied_growth": implied_growth,
+        "capital_return": capital_return,
+        "ebitda": ebitda,
+        "market_cap_basis": mcap_basis,
+        "shares_outstanding": (_sh if mcap_basis == "filing" else None),
+        "shares_date": (_t0.get("shares_date") if mcap_basis == "filing" else None),
         # Net debt (total debt − cash) and enterprise value power the DCF's
         # EV→equity bridge; None when the balance-sheet fields are unavailable.
         "net_debt": (((total_debt or 0) - (cash_bal or 0))
@@ -679,6 +812,15 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
     fcf_hist  = [x for x in _fcf_all if x > 0]
     _n_neg    = sum(1 for x in _fcf_all if x <= 0)
     base_fcf = (sum(fcf_hist[-3:]) / len(fcf_hist[-3:])) if fcf_hist else None
+    # Prefer the latest trailing-twelve-month windows (up to three, back to
+    # back): fiscal-year figures can be a year older than the price being
+    # tested against. Only when EVERY window is positive - averaging the good
+    # ones and dropping the bad is what the fiscal-year caveat below exists for.
+    _win = [w for w in (fundamentals.get("fcf_windows") or []) if isinstance(w, (int, float))]
+    base_basis = "fiscal-year"
+    if len(_win) >= 2 and all(w > 0 for w in _win):
+        base_fcf = sum(_win) / len(_win)
+        base_basis = "ttm"
     if base_fcf is None:
         latest = fundamentals.get("fcf", {}).get("fcf")
         base_fcf = latest if (isinstance(latest, (int, float)) and latest > 0) else None
@@ -717,7 +859,7 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
             "or broker it is dominated by lending and trading flows, and net debt "
             "is funding rather than leverage. Treat the fair value as indicative "
             "and prefer a residual-income or P/B-vs-ROE read.")
-    if _n_neg and fcf_hist:
+    if _n_neg and fcf_hist and base_basis == "fiscal-year":
         caveats.append(
             f"Base free cash flow averages the last {len(fcf_hist[-3:])} POSITIVE "
             f"year(s); {_n_neg} of the {len(_fcf_all)} filed years were negative "
@@ -844,7 +986,8 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
         # the number rather than living in a methodology sheet two tabs away.
         "caveats": caveats,
         "terminal_growth": terminal_growth, "years": years,
-        "base_fcf": base_fcf, "base_growth": g_base, "net_debt": net_debt,
+        "base_fcf": base_fcf, "base_fcf_basis": base_basis,
+        "base_growth": g_base, "net_debt": net_debt,
         "shares": shares, "market_implied_growth": implied_growth,
         # Average annual growth along the fade, and where FCF ends up.
         "market_implied_cagr": implied_cagr,
@@ -1090,6 +1233,7 @@ def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print, seed=4
     # which is what an equity expected return should be built from.
     ann_mu = cost_of_equity(_beta if _beta is not None else 1.0)
     mu     = ann_mu / 252.0
+    from constants import get_long_risk_free_rate as _rf_long, EQUITY_RISK_PREMIUM as _ERP
     # Seeded local generator, matching the portfolio Monte Carlo and the efficient
     # frontier. Drawing from global numpy state meant the same ticker over the same
     # window produced a different P5/P50/P95 on every run — two reports generated
@@ -1124,6 +1268,10 @@ def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print, seed=4
         "Drift basis":             (f"CAPM, beta measured vs benchmark" if _beta is not None
                                     else "CAPM with beta assumed 1.0 (no benchmark data)"),
         "Beta (adjusted, used)":   round(float(blume_adjust(_beta if _beta is not None else 1.0)), 2),
+        # The drift's inputs, so "Expected Return (CAPM)" can be rebuilt by hand:
+        # risk-free + adjusted beta x equity risk premium.
+        "Risk-free (10Y)":         f"{_rf_long() * 100:.2f}%",
+        "Equity risk premium":     f"{_ERP * 100:.2f}%",
     }
     log(f"   P5 ${summary['Bear Case (P5)']:,.2f}  "
         f"P50 ${summary['Median (P50)']:,.2f}  "

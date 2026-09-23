@@ -279,7 +279,7 @@ def _yahoo_bars(ticker: str, start: str, end: str, interval: str) -> pd.DataFram
             "High":   raw["High"].astype(float),
             "Low":    raw["Low"].astype(float),
             "Close":  raw["Close"].astype(float),
-            "Volume": raw["Volume"].fillna(0).astype(float),
+            "Volume": raw["Volume"].fillna(0).round().astype(float),
         })
         return out.dropna(subset=["Close"]).sort_values("Date").reset_index(drop=True)
     except Exception:
@@ -317,7 +317,7 @@ def get_bars_batch(tickers: list, start: str, end: str, interval: str = "day") -
                     "High":   sub["High"].astype(float),
                     "Low":    sub["Low"].astype(float),
                     "Close":  sub["Close"].astype(float),
-                    "Volume": sub["Volume"].fillna(0).astype(float),
+                    "Volume": sub["Volume"].fillna(0).round().astype(float),
                 }).dropna(subset=["Close"]).sort_values("Date").reset_index(drop=True)
                 if len(df) > 0:
                     out[orig] = df
@@ -353,6 +353,9 @@ def _polygon_bars(ticker: str, start: str, end: str, interval: str, key: str) ->
                 _ts = pd.to_datetime(df["Date"], unit="ms", utc=True).dt.tz_convert(
                     "America/New_York").dt.tz_localize(None)
                 df["Date"] = _ts.dt.normalize() if tspan in ("day", "week", "month") else _ts
+                # Adjusted aggregates carry fractional share volumes (147 of them
+                # in one AAPL report); a volume is a count of shares.
+                df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce").round()
                 return df[["Date", "Open", "High", "Low", "Close", "Volume"]] \
                     .sort_values("Date").reset_index(drop=True)
     except Exception:

@@ -14,8 +14,8 @@ SHORT = (
 # ── Backtest-specific disclosure ──────────────────────────────────────────────
 BACKTEST = (
     "Backtested performance is hypothetical. Results are simulated using historical "
-    "price data adjusted for splits and dividends (via Yahoo Finance, with Polygon as "
-    "a fallback) and do not reflect "
+    "price data adjusted for splits and dividends (via Yahoo Finance; the Polygon "
+    "fallback is adjusted for splits only) and do not reflect "
     "actual trading. Backtests are subject to survivorship bias — the stock universe "
     "contains only currently-listed companies; delisted or bankrupt securities are "
     "excluded, which may overstate historical returns. Transaction costs are modelled "
@@ -46,9 +46,10 @@ STRESS_TEST = (
     "correlations typically rise in a real crisis, so true drawdowns can be "
     "deeper. Holdings with neither history nor a usable beta are excluded from a "
     "scenario, and the portfolio figure is re-weighted across what remains. "
-    "Returns are computed from split- and dividend-adjusted prices, so they are "
-    "total returns and will differ slightly from the headline index price decline "
-    "quoted for each crisis. Past crises do not predict future drawdowns."
+    "Returns are computed from split- and dividend-adjusted prices where Yahoo "
+    "Finance supplies them, so they are total returns and will differ slightly from "
+    "the headline index price decline quoted for each crisis. Past crises do not "
+    "predict future drawdowns."
 )
 
 # ── Portfolio optimisation disclosure ────────────────────────────────────────
@@ -82,10 +83,10 @@ OPTIMISATION = (
 
 # ── Dividend / price data note ────────────────────────────────────────────────
 DIVIDENDS = (
-    "Price data is sourced from Yahoo Finance (with Polygon as a fallback) using split- "
-    "and dividend-adjusted closing prices. Dividend reinvestment is implicitly reflected "
-    "in the adjusted price series "
-    "but does not model the timing or tax treatment of actual dividend payments."
+    "Price data is sourced from Yahoo Finance using split- and dividend-adjusted "
+    "closing prices, so dividend reinvestment is implicitly reflected. When Yahoo is "
+    "unavailable, Polygon.io prices are adjusted for splits only and returns are "
+    "price-only. Neither models the timing or tax treatment of actual dividend payments."
 )
 
 # ── Portfolio Builder scope (shown before any input is collected) ────────────

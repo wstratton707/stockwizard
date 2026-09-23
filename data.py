@@ -448,6 +448,15 @@ _SEC_TAGS = {
     "net_cash_flow_from_investing_activities": ["NetCashProvidedByUsedInInvestingActivities"],
     "net_cash_flow_from_financing_activities": ["NetCashProvidedByUsedInFinancingActivities"],
     "capex": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
+    # Microsoft and Alphabet file no combined D&A fact, only the parts. Used
+    # only when no combined tag exists.
+    "depreciation_only": ["Depreciation"],
+    "amortization_intangibles": ["AmortizationOfIntangibleAssets"],
+    # Capital allocation and the cost free cash flow leaves out: stock pay is a
+    # real expense that operating cash flow adds back (Apple FY2025: $12.9B).
+    "sbc": ["ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"],
+    "buybacks": ["PaymentsForRepurchaseOfCommonStock"],
+    "dividends_paid": ["PaymentsOfDividends", "PaymentsOfDividendsCommonStock"],
 }
 _SEC_TAGS_EPS    = ["EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted"]
 _SEC_TAGS_SHARES = ["WeightedAverageNumberOfDilutedSharesOutstanding",
@@ -633,6 +642,191 @@ def key_filings(filings, forms=None):
     return out
 
 
+
+# ── Trailing twelve months, from the quarterly filings ────────────────────────
+# Annual statements alone left every ratio a fiscal year behind the price: AAPL's
+# report paired a September 2026 price with September 2025 earnings, although
+# three 10-Qs had been filed since. Flows are rebuilt quarter by quarter and the
+# latest four summed; the balance sheet is the latest filed one.
+#
+# Filings report flows CUMULATIVELY from the start of the fiscal year (3, 6, 9,
+# 12 months), and the cash-flow statement only that way. Grouping facts by their
+# start date and differencing consecutive cumulative values recovers each
+# quarter, including Q4 as the full year less nine months - for income and cash
+# flow alike. Dollar amounts need no split adjustment.
+_TTM_INCOME = ("revenues", "cost_of_revenue", "gross_profit", "operating_income_loss",
+               "net_income_loss", "research_and_development", "depreciation_amortization")
+_TTM_CASH   = ("net_cash_flow_from_operating_activities", "capex", "sbc", "buybacks",
+               "dividends_paid")
+_BAL_FIELDS = ("assets", "current_assets", "liabilities", "current_liabilities", "equity",
+               "long_term_debt", "debt_current", "debt_total_incl_current",
+               "debt_current_total", "commercial_paper", "short_term_borrowings",
+               "cash", "short_term_investments", "retained_earnings")
+
+
+def _sec_quarterly_flow(facts, tags, unit="USD"):
+    """{quarter_end: value} for a duration concept, one entry per fiscal quarter."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    out = {}
+    for tag in tags:                                   # priority order
+        node = gaap.get(tag)
+        if not node:
+            continue
+        best = {}                                      # (start, end) -> (val, filed)
+        for e in node.get("units", {}).get(unit) or []:
+            s, d, v = e.get("start"), e.get("end"), e.get("val")
+            if not s or not d or v is None:
+                continue
+            f = e.get("filed", "")
+            if (s, d) not in best or f >= best[(s, d)][1]:
+                best[(s, d)] = (float(v), f)           # later filing = restatement
+        by_start = {}
+        for (s, d), (v, _f) in best.items():
+            by_start.setdefault(s, []).append((pd.Timestamp(d), v))
+        for s, lst in by_start.items():
+            s_ts = pd.Timestamp(s)
+            lst.sort()
+            prev_end, prev_val = s_ts - pd.Timedelta(days=1), 0.0
+            for d, v in lst:
+                if (d - s_ts).days > 380:
+                    break
+                if 80 <= (d - prev_end).days <= 100:
+                    out.setdefault(d, v - prev_val)    # higher-priority tag wins
+                prev_end, prev_val = d, v
+    return dict(sorted(out.items()))
+
+
+def _sec_latest_balance(facts):
+    """(date, {field: value}) for the most recent balance-sheet date filed.
+
+    Every field is read at that ONE date; a field not reported on it is None
+    rather than an older figure, so no ratio mixes two balance sheets."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    per_field = {}
+    for field in _BAL_FIELDS:
+        vals = {}
+        for tag in _SEC_TAGS.get(field, []):
+            node = gaap.get(tag)
+            if not node:
+                continue
+            for e in node.get("units", {}).get("USD") or []:
+                if e.get("start") or not e.get("end") or e.get("val") is None:
+                    continue
+                d = pd.Timestamp(e["end"])
+                f = e.get("filed", "")
+                cur = vals.get(d)
+                if cur is None or (cur[2] == tag and f >= cur[1]):
+                    vals[d] = (float(e["val"]), f, tag)
+        per_field[field] = vals
+    dates = sorted(per_field.get("assets", {}))
+    if not dates:
+        return None, {}
+    d = dates[-1]
+    return d, {f: (per_field[f][d][0] if d in per_field[f] else None) for f in _BAL_FIELDS}
+
+
+def _sec_cover_shares(facts):
+    """(date, shares outstanding) from the latest filing's cover page.
+
+    The market cap should be THIS count times the price. Backing shares out of a
+    vendor's market cap gave Apple 14.715B - its weighted-average diluted count -
+    against 14.594B on the 10-Q cover, and a market cap 0.8% high. Several
+    values in one filing at one date are share classes and are summed."""
+    node = facts.get("facts", {}).get("dei", {}).get("EntityCommonStockSharesOutstanding")
+    rows = [e for e in ((node or {}).get("units", {}).get("shares") or [])
+            if e.get("val") and e.get("end")]
+    if not rows:
+        return None, None
+    last = max(rows, key=lambda e: (e.get("filed", ""), e["end"]))
+    vals = {float(e["val"]) for e in rows
+            if e.get("accn") == last.get("accn") and e["end"] == last["end"]}
+    return last["end"], sum(vals)
+
+
+def _sec_ttm(facts, fy_end):
+    """Latest trailing-twelve-month flows, latest balance sheet, and the last
+    three non-overlapping twelve-month FCF windows. None when fewer than four
+    consecutive quarters exist."""
+    def _q(field):
+        return _sec_quarterly_flow(facts, _SEC_TAGS[field])
+
+    rev_q = _q("revenues") or _q("net_income_loss")
+    all_ends = list(rev_q)
+    ends = all_ends[-4:]
+    if len(ends) < 4 or any(not (80 <= (b - a).days <= 100) for a, b in zip(ends, ends[1:])):
+        return None
+    t_end = ends[-1]
+    # The four quarters before, for growth that compares twelve months with
+    # twelve months. Only when all eight are back to back.
+    prior_ends = all_ends[-8:-4]
+    if len(prior_ends) < 4 or any(not (80 <= (b - a).days <= 100)
+                                  for a, b in zip(all_ends[-8:], all_ends[-7:])):
+        prior_ends = None
+
+    def _sum4(series, which=None):
+        which = ends if which is None else which
+        pts = [series.get(e) for e in which]
+        if any(v is None for v in pts):
+            # tolerate a few days' disagreement between concepts on a quarter end
+            pts = []
+            for e in which:
+                near = [v for k, v in series.items() if abs((k - e).days) <= 7]
+                if not near:
+                    return None
+                pts.append(near[0])
+        return float(sum(pts))
+
+    income = {f: _sum4(_q(f)) for f in _TTM_INCOME}
+    if income.get("depreciation_amortization") is None:
+        _dep, _amo = _sum4(_q("depreciation_only")), _sum4(_q("amortization_intangibles"))
+        if _dep is not None:
+            income["depreciation_amortization"] = _dep + (_amo or 0.0)
+    # Diluted EPS summed over the quarters. Per-share figures are as filed, so a
+    # split inside the eight quarters makes the two sums incomparable; the
+    # caller checks EPS growth against net-income growth before trusting it.
+    _eps_q = _sec_quarterly_flow(facts, _SEC_TAGS_EPS, unit="USD/shares")
+    income["eps_diluted"] = _sum4(_eps_q)
+    prior = None
+    if prior_ends:
+        prior = {"revenues": _sum4(rev_q, prior_ends),
+                 "net_income_loss": _sum4(_q("net_income_loss"), prior_ends),
+                 "eps_diluted": _sum4(_eps_q, prior_ends)}
+    if income.get("gross_profit") is None and income.get("revenues") is not None \
+            and income.get("cost_of_revenue") is not None:
+        income["gross_profit"] = income["revenues"] - income["cost_of_revenue"]
+    cfo_q, cx_q = _q("net_cash_flow_from_operating_activities"), _q("capex")
+    cash = {"net_cash_flow_from_operating_activities": _sum4(cfo_q),
+            "capex": _sum4(cx_q)}
+    for f in _TTM_CASH[2:]:
+        cash[f] = _sum4(_q(f))
+
+    # FCF windows: consecutive quarters where both CFO and capex exist.
+    fq = [(d, cfo_q[d] - cx_q[d]) for d in cfo_q if d in cx_q]
+    fq.sort()
+    windows = []
+    k = len(fq)
+    while k - 4 >= 0 and len(windows) < 3:
+        blk = fq[k - 4:k]
+        if all(80 <= (b[0] - a[0]).days <= 100 for a, b in zip(blk, blk[1:])):
+            windows.insert(0, float(sum(v for _d, v in blk)))
+            k -= 4
+        else:
+            break
+
+    b_end, balance = _sec_latest_balance(facts)
+    sh_end, shares = _sec_cover_shares(facts)
+    # Berkshire's last companyfacts cover count is from 2011. A count that old
+    # would price the company at a fraction of its value; drop it.
+    if sh_end and (pd.Timestamp(sh_end) < t_end - pd.Timedelta(days=120)):
+        sh_end, shares = None, None
+    return {"flows_end": str(t_end.date()), "fy_end": str(fy_end)[:10],
+            "income": income, "cash_flow": cash, "fcf_windows": windows,
+            "prior": prior,
+            "balance_end": str(b_end.date()) if b_end is not None else None,
+            "balance": balance,
+            "shares_outstanding": shares, "shares_date": sh_end}
+
+
 def fetch_sec_financials(ticker, years=10, log=print):
     """
     Up to `years` of annual statements from SEC EDGAR's companyfacts API.
@@ -675,6 +869,15 @@ def fetch_sec_financials(ticker, years=10, log=print):
                 return fmap[f][fy][0]
         return str(fy)
 
+    def _da(fy):
+        v = col("depreciation_amortization", fy)
+        if v is None:
+            # Depreciation plus amortization where the filer tags it; Alphabet
+            # files amortization only in some quarters, and it is 2% of the total.
+            d, a = col("depreciation_only", fy), col("amortization_intangibles", fy)
+            v = (d + (a or 0.0)) if d is not None else None
+        return v
+
     inc_rows, bal_rows, cf_rows = [], [], []
     for fy in fys:
         period = end_of(fy)
@@ -688,7 +891,7 @@ def fetch_sec_financials(ticker, years=10, log=print):
             "gross_profit": gp, "operating_income_loss": col("operating_income_loss", fy),
             "net_income_loss": col("net_income_loss", fy),
             "research_and_development": col("research_and_development", fy),
-            "depreciation_amortization": col("depreciation_amortization", fy),
+            "depreciation_amortization": _da(fy),
             "diluted_earnings_per_share": eps_map.get(fy, (None, None))[1],
             "diluted_shares": shares_map.get(fy, (None, None))[1],
         })
@@ -713,14 +916,23 @@ def fetch_sec_financials(ticker, years=10, log=print):
             "net_cash_flow_from_investing_activities": col("net_cash_flow_from_investing_activities", fy),
             "net_cash_flow_from_financing_activities": col("net_cash_flow_from_financing_activities", fy),
             "capex": col("capex", fy),
+            "sbc": col("sbc", fy),
+            "buybacks": col("buybacks", fy),
+            "dividends_paid": col("dividends_paid", fy),
         })
 
     log(f"   EDGAR: {len(fys)} fiscal years for {ticker} ({fys[-1]}–{fys[0]})")
+    try:
+        ttm = _sec_ttm(facts, end_of(fys[0]))
+    except Exception as e:
+        log(f"   TTM not built for {ticker}: {type(e).__name__}")
+        ttm = None
     return {
         "income_statement":    pd.DataFrame(inc_rows),
         "balance_sheet":       pd.DataFrame(bal_rows),
         "cash_flow_statement": pd.DataFrame(cf_rows),
         "source": "SEC EDGAR",
+        "ttm": ttm,
     }
 
 

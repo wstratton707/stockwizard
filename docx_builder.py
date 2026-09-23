@@ -16,6 +16,7 @@ import os
 import numpy as np
 
 from data import SECTOR_ETF_MAP
+from analysis import fundamentals_basis_label as _basis_label
 
 import matplotlib
 matplotlib.use("Agg")
@@ -573,7 +574,8 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
                       _asof or "latest close"])
     if f.get("ok"):
         _src_rows.append(["Financial statements", f.get("source") or "SEC EDGAR / Polygon",
-                          "Annual filings", str(f.get("as_of") or "latest")])
+                          "Annual + quarterly filings" if (f.get("basis") or {}).get("kind") == "ttm"
+                          else "Annual filings", _basis_label(f, short=True)])
     if analyst_data:
         _src_rows.append(["Analyst consensus", "Finnhub", "Third-party, not ours", "latest"])
     if news_list:

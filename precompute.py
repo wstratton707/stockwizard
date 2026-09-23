@@ -255,10 +255,12 @@ def _compute_fundamentals(ticker: str):
             "eps":        inc.get("eps_diluted"),
             "shares":     _fin_val(_inc_f, "diluted_shares"),
             "ni":         f.get("income", {}).get("net_income"),
-            "ebitda":     (_oi + _da) if (_oi is not None and _da is not None) else None,
+            "ebitda":     f.get("ebitda") if f.get("ebitda") is not None else (
+                          (_oi + _da) if (_oi is not None and _da is not None) else None),
             "debt":       _bal.get("long_term_debt"),
             "cash":       _bal.get("cash"),
-            "fcf":        (_ocf - _capex) if (_ocf is not None and _capex is not None) else None,
+            "fcf":        (f.get("fcf") or {}).get("fcf") if (f.get("fcf") or {}).get("fcf") is not None
+                          else ((_ocf - _capex) if (_ocf is not None and _capex is not None) else None),
         }
     except Exception:
         return None

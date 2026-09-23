@@ -26,7 +26,7 @@ from datetime import datetime
 from constants import get_risk_free_rate
 from disclaimers import SHORT as DISCLAIMER_SHORT
 from market_data import consensus_from_recommendation
-from analysis import compute_scorecard
+from analysis import compute_scorecard, fundamentals_basis_label, yoy_label
 
 try:
     import matplotlib
@@ -1612,7 +1612,7 @@ def _build_fundamentals_sheet(wb, fundamentals):
     row = 1
     tc = ws.cell(row=row, column=1,
                  value=f"Fundamentals & Valuation   ·   source: {f.get('source','—')}"
-                       f"   ·   FY ending {f.get('as_of','—')}")
+                       f"   ·   {fundamentals_basis_label(f)}")
     tc.font = Font(size=14, bold=True, color=DARK_BLUE, name="Calibri")
     row += 2
 
@@ -1644,11 +1644,19 @@ def _build_fundamentals_sheet(wb, fundamentals):
     _ig = f.get("implied_growth")
     X   = '0.00"x"'
     BN  = '"$"#,##0.0,,,"B"'
+    _mcb = f.get("market_cap_basis")
+    _shd = f.get("shares_date")
     section("Valuation", [
+        (("Market cap (10-Q cover shares × price)" if _mcb == "filing"
+          else "Market cap (data vendor)"), f.get("market_cap"), BN),
+        (f"Shares outstanding (cover page, {pd.Timestamp(_shd):%d %b %Y})" if _shd
+         else "Shares outstanding",
+         f.get("shares_outstanding") if _mcb == "filing" else None, '#,##0.000,,,"B"'),
         ("P/E", v["pe"], X), ("P/S", v["ps"], X), ("P/B", v["pb"], X),
         ("EV / EBITDA", f.get("ev_ebitda"), X),
         ("Earnings Yield", _pctv(v["earnings_yield"]), "0.0%"),
         ("FCF Yield", _pctv(fc.get("fcf_yield")), "0.0%"),
+        ("FCF Yield after stock-based pay", _pctv(fc.get("fcf_yield_after_sbc")), "0.0%"),
         # Labelled by BASIS, not just as "reverse-DCF implied growth". The
         # Valuation sheet carries a different implied-growth figure — solved
         # against free cash flow at the company's own CAPM WACC — and the two
@@ -1665,12 +1673,24 @@ def _build_fundamentals_sheet(wb, fundamentals):
         ("Return on Equity", _pctv(r["roe"]), "0.0%"),
         ("Return on Assets", _pctv(r["roa"]), "0.0%"),
         ("Free Cash Flow", fc.get("fcf"), BN),
+        ("Stock-based compensation", fc.get("sbc"), BN),
+        ("FCF after stock-based compensation", fc.get("fcf_after_sbc"), BN),
+    ])
+    _cr = f.get("capital_return") or {}
+    section("Capital Returned" + (" (trailing 12 months)" if (f.get("basis") or {}).get("kind") == "ttm"
+                                   else " (fiscal year)"), [
+        ("Dividends paid", _cr.get("dividends"), BN),
+        ("Share buybacks", _cr.get("buybacks"), BN),
+        ("Dividends per share (paid ÷ shares)", _cr.get("dps"), '"$"0.00'),
+        ("Dividend yield", _pctv(_cr.get("dividend_yield")), "0.00%"),
+        ("Buyback yield", _pctv(_cr.get("buyback_yield")), "0.00%"),
+        ("Shareholder yield (dividends + buybacks)", _pctv(_cr.get("shareholder_yield")), "0.00%"),
     ])
     section("Growth", [
-        ("Revenue YoY", _pctv(g["revenue_yoy"]), "0.0%"),
-        ("EPS YoY", _pctv(g["eps_yoy"]), "0.0%"),
-        ("Revenue CAGR", _pctv(g["revenue_cagr"]), "0.0%"),
-        ("EPS CAGR", _pctv(g["eps_cagr"]), "0.0%"),
+        (f"Revenue YoY ({yoy_label(f)})", _pctv(g["revenue_yoy"]), "0.0%"),
+        (f"EPS YoY ({yoy_label(f)})", _pctv(g["eps_yoy"]), "0.0%"),
+        ("Revenue CAGR (fiscal years)", _pctv(g["revenue_cagr"]), "0.0%"),
+        ("EPS CAGR (fiscal years, split-adjusted)", _pctv(g["eps_cagr"]), "0.0%"),
     ])
     section("Balance Sheet & Quality", [
         ("Current Ratio", l["current_ratio"], "0.00"),
@@ -1947,8 +1967,14 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
         input_cell=False,
         note=f"Fixed at {n_yr} years: the projection table below has {n_yr} rows. "
              "Not an input.")
+    _fb = (fundamentals or {}).get("basis") or {}
+    _base_fcf_note = (
+        f"Mean of the last {len((fundamentals or {}).get('fcf_windows') or [])} back-to-back "
+        f"trailing-twelve-month FCF figures, the newest ending {_fb.get('flows_end')}."
+        if dcf.get("base_fcf_basis") == "ttm"
+        else "Mean of the last three positive annual FCF figures.")
     kv2(R_FCF0, "Normalised base free cash flow", dcf["base_fcf"], fmt=FMT_BN,
-        input_cell=True, note="Mean of the last three positive annual FCF figures.")
+        input_cell=True, note=_base_fcf_note)
     kv2(R_G1,   "Stage-1 FCF growth — base case", dcf["base_growth"], fmt=FMT_PCT1,
         input_cell=True, note="Year-1 growth, fading linearly to the terminal rate.")
     kv2(R_GBEAR, "Stage-1 FCF growth — bear case",
@@ -2205,6 +2231,9 @@ def _build_methodology_sheet(wb, dcf=None):
     _d      = dcf if isinstance(dcf, dict) and dcf.get("ok") else {}
     _w_txt  = f"{_d['wacc']*100:.1f}%" if _d else "a company-specific discount rate (CAPM-derived WACC)"
     _tg_txt = f"{_d['terminal_growth']*100:.1f}%" if _d else "a long-run terminal growth rate"
+    _base_fcf_how = ("averaged over the latest back-to-back trailing-twelve-month figures"
+                     if (_d or {}).get("base_fcf_basis") == "ttm"
+                     else "normalised over the last three positive annual figures")
     _yr_txt = f"{_d['years']}-year" if _d else "multi-year"
 
     section("Valuation", [
@@ -2221,7 +2250,7 @@ def _build_methodology_sheet(wb, dcf=None):
          "It is blank when today's price falls outside the range of growth rates the model can solve (roughly −20% to +50% a year) — usually a sign the price is being driven by something other than free-cash-flow growth."),
         ("DCF Fair Value",
          f"Two-stage DCF on free cash flow: PV of {_yr_txt} of projected FCF + PV of terminal value − net debt, ÷ shares (market cap ÷ price). "
-         f"Discount rate {_w_txt}, terminal growth {_tg_txt}; base FCF normalised over the last three positive annual figures; stage-1 growth fades linearly to the terminal rate. "
+         f"Discount rate {_w_txt}, terminal growth {_tg_txt}; base FCF {_base_fcf_how}; stage-1 growth fades linearly to the terminal rate. "
          "The Valuation sheet holds the whole model as live Excel formulas over a block of editable assumption cells — change the discount rate, the terminal growth rate or the growth path and every downstream figure recalculates. A model, not a price target."),
         ("Sensitivity Grid",
          "Base-case fair value per share across a 5×5 grid of discount rates and terminal growth rates, on the Valuation sheet. Green cells sit above today's price, red below. "
@@ -2240,7 +2269,7 @@ def _build_methodology_sheet(wb, dcf=None):
     section("Sentiment & Data Sources", [
         ("Analyst Consensus", "Wall-Street Buy/Hold/Sell counts aggregated by Finnhub, scored into one verdict. Analysts' view, not QuantWizard's."),
         ("News Relevance & Sentiment", "Headlines are ranked High/Medium/Low for how directly they concern the company (broad round-ups are dropped) and tagged with Polygon's per-article sentiment."),
-        ("Data Sources", "Prices: Yahoo Finance (Polygon fallback), split/dividend-adjusted. Fundamentals: SEC EDGAR (Polygon fallback). News & analyst data: Finnhub / Polygon. Risk-free rate: US Treasury via FRED."),
+        ("Data Sources", "Prices: Yahoo Finance, adjusted for splits and dividends; when Yahoo is unavailable, Polygon.io, adjusted for splits only, so returns are then price-only (dividends not added back - about 0.4 percentage points a year for a 0.4%-yielding stock). The latest session can come from a live quote and carries no volume. Fundamentals: SEC EDGAR (Polygon fallback). News & analyst data: Finnhub / Polygon. Risk-free rate: US Treasury via FRED."),
         ("Disclaimer", DISCLAIMER_SHORT + " Figures are generated programmatically for information and education only."),
     ])
     ws.freeze_panes = "A3"

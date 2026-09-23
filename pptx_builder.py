@@ -15,6 +15,8 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from datetime import datetime
 from constants import get_risk_free_rate
+from analysis import fundamentals_basis_label as _basis_label
+from analysis import yoy_label as _yoy_label
 
 try:
     from pptx import Presentation
@@ -623,7 +625,7 @@ def _build_fundamentals_slide(prs, ticker, fundamentals, page_num, total):
 
     s = _blank_slide(prs)
     _slide_header(s, f"{ticker} — Fundamentals & Valuation",
-                  f"Source: {f.get('source','—')}   ·   FY ending {f.get('as_of','—')}")
+                  f"Source: {f.get('source','—')}   ·   {_basis_label(f)}")
 
     # Rows with nothing in them are dropped below rather than printed as a
     # column of "N/A", which is the single loudest thing on the slide and says
@@ -634,11 +636,13 @@ def _build_fundamentals_slide(prs, ticker, fundamentals, page_num, total):
         ("EV / EBITDA", pc(f.get("ev_ebitda"), "x")), ("FCF Yield", pc(fc.get("fcf_yield"), "%")),
         ("Gross Margin", pc(m["gross"], "%")), ("Operating Margin", pc(m["operating"], "%")),
         ("Net Margin", pc(m["net"], "%")), ("Return on Equity", pc(r["roe"], "%")),
+        ("Dividend + Buyback Yield",
+         pc((f.get("capital_return") or {}).get("shareholder_yield"), "%")),
     ]
     _fs, _z, _zone = q.get("f_score"), q.get("z_score"), q.get("z_zone")
     right = [
-        ("Revenue YoY", pc(g["revenue_yoy"], "%"), (g["revenue_yoy"] or 0) >= 0),
-        ("EPS YoY", pc(g["eps_yoy"], "%"), (g["eps_yoy"] or 0) >= 0),
+        (f"Revenue YoY ({_yoy_label(f)})", pc(g["revenue_yoy"], "%"), (g["revenue_yoy"] or 0) >= 0),
+        (f"EPS YoY ({_yoy_label(f)})", pc(g["eps_yoy"], "%"), (g["eps_yoy"] or 0) >= 0),
         ("Revenue CAGR", pc(g["revenue_cagr"], "%")),
         # A CAGR spanning a sign change has no value; that is arithmetic, not a
         # missing feed. TSLA lost money ten years ago and earns money now.
@@ -1053,7 +1057,7 @@ def build_stock_pptx(ticker, df, period_label,
     _text_box(sl, disclaimer, 1.0, 2.0, 11.3, 4.2,
               font_size=10, color=RGBColor(0xB0, 0xC4, 0xDE), align=PP_ALIGN.LEFT)
 
-    _text_box(sl, f"© {datetime.now().year} QuantWizard  ·  quantwizard.app",
+    _text_box(sl, f"© {datetime.now().year} QuantWizard  ·  quantwizard.co",
               0.6, 6.6, 12, 0.3, font_size=9, color=C_GREY_TEXT, align=PP_ALIGN.CENTER)
 
     buf = io.BytesIO()
@@ -1405,7 +1409,7 @@ def build_portfolio_pptx(preferences, final_weights, stock_metrics,
     _text_box(sl, disclaimer, 1.0, 2.0, 11.3, 4.5,
               font_size=10, color=RGBColor(0xB0, 0xC4, 0xDE))
 
-    _text_box(sl, f"© {datetime.now().year} QuantWizard  ·  quantwizard.app",
+    _text_box(sl, f"© {datetime.now().year} QuantWizard  ·  quantwizard.co",
               0.6, 6.6, 12, 0.3, font_size=9, color=C_GREY_TEXT, align=PP_ALIGN.CENTER)
 
     buf = io.BytesIO()

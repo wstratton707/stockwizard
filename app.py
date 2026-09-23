@@ -483,6 +483,8 @@ def _render_stock_news(ticker, company_name=None):
 from live_data import get_live_price, get_top_movers, get_tape_prices
 from data import append_live_session
 from analysis import exchange_name
+from analysis import fundamentals_basis_label as _basis_label
+from analysis import yoy_label as _yoy_label
 
 
 def _fmt_month(v):
@@ -2102,7 +2104,12 @@ elif _page == "analysis":
                 # and the correlation matrix — every window after the first served
                 # the first one's result from cache, computed off a different mu
                 # and sigma.
+                # The last close is part of the key: the live session bar keeps
+                # its date while its price moves, and a key of dates alone served
+                # a Monte Carlo started from an earlier quote ($336.84 beside a
+                # $336.95 report price).
                 _win_key = (f"{df['Date'].iloc[0]}|{df['Date'].iloc[-1]}|{len(df)}"
+                            f"|{float(df['Close'].iloc[-1]):.4f}"
                             if "Date" in df.columns and len(df) else "")
 
                 # Risk window. On a custom range the user has already said what
@@ -2122,6 +2129,7 @@ elif _page == "analysis":
                     else:
                         _mwin = f"{METRICS_YEARS}Y"
                 _mw_key = (f"{dfm['Date'].iloc[0]}|{dfm['Date'].iloc[-1]}|{len(dfm)}"
+                           f"|{float(dfm['Close'].iloc[-1]):.4f}"
                            if len(dfm) else _win_key)
 
                 corr_matrix = None
@@ -2413,6 +2421,9 @@ elif _page == "analysis":
                             # the SIC description kept as the industry, rather than
                             # "Electronic Computers" standing in for a sector.
                             _cd_rpt = dict(company_details or {})
+                            _fv = _fund()
+                            if _fv.get("market_cap_basis") == "filing" and _fv.get("market_cap"):
+                                _cd_rpt["Market Cap"] = _fv["market_cap"]
                             _ss = _std_sector(ticker_input)
                             if _ss and _ss.lower() != str(_cd_rpt.get("Sector", "")).lower():
                                 _cd_rpt["Industry"] = _cd_rpt.get("Sector")
@@ -3564,7 +3575,7 @@ elif _page == "analysis":
                             f'<div class="section-header"'
                             f'{_sec_id("sec-fundamentals", "Fundamentals")}>Fundamentals &amp; Valuation '
                             f'<span style="font-weight:500;color:#94a3b8;letter-spacing:0;'
-                            f'text-transform:none;font-size:0.7rem">· {_hist}FY ending {fund["as_of"]} '
+                            f'text-transform:none;font-size:0.7rem">· {_hist}{_basis_label(fund)} '
                             f'· {fund.get("source", "Polygon")}</span></div>',
                             unsafe_allow_html=True)
 
@@ -3572,6 +3583,8 @@ elif _page == "analysis":
                                               fund["returns"], fund["leverage"], fund["growth"])
                         _q, _fc = fund["quality"], fund["fcf"]
                         _fs, _z, _zone, _fy = _q["f_score"], _q["z_score"], _q["z_zone"], _fc["fcf_yield"]
+                        _cr = fund.get("capital_return") or {}
+                        _yl = _yoy_label(fund)
                         _fs_cls = ("pos" if (_fs is not None and _fs >= 7)
                                    else "neg" if (_fs is not None and _fs <= 3) else "")
                         _z_cls  = {"safe": "pos", "distress": "neg"}.get(_zone, "")
@@ -3580,6 +3593,11 @@ elif _page == "analysis":
                             "Altman Z-Score": "Bankruptcy-risk score. Above 2.99 = safe, 1.81-2.99 grey, below 1.81 = distress. Not meaningful for banks.",
                             "FCF Yield": "Free cash flow (operating cash flow − capex) ÷ market cap. Higher = more cash per dollar of value.",
                             "EV / EBITDA": "Enterprise value ÷ EBITDA — a capital-structure-neutral valuation multiple.",
+                            "FCF after SBC": "Free cash flow less stock-based pay, ÷ market cap. Operating cash flow adds stock pay back as non-cash; to a shareholder it is dilution.",
+                            "Dividend Yield": "Dividends paid over the last twelve months ÷ market cap.",
+                            "Shareholder Yield": "Dividends plus share buybacks over the last twelve months ÷ market cap — all the cash returned to owners.",
+                            "YoY": ("Latest twelve months against the twelve before." if _yl == "TTM"
+                                    else "Latest fiscal year against the one before."),
                         }
 
 
@@ -3593,6 +3611,10 @@ elif _page == "analysis":
                                 ("EV / EBITDA",    _mv(fund["ev_ebitda"], "×"), "", _qtips["EV / EBITDA"]),
                                 ("Earnings Yield", _mv(_v["earnings_yield"], "%"), _pos0(_v["earnings_yield"]), ""),
                                 ("FCF Yield",      _mv(_fy, "%"), _pos0(_fy), _qtips["FCF Yield"]),
+                                ("FCF Yield after SBC", _mv(_fc.get("fcf_yield_after_sbc"), "%"),
+                                 _pos0(_fc.get("fcf_yield_after_sbc")), _qtips["FCF after SBC"]),
+                                ("Dividend Yield", _mv(_cr.get("dividend_yield"), "%"), "", _qtips["Dividend Yield"]),
+                                ("Shareholder Yield", _mv(_cr.get("shareholder_yield"), "%"), "", _qtips["Shareholder Yield"]),
                             ]),
                             ("Profitability", [
                                 ("Gross Margin",     _mv(_m["gross"], "%"),     "pos" if _m["gross"] else "", ""),
@@ -3601,8 +3623,8 @@ elif _page == "analysis":
                                 ("Return on Equity", _mv(_r["roe"], "%"),       "pos" if _r["roe"] else "", ""),
                             ]),
                             ("Growth", [
-                                ("Revenue Growth (YoY)", _mv(_g["revenue_yoy"], "%"), _dir(_g["revenue_yoy"]), ""),
-                                ("EPS Growth (YoY)",     _mv(_g["eps_yoy"], "%"),     _dir(_g["eps_yoy"]), ""),
+                                (f"Revenue Growth ({_yl} YoY)", _mv(_g["revenue_yoy"], "%"), _dir(_g["revenue_yoy"]), _qtips["YoY"]),
+                                (f"EPS Growth ({_yl} YoY)",     _mv(_g["eps_yoy"], "%"),     _dir(_g["eps_yoy"]), _qtips["YoY"]),
                             ]),
                             ("Financial Health", [
                                 ("Current Ratio", _mv(_l["current_ratio"]), "", ""),
