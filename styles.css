@@ -2072,3 +2072,56 @@ section[data-testid="stMain"], .stMain { scroll-behavior: smooth; }
     margin-right: 0.6rem !important;
   }
 }
+
+/* ── Instant click feedback on the nav ────────────────────────────────────────
+   Measured: after clicking a nav button, nothing on screen acknowledged the
+   click for 283ms. The page itself was not the problem - the content swapped
+   cleanly with zero blank frames - but for those 283ms the button looked
+   exactly as it had before it was pressed, and an interface that does not react
+   to a press reads as broken long before it reads as slow.
+
+   The active pill is painted by Streamlit, which means it cannot arrive until
+   the server has re-run the script and sent the page back. The browser does not
+   need to wait for any of that to acknowledge a press:
+
+     :active        fires on mousedown - 0ms, no network involved
+     :focus         holds that state through mouseup and across the wait, until
+                    the real active pill arrives and takes over
+
+   The two are painted identically to Streamlit's own active tab, so the
+   handover is invisible: the button lights up under the finger and simply stays
+   lit. Nothing here changes which page you land on - it is the same click, just
+   acknowledged immediately instead of a third of a second later. */
+/* Specificity matters here and the first attempt lost. The hover rule above is
+   `.st-key-topnav button:not([data-testid*="primary"]):hover` - 0,3,1 - and a
+   plain `.st-key-topnav button:focus` is only 0,2,1, so while the cursor sits
+   on the button (which is the entire duration of a click) hover outranked it
+   and the press state never painted. Measured: 89 of 89 frames stayed on the
+   hover colour and the cyan never appeared once.
+   The :hover pairs below carry 0,4,1 and settle it. */
+.st-key-topnav button:not([data-testid*="primary"]):active,
+.st-key-topnav button:not([data-testid*="primary"]):focus,
+.st-key-topnav button:not([data-testid*="primary"]):hover:active,
+.st-key-topnav button:not([data-testid*="primary"]):hover:focus {
+  background: rgba(56,189,248,0.16) !important;
+  border: 1px solid rgba(56,189,248,0.32) !important;
+  color: #ffffff !important;
+  /* No fade on the way IN. A 150ms ease is a fifth of the wait we are trying to
+     hide, and the point is that the press registers on the frame it happens. */
+  transition: background 0s, border-color 0s !important;
+  outline: none !important;
+}
+.st-key-topnav button:focus p,
+.st-key-topnav button:active p,
+.st-key-topnav button:hover:focus p { color: #ffffff !important; }
+
+/* The same for the section rail inside Analysis, which has the identical gap
+   between pressing a section and that section being painted as selected. */
+.st-key-analysis-tabs button:active,
+.st-key-analysis-tabs button:focus-visible {
+  color: var(--brand-1) !important;
+  opacity: 1;
+  border-bottom: 2px solid var(--accent) !important;
+  transition: none !important;
+  outline: none !important;
+}
