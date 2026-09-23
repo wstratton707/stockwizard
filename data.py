@@ -235,6 +235,13 @@ def fetch_stock_data(ticker, period="5y", benchmark_tickers=None, api_key="", lo
                                   bar_size=bar_size)
                 bdf[f"{bench}_Return"]     = bdf["Close"].pct_change()
                 bdf[f"{bench}_Cumulative"] = (1 + bdf[f"{bench}_Return"].fillna(0)).cumprod() * 100
+                # Join on the calendar date, not the timestamp: the stock and the
+                # benchmark can come from different sources, and one stamps a
+                # session at midnight while the other used 04:00 UTC. An exact
+                # join left every benchmark cell empty.
+                if bar_size in ("day", "week", "month"):
+                    df["Date"]  = pd.to_datetime(df["Date"]).dt.normalize()
+                    bdf["Date"] = pd.to_datetime(bdf["Date"]).dt.normalize()
                 df = pd.merge(df, bdf[["Date", f"{bench}_Return", f"{bench}_Cumulative"]],
                               on="Date", how="left")
             except Exception as e:
@@ -853,6 +860,13 @@ def fetch_bond_data(ticker, period="5y", benchmark_tickers=None, api_key="", log
                                   end_override=end_override, bar_size=bar_size)
                 bdf[f"{bench}_Return"]     = bdf["Close"].pct_change()
                 bdf[f"{bench}_Cumulative"] = (1 + bdf[f"{bench}_Return"].fillna(0)).cumprod() * 100
+                # Join on the calendar date, not the timestamp: the stock and the
+                # benchmark can come from different sources, and one stamps a
+                # session at midnight while the other used 04:00 UTC. An exact
+                # join left every benchmark cell empty.
+                if bar_size in ("day", "week", "month"):
+                    df["Date"]  = pd.to_datetime(df["Date"]).dt.normalize()
+                    bdf["Date"] = pd.to_datetime(bdf["Date"]).dt.normalize()
                 df = pd.merge(df, bdf[["Date", f"{bench}_Return", f"{bench}_Cumulative"]],
                               on="Date", how="left")
             except Exception as e:

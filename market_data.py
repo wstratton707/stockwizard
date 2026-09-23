@@ -341,7 +341,18 @@ def _polygon_bars(ticker: str, start: str, end: str, interval: str, key: str) ->
                 df = pd.DataFrame(res).rename(columns={
                     "t": "Date", "o": "Open", "h": "High", "l": "Low",
                     "c": "Close", "v": "Volume"})
-                df["Date"] = pd.to_datetime(df["Date"], unit="ms")
+                # Polygon stamps a bar with its start in UTC milliseconds, which
+                # for a daily bar is 04:00 or 05:00 UTC depending on DST. yfinance
+                # dates the same session at midnight. Merging a stock from one
+                # source with a benchmark from the other on exact timestamps then
+                # matched nothing: on Render, where yfinance intermittently fails
+                # and Polygon answers, the SPY and QQQ columns came back empty for
+                # every row, beta fell to an assumed 1.00 and the correlation
+                # sheet shipped blank. Daily and longer bars are now the plain
+                # market date; intraday bars are New York wall-clock time.
+                _ts = pd.to_datetime(df["Date"], unit="ms", utc=True).dt.tz_convert(
+                    "America/New_York").dt.tz_localize(None)
+                df["Date"] = _ts.dt.normalize() if tspan in ("day", "week", "month") else _ts
                 return df[["Date", "Open", "High", "Low", "Close", "Volume"]] \
                     .sort_values("Date").reset_index(drop=True)
     except Exception:

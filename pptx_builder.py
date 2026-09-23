@@ -525,14 +525,21 @@ def _build_valuation_slide(prs, ticker, dcf, page_num, total):
     _rect(s, 0.3, 1.38, 12.7, 1.66, fill_rgb=C_LIGHT)
     _rect(s, 0.3, 1.38, 0.09, 1.66, fill_rgb=C_ACCENT)
     if imp is not None:
-        _text_box(s, f"{imp*100:.1f}%", 0.6, 1.62, 3.0, 0.95,
+        _avg, _fin = dcf.get("market_implied_cagr"), dcf.get("market_implied_fcf_final")
+        _bavg = dcf.get("base_cagr")
+        _shown = _avg if _avg is not None else imp
+        _text_box(s, f"{_shown*100:.1f}%", 0.6, 1.62, 3.0, 0.95,
                   font_size=48, bold=True, color=C_NAVY)
-        _text_box(s, "IMPLIED FCF GROWTH, PER YEAR", 0.63, 2.55, 3.2, 0.3,
-                  font_size=9, bold=True, color=C_GREY_TEXT)
+        _text_box(s, f"IMPLIED FCF GROWTH, AVG PER YEAR OVER {dcf['years']} YRS",
+                  0.63, 2.55, 3.6, 0.3, font_size=9, bold=True, color=C_GREY_TEXT)
         _hero = (f"To justify ${price:,.2f} a share, {ticker}'s free cash flow would have "
-                 f"to compound at about {imp*100:.1f}% a year for {dcf['years']} years, "
-                 f"then {dcf['terminal_growth']*100:.1f}% in perpetuity.\n"
-                 f"This model's own base case assumes {dcf['base_growth']*100:.1f}%. "
+                 f"to grow about {_shown*100:.1f}% a year on average for {dcf['years']} years - "
+                 f"starting near {imp*100:.1f}% and slowing to "
+                 f"{dcf['terminal_growth']*100:.1f}%"
+                 + (f", reaching ~${_fin/1e9:,.0f}B" if _fin else "")
+                 + f" - then {dcf['terminal_growth']*100:.1f}% in perpetuity.\n"
+                 f"This model's own base case averages "
+                 f"{(_bavg if _bavg is not None else dcf['base_growth'])*100:.1f}%. "
                  f"The question is not what we think the stock is worth — it is whether "
                  f"you believe this company can clear that bar.")
     else:

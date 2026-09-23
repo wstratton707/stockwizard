@@ -839,9 +839,13 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
         scn  = dcf.get("scenarios", {})
         bear, bull = scn.get("bear", {}), scn.get("bull", {})
         if imp is not None:
-            note = (f"Today's ${dcf['price']:,.2f} price implies free cash flow "
-                    f"compounding at ~{imp*100:.1f}% a year for {dcf['years']} years. "
-                    f"That is the number to argue with. ")
+            _avg, _fin = dcf.get("market_implied_cagr"), dcf.get("market_implied_fcf_final")
+            note = (f"Today's ${dcf['price']:,.2f} price implies free cash flow growth that "
+                    f"starts near {imp*100:.1f}% and fades to "
+                    f"{dcf['terminal_growth']*100:.1f}% by year {dcf['years']}"
+                    + (f" - about {_avg*100:.1f}% a year on average, taking FCF to "
+                       f"~${_fin/1e9:,.0f}B" if (_avg is not None and _fin) else "")
+                    + ". That path is the thing to argue with. ")
         else:
             note = (f"Today's ${dcf['price']:,.2f} price sits outside the growth range "
                     f"the reverse DCF can solve, so no implied rate is quoted. ")
@@ -999,6 +1003,11 @@ def _build_annual_summary(wb, df):
     # A partial current year printed as a bare "2026" reads as a full annual
     # return; a YTD marker keeps the -31% honest.
     _last_dt = pd.to_datetime(tmp["Date"]).max()
+    # The FIRST year can be partial too. A window starting 23 Sep 2024 printed a
+    # bare "2024" with an "annual" return and a Sharpe of 1.93 - three months of
+    # data presented as a year. It is labelled with its start date, and a Sharpe
+    # from fewer than ~3 months of sessions is not quoted at all.
+    _first_dt = pd.to_datetime(tmp["Date"]).min()
 
     for ri, (year, grp) in enumerate(tmp.groupby("Year"), 3):
         ret         = grp["Daily_Return"].dropna()
@@ -1009,8 +1018,13 @@ def _build_annual_summary(wb, df):
 
         _ytd = (year == _last_dt.year
                 and not (_last_dt.month == 12 and _last_dt.day >= 28))
-        row_vals = [f"{year} (YTD)" if _ytd else year, yr_return, yr_drawdown,
-                    yr_vol, round(yr_sharpe, 2) if pd.notna(yr_sharpe) else "N/A"]
+        _from = (year == _first_dt.year and year != _last_dt.year
+                 and (_first_dt.month > 1 or _first_dt.day > 7))
+        _yr_lbl = (f"{year} (YTD)" if _ytd
+                   else f"{year} (partial, from {_first_dt:%d %b})" if _from else year)
+        _shp = ("n/m" if len(ret) < 126
+                else round(yr_sharpe, 2) if pd.notna(yr_sharpe) else "N/A")
+        row_vals = [_yr_lbl, yr_return, yr_drawdown, yr_vol, _shp]
         bg = GREY_ROW if ri % 2 == 0 else WHITE
         for ci, val in enumerate(row_vals, 1):
             c = ws_a.cell(row=ri, column=ci, value=val)
@@ -1236,6 +1250,23 @@ def _build_correlation_sheet(wb, corr_matrix, ticker=None):
     if corr_matrix is None:
         return
     ws_corr = wb.create_sheet("Correlation_Matrix")
+    # Only the stock itself, or a matrix of blanks, means the benchmark series
+    # did not arrive. The sheet used to ship as an empty grid with no reason
+    # given; it now says what happened.
+    try:
+        _usable = (len(corr_matrix.columns) >= 2
+                   and corr_matrix.drop(index=corr_matrix.columns[0], errors="ignore").notna().any().any())
+    except Exception:
+        _usable = False
+    if not _usable:
+        ws_corr.cell(row=1, column=1, value="Correlation Matrix (Daily Returns)").font = Font(
+            bold=True, size=12, color=DARK_BLUE, name="Calibri")
+        ws_corr.cell(row=3, column=1, value=(
+            "Not available for this report: benchmark price data (S&P 500 / Nasdaq-100) "
+            "could not be retrieved, so there is nothing to correlate against. Beta in the "
+            "Monte Carlo sheet was not computed for the same reason."))
+        ws_corr.column_dimensions["A"].width = 110
+        return
     labels  = list(corr_matrix.columns)
     # build_correlation_matrix labels the subject column "Stock" — show the
     # actual ticker in the headers instead of template residue.
@@ -1810,13 +1841,19 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
 
     ws.merge_cells(f"C{R_HEAD_BIG}:K{R_HEAD_BIG + 1}")
     if imp is not None:
+        _avg, _fin = dcf.get("market_implied_cagr"), dcf.get("market_implied_fcf_final")
+        _bavg = dcf.get("base_cagr")
         head_txt = (
             f"At ${dcf['price']:,.2f} the market is pricing {ticker}'s free cash flow to "
-            f"compound at roughly {imp * 100:.1f}% a year for {dcf['years']} years, then "
-            f"{dcf['terminal_growth'] * 100:.1f}% in perpetuity, discounted at "
-            f"{dcf['wacc'] * 100:.1f}%.\nThe reverse DCF asks one question: is that rate "
-            f"plausible for this business?  This model's own base case assumes "
-            f"{dcf['base_growth'] * 100:.1f}%.")
+            f"grow about {(_avg if _avg is not None else imp) * 100:.1f}% a year on average "
+            f"over {dcf['years']} years - starting near {imp * 100:.1f}% and fading to "
+            f"{dcf['terminal_growth'] * 100:.1f}%"
+            + (f", which takes FCF from ${dcf['base_fcf'] / 1e9:,.0f}B to "
+               f"~${_fin / 1e9:,.0f}B" if _fin else "")
+            + f" - then {dcf['terminal_growth'] * 100:.1f}% in perpetuity, discounted at "
+            f"{dcf['wacc'] * 100:.1f}%.\nThe reverse DCF asks one question: is that path "
+            f"plausible for this business?  This model's own base case averages "
+            f"{(_bavg if _bavg is not None else dcf['base_growth']) * 100:.1f}%.")
     else:
         head_txt = (
             f"Today's ${dcf['price']:,.2f} price sits outside the range of growth rates "
@@ -1901,10 +1938,15 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
         note="Company-specific cost of capital. Raise it and fair value falls.")
     kv2(R_TG,   "Terminal growth rate", dcf["terminal_growth"], fmt=FMT_PCT2,
         input_cell=True, note="Growth forever after the explicit horizon. Must stay below WACC.")
-    kv2(R_YRS,  "Explicit forecast horizon (years)", dcf["years"], fmt="0",
-        input_cell=True,
-        note="Drives discounting and the terminal year; the projection table is fixed "
-             f"at {n_yr} rows.")
+    # Fixed, not an input. It was shaded as editable, but the projection table
+    # below has exactly {n_yr} rows: set it to 5 and the growth fade ran past the
+    # terminal rate while all ten years were still summed; set it to 15 and the
+    # terminal value was discounted 15 years from year-10 cash flow. Either way
+    # the fair value was meaningless and nothing said so.
+    kv2(R_YRS,  "Explicit forecast horizon (years) - fixed", dcf["years"], fmt="0",
+        input_cell=False,
+        note=f"Fixed at {n_yr} years: the projection table below has {n_yr} rows. "
+             "Not an input.")
     kv2(R_FCF0, "Normalised base free cash flow", dcf["base_fcf"], fmt=FMT_BN,
         input_cell=True, note="Mean of the last three positive annual FCF figures.")
     kv2(R_G1,   "Stage-1 FCF growth — base case", dcf["base_growth"], fmt=FMT_PCT1,
@@ -1913,7 +1955,7 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
         g_bear if g_bear is not None else dcf["base_growth"], fmt=FMT_PCT1, input_cell=True)
     kv2(R_GBULL, "Stage-1 FCF growth — bull case",
         g_bull if g_bull is not None else dcf["base_growth"], fmt=FMT_PCT1, input_cell=True)
-    kv2(R_ND,   "Net debt (total debt − cash)", dcf["net_debt"], fmt=FMT_BN,
+    kv2(R_ND,   "Net debt (total debt − cash & short-term investments)", dcf["net_debt"], fmt=FMT_BN,
         input_cell=True, note="Subtracted from enterprise value to reach equity value.")
     kv2(R_SH,   "Shares outstanding", dcf["shares"], fmt=FMT_SHARES, input_cell=True,
         note="Derived as market cap ÷ price, so the model ties to the quoted price.")
@@ -2192,7 +2234,7 @@ def _build_methodology_sheet(wb, dcf=None):
         ("Stock Scorecard (0–100)", "Weighted composite of seven factors — valuation, growth, profitability, financial health, momentum, risk, sentiment. Describes the stock's profile; not a buy/sell call."),
     ])
     section("Forecasting", [
-        ("Monte Carlo Simulation", "Thousands of simulated 1-year price paths (geometric Brownian motion) with drift and volatility from the stock's own daily-return history. P5–P95 are percentiles of simulated ending prices (P5 = only 5% of paths ended lower) — NOT predictions. Assumes log-normal returns and constant volatility; real markets have fat tails and regime shifts. 'Probability of gain' = share of paths ending above today's price."),
+        ("Monte Carlo Simulation", "1,000 simulated 1-year price paths (geometric Brownian motion). Drift is the CAPM cost of equity - 10-year Treasury yield plus Blume-adjusted beta times the equity risk premium - not the stock's past return, which would simply replay the recent trend. Volatility is from the stock's own daily returns over the risk window. Beta is measured against the S&P 500; if no benchmark data was available it is 1.0 and the Monte Carlo sheet says so. P5–P95 are percentiles of simulated ending prices (P5 = only 5% of paths ended lower) — NOT predictions. Assumes log-normal returns and constant volatility; real markets have fat tails and regime shifts. 'Probability of gain' = share of paths ending above today's price."),
         ("Custom Forecast (GARCH + ML)", "Optional variant modelling time-varying volatility (GARCH) and a machine-learned drift before simulating; same percentile interpretation."),
     ])
     section("Sentiment & Data Sources", [

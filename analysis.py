@@ -535,6 +535,12 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
                       if (ltd is not None or debt_cur is not None) else None)
     if total_debt is None:
         total_debt = _sup("total_debt")
+    # Debt/equity on TOTAL debt, the same debt the net-debt and WACC figures use.
+    # It was non-current debt only (AAPL 78.3 / 73.7 = 1.06 against 1.34 on total
+    # debt), so the report's leverage ratio and its net debt used different
+    # definitions of "debt" side by side.
+    if total_debt is not None and eq:
+        leverage["debt_to_equity"] = ratio(total_debt, eq)
     ebitda     = (oi + da) if (oi is not None and da is not None) else None
     ev         = (mcap + (total_debt or 0) - (cash_bal or 0)) if mcap else None
     ev_ebitda  = ratio(ev, ebitda) if (ev is not None and ebitda and ebitda > 0) else None
@@ -808,6 +814,25 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
                 hi = mid
         implied_growth = (lo + hi) / 2
 
+    # The solved rate is the YEAR-ONE growth rate, which fades in a straight line
+    # to the terminal rate by year N. Every renderer described it as a flat rate
+    # "a year for 10 years" - AAPL's 31.1% read as ten years of 31%, when the
+    # implied path averages about 16.5% and takes FCF from ~$102B to ~$470B. The
+    # headline overstated the market's hurdle roughly twofold. The average rate
+    # and the year-N FCF are what a reader should be arguing with.
+    def _fade_path(g1):
+        prod = 1.0
+        for t in range(1, years + 1):
+            g_t = (g1 + (terminal_growth - g1) * (t - 1) / (years - 1)) if years > 1 \
+                else terminal_growth
+            prod *= (1 + g_t)
+        return prod ** (1 / years) - 1, base_fcf * prod
+
+    implied_cagr = implied_fcf_final = None
+    if implied_growth is not None:
+        implied_cagr, implied_fcf_final = _fade_path(implied_growth)
+    base_cagr, base_fcf_final = _fade_path(g_base)
+
     return {
         "ok": True,
         "price": price, "fair_value": fv_base,
@@ -821,6 +846,10 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
         "terminal_growth": terminal_growth, "years": years,
         "base_fcf": base_fcf, "base_growth": g_base, "net_debt": net_debt,
         "shares": shares, "market_implied_growth": implied_growth,
+        # Average annual growth along the fade, and where FCF ends up.
+        "market_implied_cagr": implied_cagr,
+        "market_implied_fcf_final": implied_fcf_final,
+        "base_cagr": base_cagr, "base_fcf_final": base_fcf_final,
         "enterprise_value": detail["enterprise_value"],
         "equity_value": detail["equity_value"],
         "pv_explicit": detail["pv_explicit"],
@@ -1088,7 +1117,12 @@ def run_monte_carlo(df, n_simulations=1000, forecast_days=252, log=print, seed=4
         "Prob. of Gain":           f"{(fp > last_price).mean()*100:.1f}%",
         "Ann. Volatility":         f"{sigma * np.sqrt(252) * 100:.2f}%",
         "Expected Return (CAPM)":  f"{ann_mu * 100:.1f}%",
-        "Beta (vs benchmark)":     (round(float(_beta), 2) if _beta is not None else "1.00 (assumed)"),
+        # A number, or a plain statement - never a default dressed as a result.
+        # "1.00 (assumed)" sat in a column of measured figures and read as one.
+        "Beta (vs benchmark)":     (round(float(_beta), 2) if _beta is not None
+                                    else "Not computed - no benchmark data"),
+        "Drift basis":             (f"CAPM, beta measured vs benchmark" if _beta is not None
+                                    else "CAPM with beta assumed 1.0 (no benchmark data)"),
         "Beta (adjusted, used)":   round(float(blume_adjust(_beta if _beta is not None else 1.0)), 2),
     }
     log(f"   P5 ${summary['Bear Case (P5)']:,.2f}  "

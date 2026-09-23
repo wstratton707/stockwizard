@@ -2360,6 +2360,20 @@ elif _page == "analysis":
                     if len(_rdf) < 30:
                         _rdf = df
                     _rlabel = _rp.replace(" year", "Y").replace("s", "")
+                    # The label says what the data covers, not what was asked for.
+                    # When the price source can only supply part of the window (the
+                    # Polygon fallback returns about two years), a "5Y" report was
+                    # built from two years of prices and titled 5Y throughout - its
+                    # period return, Sharpe and drawdown all two-year figures.
+                    _d0 = pd.to_datetime(_rdf["Date"].iloc[0])
+                    _d1 = pd.to_datetime(_rdf["Date"].iloc[-1])
+                    _span = (_d1 - _d0).days / 365.25
+                    if _span < _RPT_YEARS[_rp] - 0.25:
+                        _rlabel = f"{max(1, round(_span))}Y"
+                        st.caption(
+                            f"Only {_span:.1f} years of price history were available for "
+                            f"{ticker_input}, so this report covers {_d0:%b %Y} to "
+                            f"{_d1:%b %Y} and is labelled {_rlabel}.")
 
                 # The narrative must describe the window the workbook describes.
                 # `summary_text` above is built from `df` — the full 10-year pull
@@ -2395,12 +2409,20 @@ elif _page == "analysis":
                             peer_df, peer_price_dfs = _load_peers()
                             sector_df = _load_sector()
                             news_list = _load_news()
+                            # Reports carry the familiar sector ("Technology") with
+                            # the SIC description kept as the industry, rather than
+                            # "Electronic Computers" standing in for a sector.
+                            _cd_rpt = dict(company_details or {})
+                            _ss = _std_sector(ticker_input)
+                            if _ss and _ss.lower() != str(_cd_rpt.get("Sector", "")).lower():
+                                _cd_rpt["Industry"] = _cd_rpt.get("Sector")
+                                _cd_rpt["Sector"] = _ss
                             try:
                                 if _kind == "excel":
                                     from excel_builder import build_excel
                                     st.session_state[_buf_key] = build_excel(
                                         ticker_input, _rdf, _rlabel,
-                                        company_details=company_details, sector_df=sector_df,
+                                        company_details=_cd_rpt, sector_df=sector_df,
                                         mc_sim_df=mc_sim_df, mc_summary=mc_summary,
                                         news_list=news_list, peer_df=peer_df,
                                         corr_matrix=corr_matrix,
@@ -2416,7 +2438,7 @@ elif _page == "analysis":
                                     from pptx_builder import build_stock_pptx
                                     st.session_state[_buf_key] = build_stock_pptx(
                                         ticker_input, _rdf, _rlabel,
-                                        company_details=company_details,
+                                        company_details=_cd_rpt,
                                         mc_sim_df=mc_sim_df, mc_summary=mc_summary,
                                         news_list=news_list, summary_text=_summary_win,
                                         fundamentals=_fund(), dcf=_dcf(),
@@ -2425,7 +2447,7 @@ elif _page == "analysis":
                                     from docx_builder import build_stock_docx
                                     st.session_state[_buf_key] = build_stock_docx(
                                         ticker_input, _rdf, _rlabel,
-                                        company_details=company_details,
+                                        company_details=_cd_rpt,
                                         mc_summary=mc_summary, news_list=news_list,
                                         summary_text=_summary_win,
                                         fundamentals=_fund(),
@@ -3809,7 +3831,12 @@ color:var(--muted);background:var(--surface2)}
                                 f'place.</p>',
                                 unsafe_allow_html=True)
                         else:
-                            _mig  = _dcfr.get("market_implied_growth")
+                            # The average rate along the fade, not the year-one
+                            # rate: that is the like-for-like figure against the
+                            # historical CAGR below. The start rate is quoted too.
+                            _mig  = _dcfr.get("market_implied_cagr")
+                            _mig1 = _dcfr.get("market_implied_growth")
+                            _mfin = _dcfr.get("market_implied_fcf_final")
                             _bg   = _dcfr.get("base_growth")
                             _wacc = _dcfr.get("wacc")
                             _tg   = _dcfr.get("terminal_growth")
@@ -3819,8 +3846,13 @@ color:var(--muted);background:var(--surface2)}
                             _up   = _dcfr.get("upside")
                             _hist = _g.get("eps_cagr")
                             _hzn  = f"{_yrs} years" if _yrs else "the forecast horizon"
-                            _base_clause = (f" The model&rsquo;s own base case is <b>{_wpi_pct(_bg)}</b>."
-                                            if _bg is not None else "")
+                            # Compared like for like: the base case's AVERAGE along
+                            # the same fade, not its year-one rate - otherwise the
+                            # sentence set a 19.6% average beside a 7.1% start.
+                            _bavg = _dcfr.get("base_cagr")
+                            _base_clause = (f" The model&rsquo;s own base case averages "
+                                            f"<b>{_wpi_pct(_bavg if _bavg is not None else _bg)}</b>."
+                                            if (_bavg is not None or _bg is not None) else "")
 
                             # 1 ── Headline. Same three-way tone as before, restated
                             # for free cash flow: the DCF projects FCF, so comparing
@@ -3834,34 +3866,39 @@ color:var(--muted);background:var(--surface2)}
                             else:
                                 _migp = _mig * 100
                                 _big  = f"{_migp:.1f}%"
+                                _path = (f" (starting near {_mig1 * 100:.1f}% and slowing to "
+                                         f"{_wpi_pct(_tg)}"
+                                         + (f", which takes FCF to about ${_mfin / 1e9:,.0f}B "
+                                            f"by the final year" if _mfin else "")
+                                         + ")") if _mig1 is not None else ""
                                 if _hist is not None and _migp > _hist + 3:
                                     _tone = "hot"
-                                    _read = (f"To justify today&rsquo;s price the company has to compound free "
-                                             f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — well above "
-                                             f"the <b>{_hist:.1f}%</b> earnings growth it has actually "
+                                    _read = (f"To justify today&rsquo;s price, free cash flow has to grow "
+                                             f"about <b>{_migp:.1f}%</b> a year on average over {_hzn}{_path} "
+                                             f"— well above the <b>{_hist:.1f}%</b> earnings growth it has actually "
                                              f"delivered. The price assumes growth accelerates from "
                                              f"here.{_base_clause}")
                                 elif _hist is not None and _migp < _hist - 3:
                                     _tone = "cool"
-                                    _read = (f"To justify today&rsquo;s price the company only has to compound "
-                                             f"free cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — below "
+                                    _read = (f"To justify today&rsquo;s price, free cash flow only has to grow "
+                                             f"about <b>{_migp:.1f}%</b> a year on average over {_hzn}{_path} — below "
                                              f"the <b>{_hist:.1f}%</b> earnings growth it has delivered. "
                                              f"Expectations look conservative.{_base_clause}")
                                 elif _hist is not None:
                                     _tone = ""
-                                    _read = (f"To justify today&rsquo;s price the company has to compound free "
-                                             f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn} — roughly in "
+                                    _read = (f"To justify today&rsquo;s price, free cash flow has to grow "
+                                             f"about <b>{_migp:.1f}%</b> a year on average over {_hzn}{_path} — roughly in "
                                              f"line with the <b>{_hist:.1f}%</b> earnings growth it has "
                                              f"delivered.{_base_clause}")
                                 else:
                                     _tone = ""
-                                    _read = (f"To justify today&rsquo;s price the company has to compound free "
-                                             f"cash flow at <b>{_migp:.1f}%</b> a year for {_hzn}, discounted "
+                                    _read = (f"To justify today&rsquo;s price, free cash flow has to grow "
+                                             f"about <b>{_migp:.1f}%</b> a year on average over {_hzn}{_path}, discounted "
                                              f"at <b>{_wpi_pct(_wacc)}</b> with a <b>{_wpi_pct(_tg)}</b> "
                                              f"terminal rate.{_base_clause}")
 
                             _wpi = ['<div class="wpi">', '<div class="wpi-head">',
-                                    '<div><div class="wpi-lbl">Market-implied FCF growth</div>',
+                                    '<div><div class="wpi-lbl">Market-implied FCF growth, average per year</div>',
                                     f'<div class="wpi-big {_tone}">{_big}</div></div>',
                                     f'<div class="wpi-read">{_read}</div>', '</div>']
 
