@@ -1635,11 +1635,20 @@ elif _page == "analysis":
 
         # Pressing Enter runs the analysis just like the button does (see the
         # `not run_btn and not ticker_input` landing-page test below).
+        def _analysis_ticker_changed():
+            """Enter in the page's ticker box. Keeps the URL in step: the header
+            search already wrote ?ticker=, but this box did not, so after
+            switching AAPL -> TSLA here the address still said AAPL and a
+            refresh or a shared link brought the wrong stock back."""
+            _v = (st.session_state.get("analysis_ticker") or "").strip().upper()
+            st.session_state["analysis_ran"] = bool(_v)
+            if _v:
+                st.query_params["ticker"] = _v
+
         _tick_kw = dict(
             placeholder="Enter a ticker — e.g. AAPL, SPY, BTC",
             key="analysis_ticker",
-            on_change=lambda: st.session_state.update(
-                analysis_ran=bool(st.session_state.get("analysis_ticker", "").strip())),
+            on_change=_analysis_ticker_changed,
             label_visibility="collapsed",
         )
         if _compact:

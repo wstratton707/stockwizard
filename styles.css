@@ -2304,15 +2304,40 @@ html, body, .stApp, .stApp * { font-variant-numeric: tabular-nums; }
 }
 .st-key-nav_search [data-testid="InputInstructions"] { display: none; }
 
-/* With search in the header, the Analysis page's own ticker box is redundant
-   once results are showing. The widget stays rendered (it holds the ticker's
-   state) but is hidden, leaving the Options control at the top right of the
-   report. The landing state keeps its full search panel. */
+/* Results view: a quiet in-page search on the left, Options on the right.
+   Hiding the page's own box entirely (the first try) left readers on a stock
+   with no obvious way to change it - the header search is a corner away. The
+   field shows the ticker being viewed, so it doubles as a label for the page,
+   and Enter runs it, so the Search button is not needed. */
 .st-key-analysis-inputs:has(.ai-compact) [data-testid="stHorizontalBlock"] {
-  justify-content: flex-end;
+  justify-content: space-between;
 }
 .st-key-analysis-inputs:has(.ai-compact) [data-testid="stHorizontalBlock"]
-  > [data-testid="stColumn"]:nth-child(-n+2) { display: none; }
+  > [data-testid="stColumn"]:nth-child(2) { display: none; }
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stHorizontalBlock"]
+  > [data-testid="stColumn"]:nth-child(1) {
+  flex: 0 1 17rem !important; width: 17rem !important; min-width: 0 !important;
+}
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stTextInput"] [data-baseweb="input"],
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stTextInput"] [data-baseweb="base-input"] {
+  background: transparent !important; border: none !important;
+}
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stTextInput"]:first-of-type input {
+  height: 38px !important; border-radius: 999px !important;
+  background-color: var(--surface2) !important; border: 1px solid var(--border) !important;
+  color: var(--brand-1) !important; font-size: 0.92rem !important; font-weight: 600;
+  letter-spacing: 0.04em; padding: 0 0.9rem 0 2.1rem !important; box-shadow: none !important;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.4' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><line x1='16.5' y1='16.5' x2='21' y2='21'/></svg>") !important;
+  background-repeat: no-repeat !important; background-position: 0.75rem 50% !important;
+}
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stTextInput"]:first-of-type input:hover {
+  border-color: var(--border2) !important;
+}
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="stTextInput"]:first-of-type input:focus {
+  background-color: #ffffff !important; border-color: var(--accent3) !important;
+  box-shadow: 0 0 0 3px rgba(56,189,248,0.22) !important;
+}
+.st-key-analysis-inputs:has(.ai-compact) [data-testid="InputInstructions"] { display: none; }
 .st-key-analysis-inputs:has(.ai-compact) [data-testid="stHorizontalBlock"]
   > [data-testid="stColumn"]:nth-child(3) { flex: 0 0 9rem !important; width: 9rem !important; }
 
@@ -2401,4 +2426,17 @@ html, body, .stApp, .stApp * { font-variant-numeric: tabular-nums; }
 }
 @media (max-width: 640px) {
   .st-key-topnav .st-key-nav_search { width: 11rem; }
+}
+
+@media (max-width: 640px) {
+  .st-key-analysis-inputs:has(.ai-compact) [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:nth-child(1) {
+    flex: 1 1 100% !important; width: 100% !important;
+  }
+}
+/* Mid-width desktops (1024-1200px) squeeze the header's search column, and the
+   hint was cut to "Search a stock, e". A size down keeps it whole. */
+@media (min-width: 641px) and (max-width: 1200px) {
+  .st-key-nav_search input { font-size: 0.78rem !important; padding-left: 1.9rem !important;
+                             background-position: 0.6rem 50% !important; }
 }
