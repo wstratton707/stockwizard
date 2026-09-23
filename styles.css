@@ -2125,3 +2125,33 @@ section[data-testid="stMain"], .stMain { scroll-behavior: smooth; }
   transition: none !important;
   outline: none !important;
 }
+
+/* ── Ticker tape: empty strip, then a roll-in from the left ───────────────────
+   The tape no longer blocks the page (it cost 2.5s on a cold cache, fetched
+   before anything else on every page). On a first visit there are no quotes
+   yet, so the strip renders at its normal height with nothing in it - the space
+   is reserved so the page below does not jump when the numbers land.
+
+   When they do land, they sweep in from the left rather than appearing all at
+   once, which reads as the tape starting up instead of as a flicker. The sweep
+   runs once; the usual right-to-left scroll carries on underneath it. */
+.ticker-tape-empty {
+  /* Must match the FILLED strip's painted height exactly or the page shifts
+     when the quotes land - which is the jump this placeholder exists to
+     prevent. Measured: filled renders at 36px, empty at 23px with a content
+     min-height, so the box is pinned instead. */
+  height: 36px;
+  box-sizing: border-box;
+}
+@keyframes tape-roll-in {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+.ticker-tape-wrap:not(.ticker-tape-empty) {
+  animation: tape-roll-in 700ms cubic-bezier(0.22, 0.61, 0.36, 1) 1;
+}
+/* Someone who has asked for less motion gets the numbers without the sweep. */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-tape-wrap:not(.ticker-tape-empty) { animation: none; }
+  .ticker-tape { animation: none; }
+}

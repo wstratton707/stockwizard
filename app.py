@@ -850,6 +850,53 @@ def _tape_html(items):
 # Streamlit-level cache on top of live_data.py's module dicts so these
 # lightweight but frequently-called fetches don't hit Polygon on every
 # tab switch / widget toggle.
+# ── Ticker tape: never on the critical path ───────────────────────────────────
+# Measured at 2.5 SECONDS on a cold cache, fetched before anything else on every
+# page in the app - and the cache was a 60-second TTL, so whoever arrived a
+# minute after the last fetch paid two and a half seconds for a decorative
+# scrolling strip before their stock lookup could even start.
+#
+# Nobody searches a ticker in order to read the tape. So the page never waits
+# for it: whatever quotes are in hand are rendered immediately, and a refresh
+# runs on a background thread for the next page view. On the very first load
+# there are no quotes at all, and the strip renders empty at its normal height -
+# reserving the space so nothing below it jumps when the numbers arrive, and
+# rolling them in from the left so the arrival reads as intentional.
+#
+# get_tape_prices is called directly rather than through the st.cache_data
+# wrapper: a background thread has no ScriptRunContext, and Streamlit's cache
+# complains when touched from one. live_data.py keeps its own module-level dict,
+# so the work is not wasted.
+_TAPE = {"items": None, "ts": 0.0, "running": False}
+_TAPE_TTL = 300.0            # 5 minutes; a decorative strip does not need 60s
+
+
+def _tape_nonblocking(api_key):
+    """Whatever quotes we have, instantly. Refresh happens behind the page."""
+    import threading
+    now = _time.time()
+    if _TAPE["items"] is not None and (now - _TAPE["ts"]) < _TAPE_TTL:
+        return _TAPE["items"]
+    if not _TAPE["running"]:
+        _TAPE["running"] = True
+
+        def _refresh():
+            try:
+                items = get_tape_prices(api_key)
+                if items:
+                    _TAPE["items"] = items
+                    _TAPE["ts"] = _time.time()
+            except Exception:
+                pass
+            finally:
+                _TAPE["running"] = False
+
+        threading.Thread(target=_refresh, daemon=True).start()
+    # Stale quotes beat no quotes: a strip that is a few minutes old still shows
+    # the market is live, and the refresh above will land shortly.
+    return _TAPE["items"]
+
+
 @st.cache_data(ttl=60, max_entries=1, show_spinner=False)
 def _cached_tape(_api_key):
     return get_tape_prices(_api_key)
@@ -859,10 +906,16 @@ def _cached_tape(_api_key):
 # the Home page body below the hero, which meant the one element proving the
 # data is live was invisible everywhere else in the app.
 with _phase("ticker tape quotes"):
-    _tape_items = _cached_tape(POLYGON_API_KEY)
-if _tape_items:
-    with st.container(key="tapebar"):
+    _tape_items = _tape_nonblocking(POLYGON_API_KEY)
+with st.container(key="tapebar"):
+    if _tape_items:
         st.markdown(_tape_html(_tape_items), unsafe_allow_html=True)
+    else:
+        # Same height, no numbers. The chrome offset (--chrome-h) assumes this
+        # strip exists, so omitting it entirely would shift the whole page up
+        # and then back down a second later.
+        st.markdown('<div class="ticker-tape-wrap ticker-tape-empty"></div>',
+                    unsafe_allow_html=True)
 
 
 @st.cache_data(ttl=300, max_entries=1, show_spinner=False)
@@ -1766,17 +1819,30 @@ elif _page == "analysis":
                 # Comparison: on" produced no peer section whatsoever. Same
                 # sector, closest in size, from the ranked universe precompute
                 # already refreshes daily.
+                # Choosing the peers costs 0.66s against the ranked universe, and
+                # it was being spent before the price chart drew even though the
+                # only thing that reads it is the Peers tab (and the exports,
+                # which fetch on click). Resolved on demand now, memoised so the
+                # comparison table and the export share one lookup.
                 peers_auto = False
-                if do_peers and not peers_list and not is_crypto:
-                    _sp_t = _time.perf_counter()
-                    peers_list = suggest_peers(
-                        ticker_input, sector=sector,
-                        market_cap=float(company_details.get("Market Cap") or 0),
-                        api_key=POLYGON_API_KEY)
-                    peers_auto = bool(peers_list)
-                    if _QW_PROFILE:
-                        print(f"[phase] {'suggest_peers (EAGER)':32} "
-                              f"{(_time.perf_counter()-_sp_t)*1000:7.0f} ms", flush=True)
+                _peers_box = {"list": peers_list, "auto": False,
+                              "resolved": bool(peers_list) or not do_peers or is_crypto}
+
+                def _peer_tickers():
+                    if not _peers_box["resolved"]:
+                        with _phase("suggest_peers (lazy)"):
+                            _pl = suggest_peers(
+                                ticker_input, sector=sector,
+                                market_cap=float(company_details.get("Market Cap") or 0),
+                                api_key=POLYGON_API_KEY)
+                        _peers_box["list"] = _pl
+                        _peers_box["auto"] = bool(_pl)
+                        _peers_box["resolved"] = True
+                    return _peers_box["list"]
+
+                def _peers_are_auto():
+                    _peer_tickers()
+                    return _peers_box["auto"]
 
                 # ── Deferred groups ──────────────────────────────────────
                 # Peers, the sector ETF and the news feed used to be fetched
@@ -1794,12 +1860,13 @@ elif _page == "analysis":
                 # fetch, which a pre-computed local could not promise.
                 def _load_peers():
                     """(peer_df, peer_price_dfs). Empty when peers are off."""
-                    if not (do_peers and peers_list and not is_crypto):
+                    _pl = _peer_tickers()
+                    if not (do_peers and _pl and not is_crypto):
                         return None, {}
                     _pdf_map = {}
                     _pdfr = cached_fetch_peer_comparison(
-                        ticker_input, tuple(peers_list), POLYGON_API_KEY)
-                    for _pt in [ticker_input] + peers_list[:4]:
+                        ticker_input, tuple(_pl), POLYGON_API_KEY)
+                    for _pt in [ticker_input] + _pl[:4]:
                         try:
                             _one = cached_fetch_ohlcv(_pt, "5y", POLYGON_API_KEY,
                                                       start_override=date_start,
@@ -1909,20 +1976,36 @@ elif _page == "analysis":
                     ticker_input, df, company_details, mc_summary, sharpe, sortino,
                     forecast_method=forecast_method)
 
-                # Fundamentals for the report (cached → the on-screen panel below
-                # reuses the same call for free). EDGAR-first, Polygon fallback.
-                _fund_report = {"ok": False}
-                if not is_crypto:
-                    try:
-                        with _phase("SEC financials + fundamentals"):
-                            _fr = (cached_fetch_sec_financials(ticker_input)
-                                   or cached_fetch_financials(ticker_input, POLYGON_API_KEY))
-                            _fund_report = compute_fundamentals(
-                                _fr, market_cap=company_details.get("Market Cap"),
-                                price=float(df["Close"].iloc[-1]),
-                                supplement=_cached_fin_supplement(ticker_input))
-                    except Exception:
-                        _fund_report = {"ok": False}
+                # Fundamentals and the DCF built on demand, not up front.
+                #
+                # Measured on a cold load: the filings cost 1.24s and the DCF
+                # another 0.67s, and NEITHER is on the Overview tab. They feed
+                # What's Priced In (Financials), the Valuation lens, and the
+                # exported reports - so a reader who opens a ticker and looks at
+                # the price chart was paying two seconds for three things they
+                # had not asked to see.
+                #
+                # Memoised in a dict rather than recomputed per call site, so the
+                # five consumers below share one fetch and the cost is paid once,
+                # by whichever of them runs first - or never, if none does.
+                _fund_box = {}
+
+                def _fund():
+                    if "v" not in _fund_box:
+                        _v = {"ok": False}
+                        if not is_crypto:
+                            try:
+                                with _phase("SEC financials + fundamentals (lazy)"):
+                                    _fr = (cached_fetch_sec_financials(ticker_input)
+                                           or cached_fetch_financials(ticker_input, POLYGON_API_KEY))
+                                    _v = compute_fundamentals(
+                                        _fr, market_cap=company_details.get("Market Cap"),
+                                        price=float(df["Close"].iloc[-1]),
+                                        supplement=_cached_fin_supplement(ticker_input))
+                            except Exception:
+                                _v = {"ok": False}
+                        _fund_box["v"] = _v
+                    return _fund_box["v"]
 
                 # Wall-Street consensus for the report (cached → the on-screen
                 # Analyst View below reuses the same call for free). {} for crypto
@@ -1945,23 +2028,33 @@ elif _page == "analysis":
                 if _QW_PROFILE:
                     print(f"[phase] {'-- through analyst data':32} "
                           f"{(_time.perf_counter()-_RUN_T0)*1000:7.0f} ms", flush=True)
-                _dcf_report = {"ok": False}
-                if not is_crypto and _fund_report.get("ok"):
-                    _beta = None
-                    for _bt in ("SPY", "QQQ"):
-                        if f"{_bt}_Return" in df.columns:
-                            _beta = market_beta(df["Daily_Return"], df[f"{_bt}_Return"])
-                            if _beta is not None:
-                                break
-                    try:
-                        _dcf_report = dcf_valuation(
-                            _fund_report, float(df["Close"].iloc[-1]),
-                            beta=_beta,
-                            # Lets the model say when an unlevered FCF DCF is the
-                            # wrong instrument for the filer — banks and brokers.
-                            sector=(company_details or {}).get("Sector"))
-                    except Exception:
-                        _dcf_report = {"ok": False}
+                _dcf_box = {}
+
+                def _dcf():
+                    """The DCF, built the first time something asks for it."""
+                    if "v" not in _dcf_box:
+                        _v = {"ok": False}
+                        _f = _fund()
+                        if not is_crypto and _f.get("ok"):
+                            _beta = None
+                            for _bt in ("SPY", "QQQ"):
+                                if f"{_bt}_Return" in df.columns:
+                                    _beta = market_beta(df["Daily_Return"], df[f"{_bt}_Return"])
+                                    if _beta is not None:
+                                        break
+                            try:
+                                with _phase("DCF (lazy)"):
+                                    _v = dcf_valuation(
+                                        _f, float(df["Close"].iloc[-1]),
+                                        beta=_beta,
+                                        # Lets the model say when an unlevered FCF
+                                        # DCF is the wrong instrument for the filer
+                                        # — banks and brokers.
+                                        sector=(company_details or {}).get("Sector"))
+                            except Exception:
+                                _v = {"ok": False}
+                        _dcf_box["v"] = _v
+                    return _dcf_box["v"]
 
                 # Reports (Excel / PowerPoint) build on demand when the user
                 # clicks Export below — not on every analysis — so results appear
@@ -2117,8 +2210,8 @@ elif _page == "analysis":
                                         corr_matrix=corr_matrix,
                                         resistance_levels=resistance, support_levels=support,
                                         summary_text=_summary_win,
-                                        bar_size=bar_size, fundamentals=_fund_report,
-                                        analyst_data=_analyst_report, dcf=_dcf_report,
+                                        bar_size=bar_size, fundamentals=_fund(),
+                                        analyst_data=_analyst_report, dcf=_dcf(),
                                     )
                                 elif _kind == "pptx":
                                     # dcf= was missing here while Excel and Word
@@ -2130,7 +2223,7 @@ elif _page == "analysis":
                                         company_details=company_details,
                                         mc_sim_df=mc_sim_df, mc_summary=mc_summary,
                                         news_list=news_list, summary_text=_summary_win,
-                                        fundamentals=_fund_report, dcf=_dcf_report,
+                                        fundamentals=_fund(), dcf=_dcf(),
                                     )
                                 else:
                                     from docx_builder import build_stock_docx
@@ -2139,8 +2232,8 @@ elif _page == "analysis":
                                         company_details=company_details,
                                         mc_summary=mc_summary, news_list=news_list,
                                         summary_text=_summary_win,
-                                        fundamentals=_fund_report,
-                                        analyst_data=_analyst_report, dcf=_dcf_report,
+                                        fundamentals=_fund(),
+                                        analyst_data=_analyst_report, dcf=_dcf(),
                                         sector_df=sector_df, peer_df=peer_df,
                                     )
                             except Exception:
@@ -3214,7 +3307,7 @@ elif _page == "analysis":
                         # Context for the metrics above: how this name stacks up against
                         # the entered peers on valuation, profitability and quality —
                         # same EDGAR-sourced compute_fundamentals, one row each.
-                        if peers_list and not is_crypto:
+                        if _peer_tickers() and not is_crypto:
                             def _peer_fund_row(_tk, _fd):
                                 if not _fd or not _fd.get("ok"):
                                     return None
@@ -3232,7 +3325,7 @@ elif _page == "analysis":
                             _mrow = _peer_fund_row(ticker_input, fund)
                             if _mrow:
                                 _frows.append(_mrow)
-                            for _pt in peers_list[:4]:
+                            for _pt in _peer_tickers()[:4]:
                                 try:
                                     _pfin = cached_fetch_sec_financials(_pt)
                                     if not _pfin:
@@ -3334,7 +3427,7 @@ elif _page == "analysis":
                         # Every rate below is read from the report, never assumed:
                         # the WACC is CAPM-derived per company, so hardcoding a
                         # discount rate here would silently misstate the model.
-                        _dcfr = _dcf_report if isinstance(_dcf_report, dict) else {"ok": False}
+                        _dcfr = _dcf() if isinstance(_dcf(), dict) else {"ok": False}
 
 
 
@@ -3900,7 +3993,7 @@ color:var(--muted);background:var(--surface2)}
                     # Say where the comparison set came from. A reader who does not
                     # know these were picked by sector and size has no way to judge
                     # whether they are the right companies to be compared against.
-                    if peers_auto:
+                    if _peers_are_auto():
                         # Deliberately does not name the sector. `sector` here is
                         # Polygon's SIC description ("Electronic Computers" for
                         # AAPL), not a GICS sector, and the peers were matched on the
