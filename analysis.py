@@ -1399,11 +1399,18 @@ def window_stats(df, rf=None):
 
 
 def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, sortino,
-                               forecast_method="Monte Carlo", stats=None):
+                               forecast_method="Monte Carlo", stats=None,
+                               return_window=None, risk_window=None):
     """`stats` from window_stats(df). When given, nothing here is recomputed —
     the paragraph formats numbers it was handed. Callers that pass a frame but
     no stats get them derived from that same frame, which is safe; passing a
-    frame from one window and ratios from another is what this exists to stop."""
+    frame from one window and ratios from another is what this exists to stop.
+
+    `return_window` / `risk_window` name the periods in the text ("the past
+    year", "the past 3 years") when the caller measured them over different
+    windows on purpose - the Analysis page shows a 1-year return beside 3-year
+    risk ratios, and its paragraph said "+2628.3% over the selected period"
+    (TSLA's ten-year pull) under a strip reading -10.74% for 1Y."""
     if stats is None:
         stats = window_stats(df)
         sharpe = stats["sharpe"] if sharpe is None else sharpe
@@ -1476,7 +1483,8 @@ def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, 
     sharpe_str = ""
     if sharpe and pd.notna(sharpe):
         q = "strong" if sharpe > 1 else ("modest" if sharpe > 0.5 else "weak")
-        sharpe_str = (f"Sharpe ratio {sharpe:.2f} ({q} risk-adjusted return); "
+        sharpe_str = ((f"Over {risk_window}: " if risk_window else "")
+                      + f"Sharpe ratio {sharpe:.2f} ({q} risk-adjusted return); "
                       f"Sortino {sortino:.2f} "
                       f"({'well-managed' if sortino > 1 else 'elevated'} downside risk).")
 
@@ -1500,13 +1508,16 @@ def generate_summary_paragraph(ticker, df, company_details, mc_summary, sharpe, 
                        f"trades on {_exch}." if _exch else "")
 
     lines = [
-        f"{ticker} delivered a cumulative return of {period_ret:+.1f}% over the selected period, "
+        f"{ticker} returned {period_ret:+.1f}% over "
+        f"{return_window or 'the selected period'}, "
         f"most recently closing at ${latest['Close']:,.2f}.",
     ]
     for s in [
         ma50_sig and f"Price is currently {ma50_sig}.",
         rsi_str, w52_str,
-        vol_str and f"{vol_str} Worst 60-day drawdown: {drawdown_60d:.1f}%.",
+        vol_str and (f"{vol_str} Worst 60-day drawdown"
+                     + (f" over {risk_window}" if risk_window else "")
+                     + f": {drawdown_60d:.1f}%."),
         sharpe_str, company_str, mc_str,
         # No trailing disclaimer. Every slide already carries one in its footer
         # and slide 13 is nothing but the disclaimer, so this third copy bought

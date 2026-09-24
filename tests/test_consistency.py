@@ -72,3 +72,23 @@ def test_live_session_needs_a_full_quote():
 def test_quote_time_is_eastern_and_labelled():
     ts = int(pd.Timestamp("2026-09-22 20:00", tz="UTC").timestamp())
     assert _fmt_ts(ts) == "4:00 PM ET"
+
+
+def test_summary_paragraph_names_the_windows_it_quotes():
+    """The Analysis page quoted TSLA's ten-year +2628.3% 'over the selected
+    period' under a stat strip reading -10.74% for 1Y. The page now hands the
+    paragraph the strip's return and names each window in the text."""
+    import numpy as np
+    import pandas as pd
+    from analysis import generate_summary_paragraph, window_stats
+    days = pd.bdate_range("2023-01-02", periods=800)
+    c = np.linspace(100, 150, len(days))
+    df = pd.DataFrame({"Date": days, "Close": c})
+    df["Daily_Return"] = df["Close"].pct_change()
+    st = window_stats(df)
+    st["period_ret"] = -10.74
+    txt = generate_summary_paragraph("TSLA", df, {}, None, st["sharpe"], st["sortino"],
+                                     stats=st, return_window="the past year",
+                                     risk_window="the past 3 years")
+    assert "returned -10.7% over the past year" in txt
+    assert "selected period" not in txt

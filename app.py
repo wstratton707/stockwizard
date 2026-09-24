@@ -109,6 +109,20 @@ except Exception:
 # hatch for unhashable args). These take plain strings, so they must NOT be
 # underscore-prefixed — doing so leaves an empty cache key, and every ticker gets
 # served the first ticker's result. Do not rename these back.
+def _headline_return(df, custom_range):
+    """(return %, label) for the page's headline: a trailing year unless a
+    range was chosen. One function so the stat strip and the paragraph under it
+    cannot drift apart again. Label None means the pull is under a year."""
+    first, last = float(df["Close"].iloc[0]), float(df["Close"].iloc[-1])
+    if custom_range:
+        return (last / first - 1) * 100, "Selected range"
+    _from = pd.to_datetime(df["Date"].iloc[-1]) - pd.DateOffset(years=1)
+    _d1 = df[pd.to_datetime(df["Date"]) >= _from]
+    if len(_d1) > 1:
+        return (last / float(_d1["Close"].iloc[0]) - 1) * 100, "1Y"
+    return (last / first - 1) * 100, None
+
+
 def _cached_suggest_peers(ticker, sector, market_cap):
     """Peers change when the rankings do, not on every rerun - which is where
     this 0.8s Supabase read was being paid. Size is keyed to two significant
@@ -2243,9 +2257,25 @@ elif _page == "analysis":
                 rfr      = get_risk_free_rate()
                 sharpe   = (ann_ret - rfr) / ann_std  if ann_std  else np.nan
                 sortino  = (ann_ret - rfr) / downside if downside else np.nan
+                # Same windows as the stat strip above it, each named in the
+                # text: the headline return is the strip's (trailing year, or
+                # the chosen range) and the ratios and drawdown are the risk
+                # window's. Handed the whole ten-year pull, the paragraph said
+                # TSLA returned +2628.3% "over the selected period" beneath a
+                # strip reading -10.74% (1Y).
+                from analysis import window_stats as _wstats
+                _pstats = _wstats(dfm)
+                _pstats["period_ret"], _pret_lbl = _headline_return(df, custom_range)
                 summary_text = generate_summary_paragraph(
-                    ticker_input, df, company_details, mc_summary, sharpe, sortino,
-                    forecast_method=forecast_method)
+                    ticker_input, df, company_details, mc_summary,
+                    _pstats["sharpe"], _pstats["sortino"],
+                    forecast_method=forecast_method, stats=_pstats,
+                    return_window=("the past year" if _pret_lbl == "1Y"
+                                   else "the selected range"),
+                    risk_window=({"selected range": "the selected range",
+                                  "full history": "the full history"}.get(
+                                      _mwin, f"the past {_mwin[:-1]} years"
+                                      if str(_mwin).endswith("Y") else str(_mwin))))
 
                 # Fundamentals and the DCF built on demand, not up front.
                 #
@@ -2362,15 +2392,9 @@ elif _page == "analysis":
             # Headline return is a trailing year unless a range was chosen. With
             # a ten-year pull the old "period return" put a decade's gain in the
             # slot the eye reads as recent performance.
-            if custom_range:
-                period_ret, _ret_label = ((latest["Close"] / first["Close"] - 1) * 100,
-                                          "Selected range")
-            else:
-                _1y_from = pd.to_datetime(df["Date"].iloc[-1]) - pd.DateOffset(years=1)
-                _df1y    = df[pd.to_datetime(df["Date"]) >= _1y_from]
-                _base    = _df1y["Close"].iloc[0] if len(_df1y) > 1 else first["Close"]
-                period_ret = (latest["Close"] / _base - 1) * 100
-                _ret_label = "1Y" if len(_df1y) > 1 else period_label
+            period_ret, _ret_label = _headline_return(df, custom_range)
+            if _ret_label is None:
+                _ret_label = period_label
             pos_neg    = lambda v: "positive" if v > 0 else ("negative" if v < 0 else "neutral")
 
             # Reports build on demand: a click builds the file (with a spinner),
