@@ -678,6 +678,13 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
     _sti = _fin_val(bal_now, "short_term_investments")
     if _sti is not None:
         cash_bal = (cash_bal or 0.0) + _sti
+    # Non-current marketable securities too - liquid, investment-grade and
+    # counted in the company's own net-cash figure (Apple: $84B at Jun-2026).
+    # The workbook's DCF offers the same treatment as a switch, on by default,
+    # so the site and the download agree.
+    _lts = _fin_val(bal_now, "lt_securities")
+    if _lts is not None:
+        cash_bal = (cash_bal or 0.0) + _lts
 
     # Current debt: prefer the roll-up when the filer reports one, otherwise sum
     # the components. Mixing the two double-counts - DebtCurrent already
@@ -806,7 +813,8 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
 
 
 def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=10,
-                  beta=None, sector=None):
+                  beta=None, sector=None, mid_year=True, base_method=None,
+                  scenario_probs=(0.25, 0.5, 0.25)):
     """Two-stage unlevered DCF (FCFF) → fair value per share + upside/downside.
 
     `wacc` resolution order: an explicit rate wins; otherwise it is derived from
@@ -867,16 +875,24 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
     _fcf_all  = [x for x in _fcf_raw if isinstance(x, (int, float))]
     fcf_hist  = [x for x in _fcf_all if x > 0]
     _n_neg    = sum(1 for x in _fcf_all if x <= 0)
-    base_fcf = (sum(fcf_hist[-3:]) / len(fcf_hist[-3:])) if fcf_hist else None
-    # Prefer the latest trailing-twelve-month windows (up to three, back to
-    # back): fiscal-year figures can be a year older than the price being
-    # tested against. Only when EVERY window is positive - averaging the good
-    # ones and dropping the bad is what the fiscal-year caveat below exists for.
-    _win = [w for w in (fundamentals.get("fcf_windows") or []) if isinstance(w, (int, float))]
-    base_basis = "fiscal-year"
-    if len(_win) >= 2 and all(w > 0 for w in _win):
-        base_fcf = sum(_win) / len(_win)
-        base_basis = "ttm"
+    # Base FCF: one of the workbook's three methods - the last fiscal year as
+    # reported (default: audited, a full year, the reference workbook's
+    # choice), the latest twelve months from the 10-Qs, or the average of the
+    # last three fiscal years. The same switch sits on the workbook's DCF tab,
+    # so the two always agree.
+    _ttm_fcf = ((fundamentals.get("fcf") or {}).get("fcf")
+                if (fundamentals.get("basis") or {}).get("kind") == "ttm" else None)
+    _fy_fcf = _fcf_raw[-1] if (_fcf_raw and isinstance(_fcf_raw[-1], (int, float))) else None
+    _last3 = [x for x in _fcf_raw[-3:] if isinstance(x, (int, float))]
+    _choices = {"ttm": _ttm_fcf, "fy": _fy_fcf,
+                "fy_avg3": (sum(_last3) / len(_last3)) if len(_last3) == 3 else None}
+    base_basis = base_method or "fy"
+    base_fcf = _choices.get(base_basis)
+    if not isinstance(base_fcf, (int, float)) or base_fcf <= 0:
+        # The chosen figure is missing or negative: fall back to the average
+        # of the last three POSITIVE years, and say so in the caveats.
+        base_basis = "fiscal-year"
+        base_fcf = (sum(fcf_hist[-3:]) / len(fcf_hist[-3:])) if fcf_hist else None
     if base_fcf is None:
         latest = fundamentals.get("fcf", {}).get("fcf")
         base_fcf = latest if (isinstance(latest, (int, float)) and latest > 0) else None
@@ -954,7 +970,10 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
         for t in range(1, years + 1):
             g_t = g1 + (tg - g1) * (t - 1) / (years - 1) if years > 1 else tg
             fcf = fcf * (1 + g_t)
-            pv  = fcf / (1 + w) ** t
+            # Mid-year: a year's cash arrives through the year, not on its
+            # last day. Discounting it a full year understated value by about
+            # half a year of the discount rate (+$6-12 a share on AAPL).
+            pv  = fcf / (1 + w) ** (t - 0.5 if mid_year else t)
             pv_sum += pv
             proj.append({"year": t, "growth": g_t, "fcf": fcf, "pv": pv})
         term_val = proj[-1]["fcf"] * (1 + tg) / (w - tg)
@@ -976,10 +995,13 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
     if isinstance(sbc_base, (int, float)) and 0 < sbc_base < base_fcf and shares:
         fv_after_sbc = (detail["enterprise_value"] * (1 - sbc_base / base_fcf) - net_debt) / shares
 
-    def _scn(g1):
-        fv, _ = _fair_value(g1)
-        return {"growth": g1, "fair_value": fv,
-                "upside": (fv / price - 1) if fv else None}
+    def _scn(g1, w=wacc, tg=terminal_growth, p=None):
+        fv, _ = _fair_value(g1, w=w, tg=tg)
+        return {"growth": g1, "wacc": w, "terminal_growth": tg, "probability": p,
+                "fair_value": fv, "upside": (fv / price - 1) if fv else None}
+
+    def _half(x):
+        return round(x * 200) / 200             # to the nearest half point
 
     # Bear is floored at -5%, not at `terminal_growth + 0.005`. That old floor
     # collided with the base case whenever base growth sat near terminal — for a
@@ -989,15 +1011,29 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
     # growth is allowed below the terminal rate: it fades toward terminal over
     # the horizon, so a declining near term followed by a mature steady state is
     # exactly what a bear case should express.
+    # Bear and bull move all three inputs together, as a real downturn or
+    # boom would. Bear: growth normalises to at most 3% a year (or 3 points
+    # under base), capital costs half a point more, terminal growth half a
+    # point less. Bull: growth holds at the latest twelve months' revenue
+    # growth (or 3 points over base), with the mirror-image rate moves.
+    _rg = (fundamentals.get("growth") or {}).get("revenue_yoy")
+    _bear_g = max(-0.05, _half(min(g_base - 0.03, 0.03)))
+    _bull_g = min(0.25, _half(max(g_base + 0.03,
+                                  (_rg / 100.0) if isinstance(_rg, (int, float)) else -1)))
+    _pb, _pm, _pu = scenario_probs
     scenarios = {
-        "bear": _scn(max(-0.05, g_base - 0.03)),
-        "base": _scn(g_base),
-        "bull": _scn(min(0.25, g_base + 0.03)),
+        "bear": _scn(_bear_g, w=wacc + 0.005, tg=terminal_growth - 0.005, p=_pb),
+        "base": _scn(g_base, p=_pm),
+        "bull": _scn(_bull_g, w=max(wacc - 0.005, terminal_growth + 0.0105),
+                     tg=terminal_growth + 0.005, p=_pu),
     }
+    _fvs = [scenarios[k]["fair_value"] for k in ("bear", "base", "bull")]
+    prob_weighted = (sum(p * v for p, v in zip(scenario_probs, _fvs))
+                     if all(v is not None for v in _fvs) else None)
 
     # WACC × terminal-growth sensitivity of the base-case fair value per share.
-    wacc_axis = [round(wacc + d, 4) for d in (-0.02, -0.01, 0.0, 0.01, 0.02)]
-    tg_axis   = [round(terminal_growth + d, 4) for d in (-0.01, -0.005, 0.0, 0.005, 0.01)]
+    wacc_axis = [wacc + d for d in (-0.01, -0.005, 0.0, 0.005, 0.01)]
+    tg_axis   = [terminal_growth + d for d in (-0.01, -0.005, 0.0, 0.005, 0.01)]
     sensitivity = []
     for w in wacc_axis:
         row = []
@@ -1006,20 +1042,20 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
             row.append(fv)
         sensitivity.append(row)
 
-    # Stage-1 growth x WACC at the base terminal rate: the two inputs a reader
-    # is most likely to argue with, against each other.
-    g_axis = [g_base + d for d in (-0.04, -0.02, 0.0, 0.02, 0.04)]
+    # Stage-1 growth (rows) x WACC (columns) at the base terminal rate: the two
+    # inputs a reader is most likely to argue with, against each other.
+    g_axis = [g_base + d for d in (-0.06, -0.03, 0.0, 0.03, 0.06)]
     sensitivity_growth = []
-    for w in wacc_axis:
+    for g in g_axis:
         row = []
-        for g in g_axis:
+        for w in wacc_axis:
             fv, _ = _fair_value(g, w=w)
             row.append(fv)
         sensitivity_growth.append(row)
 
     # Reverse-solve the stage-1 FCF growth the market is pricing in at today's price.
     implied_growth = None
-    lo, hi = -0.20, 0.50
+    lo, hi = -0.20, 0.60                       # the workbook's helper grid, too
     fv_lo, _ = _fair_value(lo)
     fv_hi, _ = _fair_value(hi)
     if fv_lo is not None and fv_hi is not None and fv_lo <= price <= fv_hi:
@@ -1064,6 +1100,8 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
         "terminal_growth": terminal_growth, "years": years,
         "base_fcf": base_fcf, "base_fcf_basis": base_basis,
         "sbc_base": sbc_base if fv_after_sbc is not None else None,
+        "mid_year": mid_year, "prob_weighted": prob_weighted,
+        "prob_weighted_upside": (prob_weighted / price - 1) if prob_weighted else None,
         "fair_value_after_sbc": fv_after_sbc,
         "upside_after_sbc": (fv_after_sbc / price - 1) if fv_after_sbc else None,
         "base_growth": g_base, "net_debt": net_debt,

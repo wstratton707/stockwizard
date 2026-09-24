@@ -251,12 +251,26 @@ def get_bars(ticker: str, start: str, end: str, interval: str = "day",
     """
     df = _yahoo_bars(ticker, start, end, interval)
     if df is not None and len(df) > 0:
+        _PRICE_SOURCE[(ticker or "").upper()] = "Yahoo Finance"
         return df
     if polygon_key:
         df = _polygon_bars(ticker, start, end, interval, polygon_key)
         if df is not None and len(df) > 0:
+            _PRICE_SOURCE[(ticker or "").upper()] = "Polygon.io"
             return df
     return None
+
+
+# Which feed last served a ticker's bars. The two differ in substance, not just
+# provenance: Yahoo's closes are adjusted for dividends (returns are total
+# returns), Polygon's for splits only (returns are price-only), and the report
+# has to say which it is showing.
+_PRICE_SOURCE = {}
+
+
+def price_source(ticker):
+    """("Yahoo Finance" | "Polygon.io" | None) for the last bars fetched."""
+    return _PRICE_SOURCE.get((ticker or "").upper())
 
 
 def _yahoo_bars(ticker: str, start: str, end: str, interval: str) -> pd.DataFrame | None:

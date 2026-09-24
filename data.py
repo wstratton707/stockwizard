@@ -444,6 +444,11 @@ _SEC_TAGS = {
                                "ShortTermInvestments",
                                "AvailableForSaleSecuritiesDebtSecuritiesCurrent"],
     "retained_earnings": ["RetainedEarningsAccumulatedDeficit"],
+    # Liquid investment-grade securities held beyond a year. Apple carries
+    # $77.7B of them and counts them in its own net-cash figure; leaving them
+    # out understated its net cash by more than the whole cash line.
+    "lt_securities": ["MarketableSecuritiesNoncurrent",
+                      "AvailableForSaleSecuritiesDebtSecuritiesNoncurrent"],
     "net_cash_flow_from_operating_activities":
         ["NetCashProvidedByUsedInOperatingActivities",
          "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"],
@@ -670,7 +675,7 @@ _TTM_CASH   = ("net_cash_flow_from_operating_activities", "capex", "sbc", "buyba
 _BAL_FIELDS = ("assets", "current_assets", "liabilities", "current_liabilities", "equity",
                "long_term_debt", "debt_current", "debt_total_incl_current",
                "debt_current_total", "commercial_paper", "short_term_borrowings",
-               "cash", "short_term_investments", "retained_earnings")
+               "cash", "short_term_investments", "retained_earnings", "lt_securities")
 
 
 def _sec_quarterly_flow(facts, tags, unit="USD"):
@@ -752,6 +757,84 @@ def _sec_cover_shares(facts):
     return last["end"], sum(vals)
 
 
+def _etr_q(pre_q, tax_q, d, near):
+    if not pre_q or not tax_q or d is None:
+        return None
+    pre, tax = near(pre_q, d), near(tax_q, d)
+    return (tax / pre) if (pre and pre > 0 and tax is not None) else None
+
+
+def fiscal_quarter_label(end, fy_end_month):
+    """("Q4", 2025) for a quarter ending in the fiscal year's last month, etc.
+
+    The fiscal year is named for the calendar year it ends in - Apple's FY2026
+    runs October 2025 to September 2026 - and quarters count back from the
+    fiscal year-end month."""
+    end = pd.Timestamp(end)
+    # 52/53-week years end a few days either side of a month-end; the nearest
+    # month-end names the quarter, so 27 Sep and 2 Oct both count as September.
+    anchor = end if end.day >= 15 else end - pd.Timedelta(days=end.day + 1)
+    m, y = anchor.month, anchor.year
+    back = (fy_end_month - m) % 12
+    q = 4 - back // 3
+    fy = y if m <= fy_end_month else y + 1
+    return f"Q{q}", fy
+
+
+def _sec_quarter_table(facts, rev_q, gp_q, fy_end, pre_q=None, tax_q=None):
+    """The latest four quarters: revenue, diluted EPS, gross profit and growth
+    on the same quarter a year earlier, oldest first.
+
+    EPS prefers the 3-month fact the filing states; a fourth quarter has none
+    (10-Ks report the year), so it is the full year less nine months."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    exact = {}
+    for tag in _SEC_TAGS_EPS:
+        for e in (gaap.get(tag, {}).get("units", {}).get("USD/shares") or []):
+            s, d = e.get("start"), e.get("end")
+            if not s or not d or e.get("val") is None:
+                continue
+            if 80 <= (pd.Timestamp(d) - pd.Timestamp(s)).days <= 100:
+                k = pd.Timestamp(d)
+                if k not in exact or e.get("filed", "") >= exact[k][1]:
+                    exact[k] = (float(e["val"]), e.get("filed", ""))
+    diffd = _sec_quarterly_flow(facts, _SEC_TAGS_EPS, unit="USD/shares")
+    eps_q = {k: v for k, v in diffd.items()}
+    eps_q.update({k: v for k, (v, _f) in exact.items()})
+
+    def near(series, d):
+        if d in series:
+            return series[d]
+        m = [v for k, v in series.items() if abs((k - d).days) <= 7]
+        return m[0] if m else None
+
+    ends = list(rev_q)[-4:]
+    fy_month = pd.Timestamp(fy_end).month
+    rows = []
+    for d in ends:
+        prev = [k for k in rev_q if 350 <= (d - k).days <= 380]
+        p = prev[-1] if prev else None
+        rev, eps, gp = near(rev_q, d), near(eps_q, d), near(gp_q, d)
+        rev_p = near(rev_q, p) if p is not None else None
+        eps_p = near(eps_q, p) if p is not None else None
+        q, fy = fiscal_quarter_label(d, fy_month)
+        rows.append({
+            "end": str(d.date()), "label": f"{q} FY{str(fy)[2:]}", "fiscal_year": fy,
+            "revenue": rev, "eps": eps, "gross_profit": gp,
+            "rev_yoy": (rev / rev_p - 1) if (rev is not None and rev_p) else None,
+            "eps_yoy": (eps / eps_p - 1) if (eps is not None and eps_p and eps_p > 0) else None,
+            "eps_exact": d in exact,
+            # effective tax rates, this quarter and a year earlier - a one-off
+            # tax charge in the base quarter distorts the growth rate
+            "etr": _etr_q(pre_q, tax_q, d, near),
+            "etr_prev": _etr_q(pre_q, tax_q, p, near) if p is not None else None,
+            "prev_label": ("{} FY{}".format(*[(a, str(b)[2:]) for a, b in
+                                              [fiscal_quarter_label(p, fy_month)]][0])
+                           if p is not None else None),
+        })
+    return rows
+
+
 def _sec_ttm(facts, fy_end):
     """Latest trailing-twelve-month flows, latest balance sheet, and the last
     three non-overlapping twelve-month FCF windows. None when fewer than four
@@ -824,6 +907,14 @@ def _sec_ttm(facts, fy_end):
         else:
             break
 
+    quarters = _sec_quarter_table(facts, rev_q, _q("gross_profit"), fy_end,
+                                  _q("pretax_income"), _q("income_tax"))
+    _dps = _sec_quarterly_flow(facts, ["CommonStockDividendsPerShareDeclared",
+                                       "CommonStockDividendsPerShareCashPaid"], unit="USD/shares")
+    dps_latest = (list(_dps.items())[-1] if _dps else None)
+    if dps_latest and dps_latest[0] < t_end - pd.Timedelta(days=200):
+        dps_latest = None                      # a dividend that stopped is not a yield
+
     b_end, balance = _sec_latest_balance(facts)
     sh_end, shares = _sec_cover_shares(facts)
     # Berkshire's last companyfacts cover count is from 2011. A count that old
@@ -835,7 +926,12 @@ def _sec_ttm(facts, fy_end):
             "prior": prior,
             "balance_end": str(b_end.date()) if b_end is not None else None,
             "balance": balance,
-            "shares_outstanding": shares, "shares_date": sh_end}
+            "shares_outstanding": shares, "shares_date": sh_end,
+            "quarters": quarters,
+            "dps_quarter": (float(dps_latest[1]) if dps_latest else None),
+            "dps_quarter_end": (str(dps_latest[0].date()) if dps_latest else None),
+            "flows_q": {"cfo": {str(k.date()): v for k, v in cfo_q.items()},
+                        "capex": {str(k.date()): v for k, v in cx_q.items()}}}
 
 
 def fetch_sec_financials(ticker, years=10, log=print):
@@ -870,9 +966,32 @@ def fetch_sec_financials(ticker, years=10, log=print):
     if not fys:
         return {}
 
+    by_end = {}
+
+    def _ends(field):
+        """{period end: value} from every 10-K fact for the field, comparatives
+        included. NVIDIA filed capex under a custom tag until FY2022; that
+        10-K restates FY2020-21 under the standard one, and reading only each
+        filing's own year dropped them."""
+        if field not in by_end:
+            gaap = facts.get("facts", {}).get("us-gaap", {})
+            out = {}
+            for tag in _SEC_TAGS.get(field, []):
+                for e in (gaap.get(tag, {}).get("units", {}).get("USD") or []):
+                    if not str(e.get("form", "")).startswith(("10-K", "20-F")) or e.get("val") is None:
+                        continue
+                    s, d = e.get("start"), e.get("end")
+                    if s and not (350 <= (pd.Timestamp(d) - pd.Timestamp(s)).days <= 380):
+                        continue
+                    out.setdefault(d, float(e["val"]))
+            by_end[field] = out
+        return by_end[field]
+
     def col(field, fy):
         m = fmap.get(field, {})
-        return m[fy][1] if fy in m else None
+        if fy in m:
+            return m[fy][1]
+        return _ends(field).get(end_of(fy))
 
     def end_of(fy):
         for f in ("net_income_loss", "revenues", "assets"):
@@ -921,6 +1040,7 @@ def fetch_sec_financials(ticker, years=10, log=print):
             "short_term_borrowings": col("short_term_borrowings", fy),
             "cash": col("cash", fy),
             "short_term_investments": col("short_term_investments", fy),
+            "lt_securities": col("lt_securities", fy),
             "retained_earnings": col("retained_earnings", fy),
         })
         cf_rows.append({

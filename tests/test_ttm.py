@@ -203,11 +203,16 @@ def test_eps_growth_across_a_split_is_not_quoted():
     assert f["growth"]["yoy_basis"] == "ttm_eps_fy"
 
 
-def test_dcf_base_uses_the_twelve_month_windows_only_when_all_are_positive():
+def test_dcf_base_is_the_latest_twelve_months_with_the_workbook_switches():
+    """The site and the workbook's DCF tab share one switch: last fiscal year
+    (default, as the reference workbook), TTM, or a 3-year average."""
     f = A.compute_fundamentals(_fin(_ttm()), market_cap=4800.0, price=330.0)
     d = A.dcf_valuation(f, 330.0, wacc=0.09)
-    assert d["base_fcf_basis"] == "ttm"
-    assert d["base_fcf"] == pytest.approx((96 + 104 + 135) / 3)
-    f2 = A.compute_fundamentals(_fin(_ttm(fcf_windows=[-5.0, 104.0, 135.0])),
-                                market_cap=4800.0, price=330.0)
-    assert A.dcf_valuation(f2, 330.0, wacc=0.09)["base_fcf_basis"] == "fiscal-year"
+    assert d["base_fcf_basis"] == "fy"
+    assert d["base_fcf"] == pytest.approx(110.0 - 12.0)          # FY CFO - capex
+    t = A.dcf_valuation(f, 330.0, wacc=0.09, base_method="ttm")
+    assert t["base_fcf"] == pytest.approx(145.0 - 10.0) and t["base_fcf_basis"] == "ttm"
+    # a negative chosen figure falls back to positive fiscal years, with a caveat
+    neg = _ttm(cash_flow={"net_cash_flow_from_operating_activities": 5.0, "capex": 10.0})
+    f2 = A.compute_fundamentals(_fin(neg), market_cap=4800.0, price=330.0)
+    assert A.dcf_valuation(f2, 330.0, wacc=0.09, base_method="ttm")["base_fcf_basis"] == "fiscal-year"

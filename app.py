@@ -2527,9 +2527,10 @@ elif _page == "analysis":
                                              # openpyxl / python-pptx / python-docx +
                                              # matplotlib, ~2s cold
                                              ("import builder", lambda: __import__(
-                                                 {"excel": "excel_builder", "pptx": "pptx_builder"}
+                                                 {"excel": "excel_report", "pptx": "pptx_builder"}
                                                  .get(_kind, "docx_builder"))),
                                              ("sector", _load_sector),
+                                             ("filings", lambda: _cached_sec_filings(ticker_input)),
                                              ("segments", lambda: _cached_segments(ticker_input)),
                                              ("valuation history",
                                               lambda: _cached_valuation(ticker_input))]
@@ -2572,28 +2573,30 @@ elif _page == "analysis":
                                 _cd_rpt["Sector"] = _ss
                             try:
                                 if _kind == "excel":
-                                    with _phase("import excel_builder"):
-                                        from excel_builder import build_excel
+                                    # The workbook in the layout of the reference report
+                                    # (assets/AAPL_5Y_Analysis (6).xlsx) - see excel_report.
+                                    with _phase("import excel_report"):
+                                        from excel_report import build_report
+                                        import market_data as _md
                                     with _phase("peer fundamentals"):
                                         _pf_rows = _peer_funds()
                                     with _phase("build_excel"):
-                                        st.session_state[_buf_key] = build_excel(
-                                            ticker_input, _rdf, _rlabel,
-                                            company_details=_cd_rpt, sector_df=sector_df,
-                                            mc_sim_df=mc_sim_df, mc_summary=mc_summary,
-                                            news_list=news_list, peer_df=peer_df,
-                                            corr_matrix=corr_matrix,
-                                            resistance_levels=resistance, support_levels=support,
-                                            summary_text=_summary_win,
-                                            bar_size=bar_size, fundamentals=_fund(),
-                                            analyst_data=_analyst_report, dcf=_dcf(),
-                                            peer_fund=_pf_rows,
+                                        st.session_state[_buf_key] = build_report(
+                                            ticker_input, _rdf,
+                                            financials=cached_fetch_sec_financials(ticker_input),
+                                            fundamentals=_fund(), dcf=_dcf(),
+                                            company_details=_cd_rpt,
+                                            mc_summary=mc_summary, mc_sim_df=mc_sim_df,
+                                            news_rows=news_list, peer_fund=_pf_rows,
+                                            peer_group=((peer_group_for(ticker_input)
+                                                         or ("same sector, nearest in size",))[0]
+                                                        if _peers_are_auto() else "your peers"),
+                                            peer_df=peer_df,
                                             segments=_cached_segments(ticker_input),
                                             valuation_data=_cached_valuation(ticker_input),
-                                            peer_group=(peer_group_for(ticker_input)
-                                                        or ("same sector, nearest in size",))[0]
-                                            if _peers_are_auto() else "your peers",
-                                            )
+                                            filings=_cached_sec_filings(ticker_input),
+                                            period_label=_rlabel,
+                                            price_source=_md.price_source(ticker_input))
                                 elif _kind == "pptx":
                                     # dcf= was missing here while Excel and Word
                                     # both passed it, so the deck's valuation

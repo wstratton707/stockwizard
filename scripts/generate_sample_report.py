@@ -35,17 +35,12 @@ try:
 except ImportError:
     pass
 
-import numpy as np
 
 from data import (fetch_stock_data, fetch_company_details, fetch_financials,
-                  fetch_sec_financials, fetch_news, fetch_peer_comparison,
-                  fetch_sector_data)
-from analysis import (compute_fundamentals, dcf_valuation, run_monte_carlo,
-                      build_correlation_matrix, detect_support_resistance,
-                      generate_summary_paragraph, market_beta)
+                  fetch_sec_financials, fetch_peer_comparison)
+from analysis import compute_fundamentals, dcf_valuation, run_monte_carlo, market_beta
 from market_data import get_financials_supplement
-from excel_builder import build_excel
-from constants import get_risk_free_rate
+from excel_report import build_report
 
 BENCHMARKS = ["SPY", "QQQ"]
 PEERS = {"NKE": ["ADDYY", "UAA", "LULU"], "PEP": ["KO", "MDLZ", "GIS"]}
@@ -91,9 +86,9 @@ def main():
     # for NKE. The sample has to be the same report the site produces.
     fin = fetch_sec_financials(tk, log=log) or fetch_financials(tk, key, log=log)
     supplement   = get_financials_supplement(tk)
-    fundamentals = compute_fundamentals(fin, market_cap=details.get("Market Cap"),
-                                        supplement=supplement)
     price = float(df["Close"].iloc[-1])
+    fundamentals = compute_fundamentals(fin, market_cap=details.get("Market Cap"),
+                                        price=price, supplement=supplement)
     # Beta must be passed here for the same reason the app passes it: without it
     # dcf_valuation falls back to a flat default rate, and the sample workbook
     # would then quote a different WACC — and a different implied growth — than
@@ -126,62 +121,48 @@ def main():
         news = report_news_rows(tk, key, company_name=details.get("Name"))
     except Exception:
         news = None
+    # Peers exactly as the app picks and measures them.
+    from portfolio_data import suggest_peers
+    from peer_groups import peer_group_for
+    from analysis import peer_metrics
+    import market_data
+    peer_list = PEERS.get(tk) or suggest_peers(tk, sector=sector or "",
+                                               market_cap=fundamentals.get("market_cap") or 0,
+                                               api_key=key)
     try:
-        peers = fetch_peer_comparison(tk, PEERS.get(tk, []), key, log=log)
+        peers = fetch_peer_comparison(tk, peer_list, key, log=log)
     except Exception:
         peers = None
-    try:
-        sector_df = fetch_sector_data(tk, key, sector, log=log) if sector else None
-    except Exception:
-        sector_df = None
-    try:
-        corr = build_correlation_matrix(df, benchmark_tickers=BENCHMARKS)
-    except Exception:
-        corr = None
-    try:
-        # Returns (resistance, support) — this unpack was swapped, which is how
-        # the published sample showed "support" levels ABOVE the resistance ones.
-        resistance, support = detect_support_resistance(df)
-    except Exception:
-        support, resistance = None, None
-    try:
-        # Without this the flagship sample silently drops the Analyst Consensus
-        # section the live app includes. Degrades to None if no Finnhub key.
-        from market_data import get_analyst_data
-        analyst = get_analyst_data(tk) or None
-    except Exception:
-        analyst = None
+    vendor = {r["Ticker"]: r["Market Cap ($B)"] * 1e9
+              for r in (peers.to_dict("records") if peers is not None else [])
+              if isinstance(r.get("Market Cap ($B)"), (int, float))}
+    peer_fund = [peer_metrics(tk, fundamentals)]
+    for p in peer_list[:4]:
+        try:
+            from datetime import timedelta
+            end = date.today()
+            bars = market_data.get_bars(p, str(end - timedelta(days=30)), str(end))
+            pf = compute_fundamentals(fetch_sec_financials(p, log=log), market_cap=vendor.get(p),
+                                      price=float(bars["Close"].iloc[-1]))
+            peer_fund.append(peer_metrics(p, pf))
+        except Exception as e:
+            log(f"peer {p} skipped: {e}")
+    peer_fund = [r for r in peer_fund if r]
 
-    ret = df["Daily_Return"].dropna()
-    ann_ret = ret.mean() * 252
-    ann_std = ret.std() * np.sqrt(252)
-    # downside_deviation, not ret[ret < 0].std() — the latter is the formula that
-    # module's docstring exists to warn against. It takes the spread of the losing
-    # days rather than the root-mean-square shortfall below zero over ALL days, so
-    # it understates the denominator and flatters the ratio.
-    #
-    # app.py and excel_builder both call downside_deviation; this script did not,
-    # so the sample workbook printed Sortino 1.04 in its metrics block (correct)
-    # and 0.99 in the prose paragraph two screens below (from here). One workbook,
-    # two answers, on the sample report linked from the home page.
-    from analysis import downside_deviation
-    downside = downside_deviation(ret)
-    rfr = get_risk_free_rate()
-    sharpe = (ann_ret - rfr) / ann_std if ann_std else np.nan
-    sortino = (ann_ret - rfr) / downside if downside else np.nan
-
-    summary = generate_summary_paragraph(tk, df, details, mc_summary,
-                                         sharpe, sortino)
-
-    buf = build_excel(
-        tk, df, args.period.upper(),
-        company_details=details, sector_df=sector_df,
-        mc_sim_df=mc_sim_df, mc_summary=mc_summary,
-        news_list=news, peer_df=peers, corr_matrix=corr,
-        resistance_levels=resistance, support_levels=support,
-        summary_text=summary, bar_size="day",
-        fundamentals=fundamentals, dcf=dcf, analyst_data=analyst,
-    )
+    from data import fetch_sec_segments, fetch_sec_filings
+    try:
+        from valuation import get_valuation_data
+        vdata = get_valuation_data(tk)
+    except Exception:
+        vdata = None
+    buf = build_report(
+        tk, df, financials=fin, fundamentals=fundamentals, dcf=dcf,
+        company_details=details, mc_summary=mc_summary, mc_sim_df=mc_sim_df,
+        news_rows=news, peer_fund=peer_fund,
+        peer_group=(peer_group_for(tk) or ("same sector, nearest in size",))[0],
+        peer_df=peers, segments=fetch_sec_segments(tk, log=log), valuation_data=vdata,
+        filings=fetch_sec_filings(tk, log=log), period_label=args.period.upper(),
+        price_source=market_data.price_source(tk))
 
     out_dir = ROOT / "static"
     out_dir.mkdir(exist_ok=True)
