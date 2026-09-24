@@ -2477,6 +2477,141 @@ def _build_methodology_sheet(wb, dcf=None):
     ws.freeze_panes = "A3"
 
 
+
+# ── Business mix, capital returns, valuation history ─────────────────────────
+def _sheet_title(ws, title, subtitle):
+    ws.sheet_view.showGridLines = False
+    t = ws.cell(row=1, column=1, value=title)
+    t.font = Font(size=14, bold=True, color=DARK_BLUE, name="Calibri")
+    s = ws.cell(row=2, column=1, value=subtitle)
+    s.font = Font(size=9, italic=True, color="666666", name="Calibri")
+
+
+def _table(ws, top, headers, rows, fmts, bold_rows=(), widths=None):
+    """Header + rows with per-column number formats. Returns the next free row."""
+    for ci, h in enumerate(headers, 1):
+        _hdr_cell(ws.cell(row=top, column=ci, value=h), bg=MID_BLUE)
+    for ri, rec in enumerate(rows, top + 1):
+        for ci, v in enumerate(rec, 1):
+            c = ws.cell(row=ri, column=ci, value=v)
+            c.font = Font(name="Calibri", size=10, bold=(ri - top - 1) in bold_rows)
+            c.border = _border()
+            c.alignment = Alignment(horizontal="left" if ci == 1 else "right")
+            if ci > 1 and fmts[ci - 2] and isinstance(v, (int, float)):
+                c.number_format = fmts[ci - 2]
+            if ri % 2 == 0:
+                c.fill = PatternFill("solid", fgColor=GREY_ROW)
+    for ci, w in enumerate(widths or [], 1):
+        ws.column_dimensions[get_column_letter(ci)].width = w
+    return top + len(rows) + 2
+
+
+def _build_segments_sheet(wb, ticker, segments):
+    axes = (segments or {}).get("axes") or {}
+    if not axes:
+        return
+    ws = wb.create_sheet("Business_Mix")
+    fy = segments.get("fy_end")
+    _sheet_title(ws, f"{ticker} — Where the Revenue Comes From",
+                 f"Fiscal year ending {pd.Timestamp(fy):%d %b %Y}, from the 10-K filed "
+                 f"{segments.get('filed')}. Each breakdown adds back to reported revenue "
+                 f"(within 2%); one that doesn't is left out rather than shown wrong.")
+    row = 4
+    for title, rows in axes.items():
+        c = ws.cell(row=row, column=1, value=title)
+        c.font = Font(bold=True, color=DARK_BLUE, size=11, name="Calibri")
+        data = [[r["name"], r["value"], r["prior"], r["growth"], r["share"]] for r in rows]
+        total = sum(r["value"] for r in rows)
+        ptot = sum(r["prior"] for r in rows if r["prior"]) if all(r["prior"] for r in rows) else None
+        data.append(["Total", total, ptot, ((total / ptot - 1) if ptot else None), 1.0])
+        row = _table(ws, row + 1, ["Line", "Revenue", "Prior year", "Growth", "Share"],
+                     data, [FMT_BN, FMT_BN, FMT_SIGNED, FMT_PCT1],
+                     bold_rows=(len(data) - 1,), widths=[40, 14, 14, 11, 10])
+    ws.cell(row=row, column=1, value=f"Source: {segments.get('url')}").font = Font(
+        size=8, italic=True, color="888888", name="Calibri")
+
+
+def _build_capital_sheet(wb, ticker, fundamentals):
+    f = fundamentals or {}
+    tr = f.get("trend") or {}
+    periods = tr.get("periods") or []
+    if not f.get("ok") or not periods or not any(tr.get("buybacks") or []):
+        return
+    ws = wb.create_sheet("Capital_Returns")
+    _sheet_title(ws, f"{ticker} — Where the Cash Goes",
+                 "Free cash flow against what was returned to shareholders, stock-based pay "
+                 "and the diluted share count, per fiscal year as filed. A falling share "
+                 "count is buybacks outrunning stock issued to employees.")
+    rows, prev_sh = [], None
+    for i, p in enumerate(periods):
+        fcf = tr["fcf"][i]
+        bb = tr.get("buybacks", [None] * len(periods))[i]
+        dv = tr.get("dividends", [None] * len(periods))[i]
+        sbc = tr.get("sbc", [None] * len(periods))[i]
+        sh = tr.get("diluted_shares", [None] * len(periods))[i]
+        ret = (bb or 0) + (dv or 0) if (bb is not None or dv is not None) else None
+        ch = ((sh / prev_sh - 1) if (sh and prev_sh and 0.67 < sh / prev_sh < 1.5) else None)
+        rows.append([p, fcf, bb, dv, ret,
+                     (ret / fcf) if (ret is not None and fcf and fcf > 0) else None,
+                     sbc, (sbc / fcf) if (sbc is not None and fcf and fcf > 0) else None,
+                     sh, ch])
+        prev_sh = sh
+    cr, fc = f.get("capital_return") or {}, f.get("fcf") or {}
+    if (f.get("basis") or {}).get("kind") == "ttm":
+        ret = ((cr.get("buybacks") or 0) + (cr.get("dividends") or 0)
+               if (cr.get("buybacks") is not None or cr.get("dividends") is not None) else None)
+        rows.append([fundamentals_basis_label(f, short=True), fc.get("fcf"), cr.get("buybacks"),
+                     cr.get("dividends"), ret,
+                     (ret / fc["fcf"]) if (ret is not None and fc.get("fcf") and fc["fcf"] > 0) else None,
+                     fc.get("sbc"),
+                     (fc["sbc"] / fc["fcf"]) if (fc.get("sbc") is not None and fc.get("fcf") and fc["fcf"] > 0) else None,
+                     None, None])
+    SH = '#,##0.00,,,"B"'
+    row = _table(ws, 4, ["Fiscal year", "Free cash flow", "Buybacks", "Dividends",
+                         "Total returned", "Returned / FCF", "Stock-based pay",
+                         "SBC / FCF", "Diluted shares", "Share change"],
+                 rows, [FMT_BN, FMT_BN, FMT_BN, FMT_BN, "0%", FMT_BN, "0.0%", SH, FMT_SIGNED],
+                 bold_rows=((len(rows) - 1,) if (f.get("basis") or {}).get("kind") == "ttm" else ()),
+                 widths=[18, 14, 12, 12, 14, 14, 14, 11, 14, 12])
+    ws.cell(row=row, column=1, value=(
+        "Share change is left blank across a stock split, where the as-filed count jumps. "
+        "Returned / FCF above 100% means buybacks and dividends were funded partly from "
+        "the balance sheet.")).font = Font(size=9, italic=True, color="666666", name="Calibri")
+
+
+def _build_valuation_history_sheet(wb, ticker, vhist):
+    if not vhist:
+        return
+    ws = wb.create_sheet("Valuation_History")
+    _sheet_title(ws, f"{ticker} — What the Market Has Paid Before",
+                 "Each fiscal year's EPS (on today's share basis) against the stock's average, "
+                 "high and low price in that calendar year. FCF yield = cash conversion "
+                 "(FCF ÷ net income) ÷ P/E.")
+    cur, med = vhist.get("current_pe"), vhist.get("median_pe")
+    summary = [
+        ["Current P/E (latest 12 months)", cur],
+        [f"Median P/E, last {len(vhist['rows'])} years", med],
+        ["Range of yearly average P/E", f"{vhist['min_pe']:.1f}x – {vhist['max_pe']:.1f}x"],
+        ["Current vs median", vhist.get("current_vs_median")],
+        ["Years with a lower average P/E than today", vhist.get("percentile")],
+    ]
+    for i, (k, v) in enumerate(summary, 4):
+        a = ws.cell(row=i, column=1, value=k)
+        b = ws.cell(row=i, column=2, value=v)
+        a.font = Font(name="Calibri", size=10)
+        b.font = Font(name="Calibri", size=10, bold=True)
+        b.alignment = Alignment(horizontal="right")
+        a.border = b.border = _border()
+        if isinstance(v, (int, float)):
+            b.number_format = ('0.0"x"' if i in (4, 5) else FMT_SIGNED if i == 7 else "0%")
+    rows = [[r["year"], r["eps"], r["pe_low"], r["pe_avg"], r["pe_high"], r["fcf_yield"]]
+            for r in vhist["rows"]]
+    _table(ws, 10, ["Fiscal year", "EPS (today's shares)", "P/E low", "P/E average",
+                    "P/E high", "FCF yield"],
+           rows, ['"$"0.00', '0.0"x"', '0.0"x"', '0.0"x"', "0.0%"],
+           widths=[40, 18, 11, 12, 11, 11])
+
+
 def build_excel(ticker, df, period,
                 company_details=None, sector_df=None,
                 mc_sim_df=None, mc_summary=None,
@@ -2484,7 +2619,8 @@ def build_excel(ticker, df, period,
                 corr_matrix=None,
                 resistance_levels=None, support_levels=None,
                 summary_text="", bar_size="day", fundamentals=None,
-                analyst_data=None, dcf=None, peer_fund=None, peer_group=None):
+                analyst_data=None, dcf=None, peer_fund=None, peer_group=None,
+                segments=None, valuation_data=None):
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -2502,13 +2638,21 @@ def build_excel(ticker, df, period,
     _build_charts_sheet(wb, ticker, ws_p, export_df, ws_s, ws_mc_data, full_df=df)
     _build_valuation_sheet(wb, ticker, dcf, fundamentals)
     _build_fundamentals_sheet(wb, fundamentals)
+    _build_segments_sheet(wb, ticker, segments)
+    _build_capital_sheet(wb, ticker, fundamentals)
+    try:
+        from analysis import valuation_history
+        _build_valuation_history_sheet(wb, ticker, valuation_history(valuation_data, fundamentals))
+    except Exception:
+        pass
     _build_methodology_sheet(wb, dcf=dcf)
 
     # Final tab order (Cover first, then Dashboard, then the rest). Valuation sits
     # right after the Dashboard — "what is it worth?" follows "what's the answer?".
     # Methodology is the reference appendix at the end. The TOC is built from this
     # same order so the cover links match the tab strip.
-    desired = ["Cover","Dashboard","Valuation","Fundamentals","Annual_Summary","Price_Indicators","News_Headlines",
+    desired = ["Cover","Dashboard","Valuation","Fundamentals","Business_Mix","Capital_Returns",
+               "Valuation_History","Annual_Summary","Price_Indicators","News_Headlines",
                "Peer_Comparison","Sector_Comparison","Correlation_Matrix",
                "Monte_Carlo","Charts","Methodology"]
     built     = wb.sheetnames                                   # everything except Cover

@@ -702,6 +702,11 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
         "operating_margin": [pct(_fin_val(inc, "operating_income_loss", i),
                                   _fin_val(inc, "revenues", i)) for i in order],
         "fcf":              [_fcf_at(i) for i in order],
+        # Capital allocation, as filed per fiscal year.
+        "sbc":              [_fin_val(cf, "sbc", i) for i in order],
+        "buybacks":         [_fin_val(cf, "buybacks", i) for i in order],
+        "dividends":        [_fin_val(cf, "dividends_paid", i) for i in order],
+        "diluted_shares":   [_fin_val(inc, "diluted_shares", i) for i in order],
     }
 
     _fy_end = str(inc.iloc[0]["Period"])[:10] if "Period" in inc.columns else None
@@ -1501,3 +1506,53 @@ def peer_median(rows, skip=None):
         mid = len(xs) // 2
         out[key] = xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) / 2
     return out
+
+
+def valuation_history(vdata, fundamentals=None, years=10):
+    """What the market has paid for this company's earnings and cash, by year.
+
+    From valuation.get_valuation_data: each fiscal year's EPS (on today's share
+    basis) against the stock's average, high and low price in that calendar
+    year. FCF yield is (FCF / net income) / P/E - the same year's cash
+    conversion over the earnings multiple - which needs no share count and so
+    no split adjustment. Returns None without enough history."""
+    if not vdata or not vdata.get("years"):
+        return None
+    ys = vdata["years"][-years:]
+    idx = {y: i for i, y in enumerate(vdata["years"])}
+    tr = (fundamentals or {}).get("trend") or {}
+    conv = {}
+    for p, ni, fcf in zip(tr.get("periods") or [], tr.get("net_income") or [],
+                          tr.get("fcf") or []):
+        try:
+            if ni and ni > 0 and fcf is not None:
+                conv[int(str(p)[:4])] = fcf / ni
+        except (TypeError, ValueError):
+            pass
+    rows = []
+    for y in ys:
+        i = idx[y]
+        eps = vdata["eps"][i]
+        pe = vdata["pe_by_year"][i]
+        hi, lo = vdata["high"][i], vdata["low"][i]
+        ok = isinstance(eps, (int, float)) and eps > 0
+        rows.append({
+            "year": y, "eps": eps,
+            "pe_avg": pe,
+            "pe_high": (hi / eps) if (ok and hi) else None,
+            "pe_low": (lo / eps) if (ok and lo) else None,
+            "fcf_yield": ((conv[y] / pe) if (y in conv and pe) else None),
+        })
+    pes = [r["pe_avg"] for r in rows if isinstance(r["pe_avg"], (int, float))]
+    if len(pes) < 3:
+        return None
+    cur = ((fundamentals or {}).get("valuation") or {}).get("pe")
+    s = sorted(pes)
+    med = s[len(s) // 2] if len(s) % 2 else (s[len(s) // 2 - 1] + s[len(s) // 2]) / 2
+    return {
+        "rows": rows, "median_pe": med, "min_pe": s[0], "max_pe": s[-1],
+        "current_pe": cur,
+        "current_vs_median": (cur / med - 1) if (cur and med) else None,
+        # Share of past years with a LOWER average P/E than today's.
+        "percentile": (sum(1 for x in pes if x < cur) / len(pes)) if cur else None,
+    }

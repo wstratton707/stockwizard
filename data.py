@@ -1361,3 +1361,191 @@ def fetch_etf_details(ticker, fmp_key=""):
                 pass
 
     return {"meta": meta, "holdings": holdings}
+
+
+# ── Revenue by segment, product and geography (latest 10-K) ───────────────────
+# companyfacts carries only undimensioned facts, so every breakdown a 10-K
+# reports - iPhone against Services, the Americas against Greater China - is
+# absent from it. The breakdowns live in the filing's XBRL instance, keyed by
+# dimension. This reads the latest 10-K's instance and label file, keeps revenue
+# facts on a single breakdown axis, drops subtotal members, and accepts an axis
+# only when its members add back to reported revenue: a breakdown that doesn't
+# reconcile is left out rather than shown wrong.
+_SEG_AXES = {
+    "ProductOrServiceAxis":          "Products & services",
+    "StatementBusinessSegmentsAxis": "Reportable segments",
+    "StatementGeographicalAxis":     "Geography",
+}
+# ASU 2023-07 filings tag segment facts with this second dimension as well.
+_SEG_OK_EXTRA = {("ConsolidationItemsAxis", "OperatingSegmentsMember")}
+_NS = {"xbrli": "http://www.xbrl.org/2003/instance",
+       "xbrldi": "http://xbrl.org/2006/xbrldi",
+       "link": "http://www.xbrl.org/2003/linkbase",
+       "xlink": "http://www.w3.org/1999/xlink"}
+
+
+def _local(qname):
+    return qname.split(":")[-1].split("}")[-1]
+
+
+def _humanize_member(qname):
+    """us-gaap:ServiceMember -> 'Service' when the filing gives no label."""
+    import re as _re
+    loc = _local(qname)
+    loc = loc[:-6] if loc.endswith("Member") else loc
+    words = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", loc).strip().split()
+    small = {"And": "and", "Of": "of", "The": "the", "For": "for", "In": "in"}
+    words = [small.get(w, w) if i else w for i, w in enumerate(words)]
+    out = " ".join("US" if w in ("Us", "U S") else w for w in words)
+    return {"Non US": "Outside the US"}.get(out, out)
+
+
+def _tidy_label(text):
+    """A label filed in capitals ('UNITED STATES') reads as shouting in a table."""
+    return text.title() if (text.isupper() and len(text) > 3) else text
+
+
+def _seg_labels(lab_bytes):
+    """{'aapl_IPhoneMember': 'iPhone'} from a label linkbase, terse label first."""
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(lab_bytes)
+    X = "{%s}" % _NS["xlink"]
+    out, pri = {}, {}
+    for link in root.iter("{%s}labelLink" % _NS["link"]):
+        loc2id = {l.get(X + "label"): l.get(X + "href", "").split("#")[-1]
+                  for l in link.iter("{%s}loc" % _NS["link"])}
+        lab2text = {}
+        for lab in link.iter("{%s}label" % _NS["link"]):
+            role = lab.get(X + "role", "").rsplit("/", 1)[-1]
+            lab2text.setdefault(lab.get(X + "label"), []).append((role, (lab.text or "").strip()))
+        for arc in link.iter("{%s}labelArc" % _NS["link"]):
+            cid = loc2id.get(arc.get(X + "from"))
+            for role, text in lab2text.get(arc.get(X + "to"), []):
+                rank = {"terseLabel": 0, "label": 1}.get(role, 9)
+                if cid and text and rank < pri.get(cid, 99):
+                    out[cid], pri[cid] = text, rank
+    return out
+
+
+def _drop_subtotals(members, total):
+    """Members that are the sum of other members, or the total itself, go."""
+    from itertools import combinations
+    names = [m for m in members if members[m] > 0]
+    out = dict(members)
+    for m in names:
+        v = members[m]
+        if total and abs(v - total) <= 0.005 * total:
+            out.pop(m, None)
+            continue
+        others = [o for o in names if o != m and members[o] < v]
+        found = False
+        for k in range(2, min(len(others), 8) + 1):
+            for combo in combinations(others, k):
+                if abs(sum(members[o] for o in combo) - v) <= 0.002 * v:
+                    found = True
+                    break
+            if found:
+                break
+        if found:
+            out.pop(m, None)
+    return out
+
+
+def fetch_sec_segments(ticker, log=print):
+    """Revenue breakdowns from the latest 10-K, or {} when none reconciles.
+
+    {"fy_end", "filed", "url", "axes": {title: [{"name", "value", "prior",
+    "share", "growth"}, ...]}} - each axis's members sum to reported revenue
+    within 2%."""
+    import xml.etree.ElementTree as ET
+    try:
+        tenks = [f for f in fetch_sec_filings(ticker, log=log) if f["form"] == "10-K"]
+    except Exception:
+        tenks = []
+    if not tenks:
+        return {}
+    f = tenks[0]
+    base, doc = f["url"].rsplit("/", 1)
+    stem = doc.rsplit(".", 1)[0]
+    try:
+        inst = requests.get(f"{base}/{stem}_htm.xml", headers=SEC_HEADERS, timeout=30)
+        if inst.status_code != 200:
+            return {}
+        lab = requests.get(f"{base}/{stem}_lab.xml", headers=SEC_HEADERS, timeout=30)
+        labels = _seg_labels(lab.content) if lab.status_code == 200 else {}
+        root = ET.fromstring(inst.content)
+    except Exception as e:
+        log(f"   segments: {type(e).__name__} for {ticker}")
+        return {}
+
+    # contexts: id -> (start, end, {axis_local: member_qname})
+    ctx = {}
+    for c in root.iter("{%s}context" % _NS["xbrli"]):
+        p = c.find("xbrli:period", _NS)
+        s, e = p.find("xbrli:startDate", _NS), p.find("xbrli:endDate", _NS)
+        if s is None or e is None:
+            continue
+        dims = {_local(m.get("dimension")): (m.text or "").strip()
+                for m in c.iter("{%s}explicitMember" % _NS["xbrldi"])}
+        ctx[c.get("id")] = (s.text, e.text, dims)
+
+    rev_tags = _SEC_TAGS["revenues"]
+    # tag -> {(start, end, axis or None, member or None): value}
+    by_tag = {}
+    for el in root:
+        tag = el.tag.split("}")[-1]
+        if tag not in rev_tags or el.get("contextRef") not in ctx:
+            continue
+        try:
+            val = float(el.text)
+        except (TypeError, ValueError):
+            continue
+        s, e, dims = ctx[el.get("contextRef")]
+        axis_dims = {a: m for a, m in dims.items() if a in _SEG_AXES}
+        extra = {(a, _local(m)) for a, m in dims.items() if a not in _SEG_AXES}
+        if len(axis_dims) > 1 or not extra <= _SEG_OK_EXTRA:
+            continue
+        key = ((s, e) + next(iter(axis_dims.items()))) if axis_dims else (s, e, None, None)
+        by_tag.setdefault(tag, {})[key] = val
+
+    fy_end = f.get("period")
+    axes = {}
+    for tag in rev_tags:                         # priority order, first that works
+        facts = by_tag.get(tag)
+        if not facts:
+            continue
+        def _annual(k):
+            try:
+                return 350 <= (pd.Timestamp(k[1]) - pd.Timestamp(k[0])).days <= 380
+            except Exception:
+                return False
+        totals = {k[1]: v for k, v in facts.items() if k[2] is None and _annual(k)}
+        if fy_end not in totals:
+            continue
+        prior_end = max((d for d in totals if d < fy_end), default=None)
+        for axis, title in _SEG_AXES.items():
+            if title in axes:
+                continue
+            cur = {k[3]: v for k, v in facts.items() if k[2] == axis and k[1] == fy_end and _annual(k)}
+            if len(cur) < 2:
+                continue
+            cur = _drop_subtotals(cur, totals[fy_end])
+            if len(cur) < 2 or abs(sum(cur.values()) - totals[fy_end]) > 0.02 * totals[fy_end]:
+                continue
+            prv = {k[3]: v for k, v in facts.items()
+                   if k[2] == axis and k[1] == prior_end and _annual(k)} if prior_end else {}
+            rows = []
+            for m, v in sorted(cur.items(), key=lambda kv: -kv[1]):
+                pv = prv.get(m)
+                rows.append({
+                    "name": _tidy_label(labels.get(m.replace(":", "_")) or _humanize_member(m)),
+                    "value": v, "prior": pv,
+                    "share": v / totals[fy_end],
+                    "growth": (v / pv - 1) if (pv and pv > 0) else None,
+                })
+            axes[title] = rows
+        if axes:
+            break
+    if not axes:
+        return {}
+    return {"fy_end": fy_end, "filed": f.get("filed"), "url": f.get("url"), "axes": axes}

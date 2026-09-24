@@ -109,6 +109,16 @@ except Exception:
 # hatch for unhashable args). These take plain strings, so they must NOT be
 # underscore-prefixed — doing so leaves an empty cache key, and every ticker gets
 # served the first ticker's result. Do not rename these back.
+@st.cache_data(ttl=86400, show_spinner=False)
+def _cached_segments(ticker):
+    """Revenue breakdowns from the latest 10-K; they change once a year."""
+    try:
+        from data import fetch_sec_segments
+        return fetch_sec_segments(ticker, log=lambda *a, **k: None)
+    except Exception:
+        return {}
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _cached_valuation(ticker):
     """~15yr price-vs-earnings valuation series (EDGAR + yfinance). Cached 1h; the
@@ -2096,7 +2106,18 @@ elif _page == "analysis":
                             _me = peer_metrics(ticker_input, _fund())
                             if _me:
                                 _rows.append(_me)
-                            _, _pxs = _load_peers()
+                            _pdf, _pxs = _load_peers()
+                            # Vendor market caps from the peer table already in
+                            # hand - a second round of Polygon calls cost 5s and
+                            # runs into the free tier's five-a-minute limit.
+                            _vmc = {}
+                            try:
+                                for _rr in (_pdf.to_dict("records") if _pdf is not None else []):
+                                    _m = _rr.get("Market Cap ($B)")
+                                    if isinstance(_m, (int, float)):
+                                        _vmc[_rr.get("Ticker")] = float(_m) * 1e9
+                            except Exception:
+                                pass
                             for _pt in _pl[:4]:
                                 try:
                                     _pfin = cached_fetch_sec_financials(_pt)
@@ -2104,8 +2125,7 @@ elif _page == "analysis":
                                         continue
                                     _ppx = (float(_pxs[_pt]["Close"].iloc[-1])
                                             if _pt in _pxs and len(_pxs[_pt]) else None)
-                                    _pmc = (cached_fetch_company_details(_pt, POLYGON_API_KEY)
-                                            or {}).get("Market Cap")
+                                    _pmc = _vmc.get(_pt)
                                     _r = peer_metrics(_pt, compute_fundamentals(
                                         _pfin, market_cap=_pmc, price=_ppx))
                                     if _r:
@@ -2448,6 +2468,37 @@ elif _page == "analysis":
                             # on screen. Export is an explicit action and a few
                             # seconds here is the right trade; a thinner file
                             # would not be.
+                            if _kind == "excel" and not is_crypto:
+                                # Peers, news, the sector ETF, segments, the
+                                # valuation history and each peer's filings are
+                                # independent fetches that ran one after another.
+                                # Three at a time into the same caches the build
+                                # then reads; capped at three because each
+                                # filings parse peaks ~40 MB.
+                                try:
+                                    import threading as _thr
+                                    from concurrent.futures import ThreadPoolExecutor as _TPE
+                                    from streamlit.runtime.scriptrunner import (
+                                        add_script_run_ctx as _add_ctx,
+                                        get_script_run_ctx as _get_ctx)
+                                    _ctx = _get_ctx()
+                                    _pp = (_peer_tickers() or [])[:4]
+                                    # The slow network-bound ones first; the
+                                    # filings parses queue behind them.
+                                    _jobs = [_load_peers, _load_news, _load_sector,
+                                             lambda: _cached_segments(ticker_input),
+                                             lambda: _cached_valuation(ticker_input)]
+                                    _jobs += [(lambda _q: (lambda: cached_fetch_sec_financials(_q)))(_p)
+                                              for _p in _pp]
+                                    with _TPE(max_workers=3, initializer=lambda: _add_ctx(
+                                            _thr.current_thread(), _ctx)) as _ex:
+                                        for _fut in [_ex.submit(_fn) for _fn in _jobs]:
+                                            try:
+                                                _fut.result(timeout=60)
+                                            except Exception:
+                                                pass
+                                except Exception:
+                                    pass
                             peer_df, peer_price_dfs = _load_peers()
                             sector_df = _load_sector()
                             news_list = _load_news()
@@ -2476,6 +2527,8 @@ elif _page == "analysis":
                                         bar_size=bar_size, fundamentals=_fund(),
                                         analyst_data=_analyst_report, dcf=_dcf(),
                                         peer_fund=_peer_funds(),
+                                        segments=_cached_segments(ticker_input),
+                                        valuation_data=_cached_valuation(ticker_input),
                                         peer_group=(peer_group_for(ticker_input)
                                                     or ("same sector, nearest in size",))[0]
                                         if _peers_are_auto() else "your peers",
@@ -2503,7 +2556,13 @@ elif _page == "analysis":
                                         analyst_data=_analyst_report, dcf=_dcf(),
                                         sector_df=sector_df, peer_df=peer_df,
                                     )
-                            except Exception:
+                            except Exception as _rep_err:
+                                # Logged: the page shows only that no file was
+                                # made, and without this line neither did Render.
+                                import traceback as _tb
+                                print(f"[report] {_kind} build failed for {ticker_input}: "
+                                      f"{type(_rep_err).__name__}: {_rep_err} | "
+                                      f"{_tb.format_exc(limit=4)}", flush=True)
                                 st.session_state[_buf_key] = None
                             st.session_state[_id_key] = _report_id
                         # Count the build, not the download — downloading the
