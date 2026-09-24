@@ -204,7 +204,8 @@ def _price_chart_png(df, ticker):
 def build_stock_docx(ticker, df, period_label, company_details=None,
                      mc_summary=None, news_list=None, summary_text="",
                      fundamentals=None, analyst_data=None, dcf=None,
-                     sector_df=None, peer_df=None):
+                     sector_df=None, peer_df=None, segments=None, peer_fund=None,
+                     peer_group=None, valuation_data=None):
     """Return a BytesIO .docx equity brief for one stock."""
     cd = company_details or {}
     f = fundamentals or {}
@@ -409,7 +410,43 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
             _para(doc, _msg, size=10.5, after=4)
 
     # ── 4. Competitive set ────────────────────────────────────────────────────
-    if peer_df is not None and not peer_df.empty and "Ticker" in peer_df.columns:
+    if peer_fund and len(peer_fund) > 1:
+        from analysis import peer_median
+        _heading(doc, _sec("Competitive Set"))
+
+        def _x(v):
+            return f"{v:.1f}×" if isinstance(v, (int, float)) else "—"
+
+        def _p(v):
+            return f"{v:.1f}%" if isinstance(v, (int, float)) else "—"
+        _med = peer_median(peer_fund, skip=ticker)
+        _table(doc, ["Ticker", "P/E", "EV/EBITDA", "Revenue growth", "Operating margin",
+                     "FCF yield"],
+               [[r["ticker"], _x(r.get("pe")), _x(r.get("ev_ebitda")), _p(r.get("rev_growth")),
+                 _p(r.get("op_margin")), _p(r.get("fcf_yield"))] for r in peer_fund]
+               + [["Peer median", _x(_med.get("pe")), _x(_med.get("ev_ebitda")),
+                   _p(_med.get("rev_growth")), _p(_med.get("op_margin")),
+                   _p(_med.get("fcf_yield"))]])
+        _me = next((r for r in peer_fund if r.get("ticker") == ticker), {})
+        _bits = []
+        if isinstance(_me.get("pe"), (int, float)) and isinstance(_med.get("pe"), (int, float)):
+            _rel = _me["pe"] / _med["pe"] - 1
+            _bits.append(f"{ticker} trades at {_me['pe']:.1f}× earnings, "
+                         f"{abs(_rel) * 100:.0f}% {'above' if _rel > 0 else 'below'} the peer "
+                         f"median of {_med['pe']:.1f}×")
+        if isinstance(_me.get("rev_growth"), (int, float)) and isinstance(_med.get("rev_growth"), (int, float)):
+            _bits.append(f"while growing revenue {_me['rev_growth']:.0f}% against "
+                         f"{_med['rev_growth']:.0f}% for the group")
+        if _bits:
+            _para(doc, ", ".join(_bits) + ".")
+        _para(doc,
+              (f"Peers are the {peer_group} group, " if peer_group and peer_group != "your peers"
+               else "Peers are ")
+              + "each on its own latest filings and market cap. The set is a starting "
+                "point for comparison, not a judgement about who competes most directly - "
+                "substitute your own if you disagree with it.",
+              size=9.5, color=MUTED, after=4)
+    elif peer_df is not None and not peer_df.empty and "Ticker" in peer_df.columns:
         _heading(doc, _sec("Competitive Set"))
         _prows = []
         for _, _r in peer_df.iterrows():
@@ -434,6 +471,7 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
     # ── 5. Fundamentals ───────────────────────────────────────────────────────
     if f.get("ok"):
         _heading(doc, _sec("Fundamentals"))
+        _para(doc, _basis_label(f), size=9, color=MUTED, after=3)
         m = f.get("margins", {})
         ret = f.get("returns", {})
         val = f.get("valuation", {})
@@ -471,8 +509,57 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
                       "health.")
         if val.get("pe") is not None:
             fb.append(f"Shares trade at roughly {val['pe']:.0f}× trailing earnings.")
+        if gr.get("eps_yoy_ex_tax_one_offs") is not None and gr.get("eps_yoy") is not None:
+            _o = (gr.get("tax_one_offs") or [{}])[0]
+            _way = ("flattered" if gr["eps_yoy_ex_tax_one_offs"] < gr["eps_yoy"] else "held back")
+            fb.append(f"Reported EPS growth of {gr['eps_yoy']:+.0f}% is {_way} "
+                      f"by a one-off tax item ({_o.get('period', 'one period')} was taxed at "
+                      f"{_o.get('tax_rate', 0) * 100:.0f}% against a usual "
+                      f"{_o.get('typical_rate', 0) * 100:.0f}%); excluding it, EPS grew "
+                      f"{gr['eps_yoy_ex_tax_one_offs']:+.0f}%.")
         if fb:
             _para(doc, " ".join(fb))
+
+    # ── Revenue mix ───────────────────────────────────────────────────────────
+    _axes = (segments or {}).get("axes") or {}
+    if _axes:
+        _heading(doc, _sec("Where the Revenue Comes From"))
+        _para(doc, f"Fiscal year ending {segments.get('fy_end')}, from the 10-K filed "
+                   f"{segments.get('filed')}.", size=9, color=MUTED, after=3)
+        for _title, _rows in list(_axes.items())[:2]:
+            _para(doc, _title, bold=True, size=10, after=2)
+            _table(doc, ["Line", "Revenue", "Share", "Growth"],
+                   [[r["name"], _money(r["value"]), f"{r['share'] * 100:.0f}%",
+                     _pct(r["growth"] * 100 if r.get("growth") is not None else None, 1, sign=True)]
+                    for r in _rows[:8]])
+        _first = list(_axes.values())[0]
+        _big = _first[0]
+        _fast = max((r for r in _first if r.get("growth") is not None),
+                    key=lambda r: r["growth"], default=None)
+        _s = f"{_big['name']} is the largest line at {_big['share'] * 100:.0f}% of revenue"
+        if _fast and _fast is not _big:
+            _s += f"; {_fast['name']} grew fastest, {_fast['growth'] * 100:+.0f}% on the year"
+        _para(doc, _s + ".")
+
+    # ── Capital returns ───────────────────────────────────────────────────────
+    _tr = f.get("trend") or {}
+    if f.get("ok") and (any(_tr.get("buybacks") or []) or any(_tr.get("dividends") or [])):
+        _heading(doc, _sec("Capital Returns"))
+        _per = _tr.get("periods") or []
+        _crow = []
+        for i in range(max(0, len(_per) - 5), len(_per)):
+            _fc, _bb = _tr["fcf"][i], (_tr.get("buybacks") or [None] * len(_per))[i]
+            _dv, _sb = (_tr.get("dividends") or [None] * len(_per))[i], (_tr.get("sbc") or [None] * len(_per))[i]
+            _ret = ((_bb or 0) + (_dv or 0)) if (_bb is not None or _dv is not None) else None
+            _crow.append([_per[i], _money(_fc), _money(_bb), _money(_dv), _money(_sb),
+                          f"{_ret / _fc * 100:.0f}%" if (_ret is not None and _fc and _fc > 0) else None])
+        _table(doc, ["Fiscal year", "Free cash flow", "Buybacks", "Dividends",
+                     "Stock-based pay", "Returned / FCF"], _crow)
+        _cr = f.get("capital_return") or {}
+        if _cr.get("shareholder_yield") is not None:
+            _para(doc, f"Over the latest twelve months {ticker} returned "
+                       f"{_cr['shareholder_yield']:.1f}% of its market value through dividends "
+                       f"and buybacks (dividend yield {_pct(_cr.get('dividend_yield'), 2)}).")
 
     # ── 4. Analyst outlook & fair value ───────────────────────────────────────
     _heading(doc, _sec("Valuation & Fair Value"))
@@ -512,12 +599,32 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
               f"{dcf.get('terminal_growth', 0)*100:.1f}% long-run growth). "
               f"A DCF is highly sensitive to its assumptions and is one input, not a "
               f"price target.")
+        if dcf.get("fair_value_after_sbc") is not None:
+            _para(doc,
+                  f"Treating stock-based pay (${dcf['sbc_base'] / 1e9:,.1f}B a year) as the "
+                  f"cost it is to shareholders lowers that to "
+                  f"${dcf['fair_value_after_sbc']:,.2f}.", size=10)
+
+    try:
+        from analysis import valuation_history as _vh
+        _hist = _vh(valuation_data, f)
+    except Exception:
+        _hist = None
+    if _hist and _hist.get("current_pe") and _hist.get("median_pe"):
+        _pc = _hist.get("percentile")
+        _where = ("higher than in any of those years" if _pc == 1 else
+                  "lower than in any of those years" if _pc == 0 else
+                  f"higher than in {_pc * 100:.0f}% of them")
+        _para(doc,
+              f"Against its own history: {ticker} trades at {_hist['current_pe']:.1f}× "
+              f"trailing earnings, against a median of {_hist['median_pe']:.1f}× over the last "
+              f"{len(_hist['rows'])} fiscal years - {_where}.", size=10)
 
     # ── 5. Forward outlook (Monte Carlo) ──────────────────────────────────────
     if mc_summary:
         _heading(doc, _sec("Forward Outlook"))
         _para(doc,
-              f"A Monte Carlo simulation of thousands of price paths projects a median "
+              f"A Monte Carlo simulation of 1,000 price paths projects a median "
               f"outcome of {mc_summary.get('Median (P50)', 'N/A')}, with a bearish "
               f"(5th-percentile) case of {mc_summary.get('Bear Case (P5)', 'N/A')} and a "
               f"bullish (75th-percentile) case of {mc_summary.get('Bull Case (P75)', 'N/A')}. "

@@ -35,10 +35,6 @@ THEME_RULES = [
     ("Macro",             ["fed ", "inflation", "interest rate", "tariff", "recession", "jobs report"]),
 ]
 
-_POS = ("surge", "jump", "beat", "upgrade", "record", "growth", "gain", "soar",
-        "rally", "win", "strong", "raise", "boost", "top", "outperform", "high", "approve")
-_NEG = ("plunge", "drop", "miss", "downgrade", "lawsuit", "fall", "slump", "warn",
-        "cut", "loss", "weak", "decline", "probe", "recall", "sink", "slash", "concern", "fear")
 
 # ── Source reliability tiers ─────────────────────────────────────────────────
 # Our upstreams are lopsided: Polygon's feed is ~95% Motley Fool and Finnhub's is
@@ -148,15 +144,53 @@ def tag_theme(title, summary=""):
     return "General"
 
 
+# Whole-word stems, not substrings: "high" inside "All-Time High" scored a story
+# about a stock slipping after its record as Positive, and "top" matched
+# "laptop". The headline decides; the summary only breaks a tie, because a
+# summary is often the generic blurb and outvotes the headline on word count.
+_POS_RX = re.compile(
+    r"\b(surg|jump|beat|upgrad|soar|rall(y|ies|ied)|outperform|bullish|climb|"
+    r"record high|all-time high|raise[sd]? (guidance|forecast|outlook|dividend)|"
+    r"boost|approv|wins?\b|strong|gain)", re.I)
+_NEG_RX = re.compile(
+    r"\b(plung|drop|miss(es|ed)?\b|downgrad|lawsuit|falls?\b|fell\b|slump|warn|"
+    r"cuts?\b|loss(es)?\b|weak|declin|probe|recall|sink|sank|slash|slip|slid|"
+    r"tumbl|plummet|crash|bearish|sell-?off|red flag|underperform|halt|concern|fear)", re.I)
+
+
+def _score(text):
+    return len(_POS_RX.findall(text or "")) - len(_NEG_RX.findall(text or ""))
+
+
 def _keyword_sentiment(title, summary=""):
-    hay = f"{(title or '').lower()} {(summary or '').lower()}"
-    p = sum(hay.count(w) for w in _POS)
-    n = sum(hay.count(w) for w in _NEG)
-    if p > n:
-        return "Positive"
-    if n > p:
-        return "Negative"
-    return "Neutral"
+    s = _score(title)
+    if s == 0:
+        s = _score(summary)
+    return "Positive" if s > 0 else ("Negative" if s < 0 else "Neutral")
+
+
+# Quote and option-chain pages are indexed as news by aggregators: "AAPL 260925
+# 330.00P (AAPL260925P330000) Stock Options Chain | Quotes & News" sat in a
+# report's headlines. Not coverage of anything.
+_QUOTE_PAGE_RX = re.compile(
+    r"(\b[A-Z]{1,6}\d{6}[CP]\d{8}\b|options? chain|quotes? & news|"
+    r"stock price,? news|stock quote|price and chart)", re.I)
+
+
+def is_quote_page(title):
+    return bool(_QUOTE_PAGE_RX.search(title or ""))
+
+
+def _names_other_ticker_only(title, ticker, name_tokens):
+    """True when a headline is about some OTHER listed thing - "Should iShares
+    Russell Top 200 Growth ETF (IWY) Be on Your Investing Radar?" arrived in
+    AAPL's feed because Apple is a holding - and never names this company."""
+    t = title or ""
+    tagged = re.findall(r"\(([A-Z]{1,5}(?:\.[A-Z])?)\)", t)
+    if not tagged or ticker.upper() in tagged:
+        return False
+    low = t.lower()
+    return not (ticker.lower() in low.split() or any(tok in low for tok in name_tokens))
 
 
 # ── Source fetchers (each returns a list of normalised dicts, [] on failure) ──
@@ -418,8 +452,16 @@ def aggregate_news(ticker, api_key, company_name=None, limit=24, days=21):
     # Language and solicitation are a hard gate applied before relevance, not part
     # of it — the relevance fallback below deliberately widens the net, and it must
     # not be able to pull a Hebrew wire release or a class-action advert back in.
+    def _wire_not_about_us(a):
+        # A press release that doesn't name the company in its headline is some
+        # other issuer's announcement ("... App Launches on iPhone").
+        return source_tier(a["source"]) == 4 and not names_in_title(a)
+
     deduped = [a for a in _dedupe(arts)
-               if is_english(a["title"]) and not is_solicitation(a["title"], a["summary"])]
+               if is_english(a["title"]) and not is_solicitation(a["title"], a["summary"])
+               and not is_quote_page(a["title"])
+               and not _names_other_ticker_only(a["title"], ticker, name_tokens)
+               and not (a["provider"] != "sec" and _wire_not_about_us(a))]
     arts = [a for a in deduped if relevant(a)]
     # Quiet tickers (and any ticker whose company_name we weren't given) can filter
     # down to nothing; show the wider feed rather than an empty section.

@@ -594,10 +594,13 @@ def _build_valuation_slide(prs, ticker, dcf, page_num, total):
                  for n in ("bear", "base", "bull")]
         _kv_block(s, _rows, 0.32, 4.75, 6.2, col_w=2.6, row_h=0.5)
 
-    _text_box(s, f"Two-stage unlevered DCF on free cash flow · {dcf['wacc']*100:.1f}% discount "
+    _sbc_txt = (f"After deducting stock-based pay (${dcf['sbc_base']/1e9:,.1f}B a year) the "
+                f"fair value is ${dcf['fair_value_after_sbc']:,.2f}. "
+                if dcf.get("fair_value_after_sbc") is not None else "")
+    _text_box(s, _sbc_txt + f"Two-stage unlevered DCF on free cash flow · {dcf['wacc']*100:.1f}% discount "
                  f"rate · {dcf['terminal_growth']*100:.1f}% terminal growth · base FCF "
                  f"normalised over recent years · full editable model, assumptions and "
-                 f"sensitivity grid on the Valuation sheet of the Excel workbook. "
+                 f"sensitivity grids on the Valuation sheet of the Excel workbook. "
                  f"A model, not a price target.",
               0.35, 6.80, 12.6, 0.36, font_size=8.5, italic=True, color=C_GREY_TEXT)
     return True
@@ -642,7 +645,10 @@ def _build_fundamentals_slide(prs, ticker, fundamentals, page_num, total):
     _fs, _z, _zone = q.get("f_score"), q.get("z_score"), q.get("z_zone")
     right = [
         (f"Revenue YoY ({_yoy_label(f)})", pc(g["revenue_yoy"], "%"), (g["revenue_yoy"] or 0) >= 0),
-        (f"EPS YoY ({_yoy_label(f)})", pc(g["eps_yoy"], "%"), (g["eps_yoy"] or 0) >= 0),
+        (f"EPS YoY ({_yoy_label(f)})",
+         pc(g["eps_yoy"], "%") + (f" ({g['eps_yoy_ex_tax_one_offs']:+.1f}% ex tax one-offs)"
+                                  if g.get("eps_yoy_ex_tax_one_offs") is not None else ""),
+         (g["eps_yoy"] or 0) >= 0),
         ("Revenue CAGR", pc(g["revenue_cagr"], "%")),
         # A CAGR spanning a sign change has no value; that is arithmetic, not a
         # missing feed. TSLA lost money ten years ago and earns money now.
@@ -671,10 +677,199 @@ def _build_fundamentals_slide(prs, ticker, fundamentals, page_num, total):
     return True
 
 
+
+# ── Business mix, peers & history, capital returns ────────────────────────────
+def _segment_chart(rows, title, w=6.0, h=4.6):
+    """Horizontal bars of revenue by line, labelled with value, share, growth."""
+    rows = list(rows)[:7]
+    names = [r["name"] for r in rows][::-1]
+    vals = [r["value"] / 1e9 for r in rows][::-1]
+    fig, ax = plt.subplots(figsize=(w, h))
+    bars = ax.barh(names, vals, color=MPL_COLORS["blue"], height=0.6)
+    top = max(vals) if vals else 1
+    for b, r in zip(bars, rows[::-1]):
+        g = r.get("growth")
+        lab = f"${r['value'] / 1e9:,.1f}B  ·  {r['share'] * 100:.0f}%" + (
+            f"  ·  {g * 100:+.1f}%" if g is not None else "")
+        ax.text(b.get_width() + top * 0.02, b.get_y() + b.get_height() / 2, lab,
+                va="center", fontsize=8.5, color="#1E293B")
+    ax.set_xlim(0, top * 1.75)
+    ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:,.0f}B"))
+    _chart_style(ax, title, xlabel="", ylabel="")
+    ax.tick_params(axis="x", rotation=0)
+    ax.tick_params(axis="y", labelsize=9)
+    fig.tight_layout()
+    return _fig_to_buf(fig)
+
+
+def _pe_history_chart(vhist, w=6.2, h=4.4):
+    rows = [r for r in vhist["rows"] if isinstance(r.get("pe_avg"), (int, float))]
+    yrs = [str(r["year"]) for r in rows]
+    avg = [r["pe_avg"] for r in rows]
+    lo = [r["pe_low"] if isinstance(r.get("pe_low"), (int, float)) else a for r, a in zip(rows, avg)]
+    hi = [r["pe_high"] if isinstance(r.get("pe_high"), (int, float)) else a for r, a in zip(rows, avg)]
+    fig, ax = plt.subplots(figsize=(w, h))
+    ax.bar(yrs, avg, color=MPL_COLORS["blue"], width=0.6, label="Average P/E", zorder=2)
+    ax.vlines(yrs, lo, hi, color="#1E293B", linewidth=1.2, zorder=3, label="Low - high")
+    med, cur = vhist.get("median_pe"), vhist.get("current_pe")
+    if med:
+        ax.axhline(med, color=MPL_COLORS["grey"], linestyle="--", linewidth=1.2,
+                   label=f"Median {med:.1f}x")
+    if cur:
+        ax.axhline(cur, color=MPL_COLORS["red"], linewidth=1.6, label=f"Today {cur:.1f}x")
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.0f}x"))
+    _chart_style(ax, "P/E by fiscal year", xlabel="", ylabel="")
+    fig.tight_layout()
+    return _fig_to_buf(fig)
+
+
+def _capital_chart(trend, w=8.0, h=4.6):
+    per = [str(p)[:4] for p in trend.get("periods") or []]
+    n = len(per)
+
+    def _b(key):
+        return [((x or 0) / 1e9) for x in (trend.get(key) or [None] * n)]
+    fcf, bb, dv, sbc = _b("fcf"), _b("buybacks"), _b("dividends"), _b("sbc")
+    import numpy as _np
+    x = _np.arange(n)
+    fig, ax = plt.subplots(figsize=(w, h))
+    ax.bar(x - 0.2, fcf, width=0.38, color=MPL_COLORS["navy"], label="Free cash flow")
+    ax.bar(x + 0.2, bb, width=0.38, color=MPL_COLORS["cyan"], label="Buybacks")
+    ax.bar(x + 0.2, dv, width=0.38, bottom=bb, color=MPL_COLORS["green"], label="Dividends")
+    ax.plot(x, sbc, color=MPL_COLORS["red"], marker="o", linewidth=1.6, label="Stock-based pay")
+    ax.set_xticks(x)
+    ax.set_xticklabels(per)
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}B"))
+    _chart_style(ax, "Free cash flow vs cash returned", xlabel="", ylabel="")
+    ax.tick_params(axis="x", rotation=0)
+    fig.tight_layout()
+    return _fig_to_buf(fig)
+
+
+def _peer_table(slide, rows, subject, l, t, w):
+    """Peers as a native table: subject bold, peer median last."""
+    from analysis import peer_median
+    cols = [("ticker", "", None), ("pe", "P/E", "x"), ("ev_ebitda", "EV/EBITDA", "x"),
+            ("rev_growth", "Rev growth", "pct"), ("op_margin", "Op margin", "pct"),
+            ("fcf_yield", "FCF yield", "pct")]
+    data = list(rows) + [peer_median(rows, skip=subject)]
+    tbl = slide.shapes.add_table(len(data) + 1, len(cols), Inches(l), Inches(t),
+                                 Inches(w), Inches(0.36 * (len(data) + 1))).table
+    for j, (_k, lab, _kind) in enumerate(cols):
+        c = tbl.cell(0, j)
+        c.text = lab
+        c.fill.solid()
+        c.fill.fore_color.rgb = C_NAVY
+        p = c.text_frame.paragraphs[0]
+        p.font.size, p.font.bold, p.font.color.rgb = Pt(10), True, C_WHITE
+        p.alignment = PP_ALIGN.RIGHT if j else PP_ALIGN.LEFT
+    for i, r in enumerate(data, 1):
+        is_subj, is_med = r.get("ticker") == subject, i == len(data)
+        for j, (k, _lab, kind) in enumerate(cols):
+            v = r.get(k)
+            txt = (str(v) if kind is None else "—" if not isinstance(v, (int, float))
+                   else f"{v:.1f}x" if kind == "x" else f"{v:.1f}%")
+            if is_med and kind is None:
+                txt = "Median"
+            c = tbl.cell(i, j)
+            c.text = txt
+            c.fill.solid()
+            c.fill.fore_color.rgb = (RGBColor(0xD6, 0xE4, 0xF0) if is_subj
+                                     else C_LIGHT if i % 2 == 0 else C_WHITE)
+            p = c.text_frame.paragraphs[0]
+            p.font.size, p.font.bold = Pt(10), (is_subj or is_med)
+            p.font.italic = is_med
+            p.font.color.rgb = C_DARK_TEXT
+            p.alignment = PP_ALIGN.RIGHT if j else PP_ALIGN.LEFT
+
+
+def _build_business_slides(prs, ticker, fundamentals, segments, peer_fund, peer_group,
+                           vhist, next_page, total):
+    """Up to three slides; returns how many it added."""
+    added = 0
+    axes = (segments or {}).get("axes") or {}
+    if axes:
+        s = _blank_slide(prs)
+        fy = segments.get("fy_end")
+        _slide_header(s, "Where the Revenue Comes From",
+                      f"{ticker}  ·  fiscal year ending {pd.Timestamp(fy):%d %b %Y}  ·  "
+                      f"from the 10-K")
+        _slide_footer(s, next_page(), total)
+        items = list(axes.items())[:2]
+        for k, (title, rows) in enumerate(items):
+            width = 12.2 if len(items) == 1 else 6.1
+            buf = _segment_chart(rows, title, w=width, h=4.9)
+            _add_image(s, buf, 0.5 + k * 6.3, 1.3, width, 4.9)
+        _text_box(s, "Value  ·  share of revenue  ·  growth on the prior year. Each breakdown "
+                     "adds back to reported revenue.", 0.5, 6.4, 12.3, 0.3,
+                  font_size=9, italic=True, color=C_GREY_TEXT)
+        added += 1
+    if (peer_fund and len(peer_fund) > 1) or vhist:
+        s = _blank_slide(prs)
+        _slide_header(s, "Priced Against Peers and Its Own History",
+                      f"{ticker}" + (f"  ·  peers: {peer_group}" if peer_group else ""))
+        _slide_footer(s, next_page(), total)
+        if peer_fund and len(peer_fund) > 1:
+            _text_box(s, "Valuation vs peers", 0.5, 1.3, 6.2, 0.3,
+                      font_size=12, bold=True, color=C_NAVY)
+            _peer_table(s, peer_fund, ticker, 0.5, 1.7, 6.2)
+            from analysis import peer_median as _pmed
+            _me = next((r for r in peer_fund if r.get("ticker") == ticker), {})
+            _md = _pmed(peer_fund, skip=ticker)
+            if isinstance(_me.get("pe"), (int, float)) and isinstance(_md.get("pe"), (int, float)):
+                _rel = _me["pe"] / _md["pe"] - 1
+                _line = (f"{ticker} trades at {_me['pe']:.1f}x earnings, "
+                         f"{abs(_rel) * 100:.0f}% {'above' if _rel > 0 else 'below'} the peer "
+                         f"median of {_md['pe']:.1f}x")
+                if isinstance(_me.get("rev_growth"), (int, float)) and isinstance(_md.get("rev_growth"), (int, float)):
+                    _line += (f", growing revenue {_me['rev_growth']:.0f}% against "
+                              f"{_md['rev_growth']:.0f}% for the group")
+                _text_box(s, _line + ".", 0.5, 1.95 + 0.36 * (len(peer_fund) + 2), 6.2, 0.7,
+                          font_size=11, color=C_DARK_TEXT)
+        if vhist:
+            buf = _pe_history_chart(vhist, w=6.0, h=4.3)
+            _add_image(s, buf, 6.95, 1.3, 6.0, 4.3)
+            cur, med, pct = vhist.get("current_pe"), vhist.get("median_pe"), vhist.get("percentile")
+            if cur and med:
+                where = ("above every year's average" if pct == 1 else
+                         "below every year's average" if pct == 0 else
+                         f"above {pct * 100:.0f}% of the years' averages")
+                _text_box(s, f"Today {cur:.1f}x trailing earnings against a "
+                             f"{len(vhist['rows'])}-year median of {med:.1f}x - {where}.",
+                          6.95, 5.75, 6.0, 0.6, font_size=10, color=C_DARK_TEXT)
+        added += 1
+    tr = (fundamentals or {}).get("trend") or {}
+    if any(tr.get("buybacks") or []) or any(tr.get("dividends") or []):
+        s = _blank_slide(prs)
+        _slide_header(s, "Where the Cash Goes", f"{ticker}  ·  per fiscal year, as filed")
+        _slide_footer(s, next_page(), total)
+        _add_image(s, _capital_chart(tr, w=8.2, h=4.9), 0.5, 1.3, 8.2, 4.9)
+        f = fundamentals or {}
+        fc, cr = f.get("fcf") or {}, f.get("capital_return") or {}
+        sh = [x for x in (tr.get("diluted_shares") or []) if x]
+        pairs = [
+            ("Free cash flow", f"${fc['fcf'] / 1e9:,.1f}B" if fc.get("fcf") is not None else "N/A"),
+            ("Buybacks", f"${cr['buybacks'] / 1e9:,.1f}B" if cr.get("buybacks") is not None else "N/A"),
+            ("Dividends", f"${cr['dividends'] / 1e9:,.1f}B" if cr.get("dividends") is not None else "N/A"),
+            ("Stock-based pay", f"${fc['sbc'] / 1e9:,.1f}B" if fc.get("sbc") is not None else "N/A"),
+            ("Shareholder yield", f"{cr['shareholder_yield']:.1f}%" if cr.get("shareholder_yield") is not None else "N/A"),
+            ("Dividend yield", f"{cr['dividend_yield']:.2f}%" if cr.get("dividend_yield") is not None else "N/A"),
+        ]
+        if len(sh) >= 4 and 0.67 < sh[-1] / sh[-4] < 1.5:
+            pairs.append(("Share count, 3 yrs", f"{(sh[-1] / sh[-4] - 1) * 100:+.1f}%",
+                          sh[-1] < sh[-4]))
+        basis = "Latest 12 months" if (f.get("basis") or {}).get("kind") == "ttm" else "Latest fiscal year"
+        _text_box(s, basis, 9.0, 1.3, 3.9, 0.3, font_size=12, bold=True, color=C_NAVY)
+        _kv_block(s, pairs, 9.0, 1.7, 3.9, col_w=2.1, row_h=0.55)
+        added += 1
+    return added
+
+
 def build_stock_pptx(ticker, df, period_label,
                      company_details=None, mc_sim_df=None, mc_summary=None,
                      news_list=None, summary_text="", fundamentals=None,
-                     dcf=None):
+                     dcf=None, segments=None, peer_fund=None, peer_group=None,
+                     valuation_data=None):
     """Build a professional stock analysis PowerPoint. Returns BytesIO."""
     if not PPTX_AVAILABLE:
         raise RuntimeError("python-pptx is not installed.")
@@ -730,8 +925,17 @@ def build_stock_pptx(ticker, df, period_label,
     # +1 for the "Bottom Line" executive-summary slide added after the cover, and
     # +1 for the valuation slide whenever a DCF was attempted at all (it renders a
     # short explanation rather than nothing when the model couldn't be built).
+    try:
+        from analysis import valuation_history as _vh
+        vhist = _vh(valuation_data, fundamentals)
+    except Exception:
+        vhist = None
+    _tr = (fundamentals or {}).get("trend") or {}
+    _n_business = (bool((segments or {}).get("axes"))
+                   + bool((peer_fund and len(peer_fund) > 1) or vhist)
+                   + bool(any(_tr.get("buybacks") or []) or any(_tr.get("dividends") or [])))
     total_slides = ((11 if (fundamentals and fundamentals.get("ok")) else 10)
-                    + 1 + (1 if dcf is not None else 0))
+                    + 1 + (1 if dcf is not None else 0) + _n_business)
     page = [1]   # cover is page 1 (hardcoded); next slide starts at 2
 
     def _next_page():
@@ -839,6 +1043,10 @@ def build_stock_pptx(ticker, df, period_label,
     # ── Fundamentals & Valuation (only when EDGAR/Polygon data is available) ───
     if fundamentals and fundamentals.get("ok"):
         _build_fundamentals_slide(prs, ticker, fundamentals, _next_page(), total_slides)
+
+    # ── Revenue mix, peers & history, capital returns ──────────────────────────
+    _build_business_slides(prs, ticker, fundamentals, segments, peer_fund, peer_group,
+                           vhist, _next_page, total_slides)
 
     # ── Slide 2: Company Snapshot ─────────────────────────────────────────────
     sl = _blank_slide(prs)

@@ -837,6 +837,10 @@ def _build_dashboard(wb, ticker, df, company_details, mc_summary,
             kv(row_cursor, "Upside / Downside", _vlink("up"))
             ws.cell(row=row_cursor, column=2).number_format = "+0.0%;-0.0%"
             row_cursor += 1
+        if dcf.get("fair_value_after_sbc") is not None:
+            kv(row_cursor, "DCF Fair Value after stock-based pay", _vlink("fv_sbc"))
+            ws.cell(row=row_cursor, column=2).number_format = '"$"#,##0.00'
+            row_cursor += 1
         lc = ws.cell(row=row_cursor, column=1, value="DCF Verdict")
         vc = ws.cell(row=row_cursor, column=2, value=_vlink("verd"))
         lc.font = Font(name="Calibri", size=10)
@@ -1751,6 +1755,11 @@ def _build_fundamentals_sheet(wb, fundamentals):
     section("Growth", [
         (f"Revenue YoY ({yoy_label(f)})", _pctv(g["revenue_yoy"]), "0.0%"),
         (f"EPS YoY ({yoy_label(f)})", _pctv(g["eps_yoy"]), "0.0%"),
+        *([("EPS YoY excluding one-off tax items", _pctv(g["eps_yoy_ex_tax_one_offs"]), "0.0%")]
+          + [(f"  {o['period']}: tax rate {o['tax_rate']*100:.1f}% vs a usual "
+              f"{o['typical_rate']*100:.1f}%, moving earnings {o['earnings_effect']/1e9:+.1f}B",
+              "", None) for o in g.get("tax_one_offs") or []]
+          if g.get("eps_yoy_ex_tax_one_offs") is not None else []),
         ("Revenue CAGR (fiscal years)", _pctv(g["revenue_cagr"]), "0.0%"),
         ("EPS CAGR (fiscal years, split-adjusted)", _pctv(g["eps_cagr"]), "0.0%"),
     ])
@@ -1821,7 +1830,7 @@ _DCF_NO_MODEL_REASONS = {
 
 # Rows on the Valuation sheet other sheets link to. Fixed, so the Dashboard can
 # be written before the Valuation sheet exists and still point at the live cells.
-_VAL_ROWS = {"fv": 9, "px": 10, "up": 11, "verd": 12, "gmkt": 30}
+_VAL_ROWS = {"fv": 9, "px": 10, "up": 11, "verd": 12, "fv_sbc": 13, "gmkt": 30}
 
 
 def _verdict_colours(ws, cell, up_ref):
@@ -1915,13 +1924,14 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
     (R_W, R_TG, R_YRS, R_FCF0, R_G1,
      R_GBEAR, R_GBULL, R_GMKT, R_ND, R_SH, R_P) = range(23, 34)
     assert R_GMKT == _VAL_ROWS["gmkt"]
-    R_WB_SEC = 35
+    R_SBC = 34                           # stock-based pay, for the after-SBC value
+    R_WB_SEC = 36
     _wb = dcf.get("wacc_basis") if isinstance(dcf.get("wacc_basis"), dict) else {}
     _wb_live = bool(_wb) and not _wb.get("fallback") and _wb.get("beta") is not None \
         and _wb.get("market_cap") is not None
     (R_RF, R_BETA, R_BADJ, R_ERP, R_KE, R_SPR, R_KD, R_TAX, R_KDAT,
-     R_E, R_D, R_WE, R_WD, R_WRAW, R_WOUT) = range(36, 51)
-    R_WB_END = R_WOUT if _wb_live else 36
+     R_E, R_D, R_WE, R_WD, R_WRAW, R_WOUT) = range(37, 52)
+    R_WB_END = R_WOUT if _wb_live else 37
     R_PROJ_SEC = R_WB_END + 2
     R_PROJ_HDR = R_PROJ_SEC + 1
     R_P0 = R_PROJ_HDR + 1
@@ -2113,6 +2123,18 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
               if (_mcb == "filing" and _shd)
               else "Derived as market cap ÷ price, so the model ties to the quoted price."))
     kv2(R_P,    "Current price", dcf["price"], fmt=FMT_USD, input_cell=True)
+    _sbc0 = dcf.get("sbc_base")
+    kv2(R_SBC, "Stock-based pay (latest 12 months)",
+        _sbc0 if _sbc0 is not None else 0, fmt=FMT_BN, input_cell=True,
+        note=("Not deducted in the base case (operating cash flow adds it back); "
+              "the after-SBC fair value above deducts it." if _sbc0 is not None
+              else "Not reported by this filer; set it to test the after-SBC value."))
+    # Fair value on FCF after stock pay. Enterprise value is linear in base
+    # FCF for a given growth path, so scaling the live EV is the whole model.
+    kv2(_VAL_ROWS["fv_sbc"], "Fair value / share after stock-based pay",
+        f'=IF(B{R_FCF0}=0,"",(B{R_EV}*(1-B{R_SBC}/B{R_FCF0})-B{R_ND})/B{R_SH})',
+        fmt=FMT_USD,
+        note="Same model with base FCF reduced by stock-based pay - dilution is a real cost")
 
     # ── 4b. WACC build-up — the discount rate as formulas, not a number ───────
     sec(R_WB_SEC, "Discount Rate Build-Up — CAPM cost of equity, blended with debt")
@@ -2152,11 +2174,11 @@ def _build_valuation_sheet(wb, ticker, dcf, fundamentals=None):
                 f"the model uses the default {dcf['wacc'] * 100:.1f}% discount rate."
                 if (_wb or {}).get("fallback") or not _wb
                 else f"The discount rate was set directly at {dcf['wacc'] * 100:.1f}%.")
-        c = ws.cell(row=36, column=1, value=_why + " Edit the WACC input above to test your own.")
+        c = ws.cell(row=37, column=1, value=_why + " Edit the WACC input above to test your own.")
         c.font = Font(name="Calibri", size=10, italic=True)
         c.alignment = Alignment(wrap_text=True, vertical="center")
-        ws.merge_cells("A36:K36")
-        ws.row_dimensions[36].height = 30
+        ws.merge_cells("A37:K37")
+        ws.row_dimensions[37].height = 30
 
     # ── 5. Projection — live formulas, base / bear / bull side by side ────────
     sec(R_PROJ_SEC, "Base-Case Projection  (bear, bull and market run alongside)",

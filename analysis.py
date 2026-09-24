@@ -535,7 +535,7 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
     growth = {"revenue_yoy": yoy("revenues"), "net_income_yoy": yoy("net_income_loss"),
               "eps_yoy": yoy("diluted_earnings_per_share"),
               "revenue_cagr": cagr("revenues"), "eps_cagr": eps_cagr_adjusted(),
-              "yoy_basis": "fy"}
+              "yoy_basis": "fy", "eps_yoy_ex_tax_one_offs": None, "tax_one_offs": []}
     # With quarters newer than the 10-K, year-on-year compares the latest twelve
     # months with the twelve before. Apple's fiscal-year figure was +6.4% while
     # its last three quarters each grew about 16%.
@@ -559,6 +559,54 @@ def compute_fundamentals(financials, market_cap=None, price=None, supplement=Non
             growth.update({"revenue_yoy": _rg, "net_income_yoy": _ng,
                            "eps_yoy": _eg if _eg is not None else growth["eps_yoy"],
                            "yoy_basis": "ttm" if _eg is not None else "ttm_eps_fy"})
+
+    # ── One-off tax items ─────────────────────────────────────────────────────
+    # Apple's EPS growth read +22.7% for FY2025 because FY2024 carried a $10.2B
+    # one-time EU tax charge - growth off a depressed base. A year's effective
+    # tax rate far from the company's usual rate marks a one-off; re-taxing that
+    # year's pre-tax income at the usual rate gives the earnings without it.
+    # Only tax is normalised: it is the one-off that filings let us identify
+    # without judgement. Reported figures are left exactly as filed beside it.
+    def _etr(pre, tax):
+        return (tax / pre) if (isinstance(pre, (int, float)) and pre > 0
+                               and isinstance(tax, (int, float))) else None
+    _rates = [_etr(_fin_val(inc, "pretax_income", i), _fin_val(inc, "income_tax", i))
+              for i in range(min(6, len(inc)))]
+    _usable = sorted(r for r in _rates if r is not None and -0.1 < r < 0.6)
+    if len(_usable) >= 3:
+        _typ = _usable[len(_usable) // 2]
+
+        def _norm(ni, pre, tax, eps, label):
+            """(normalised EPS, one-off record or None) for one period."""
+            r = _etr(pre, tax)
+            if r is None or not ni or eps is None:
+                return eps, None
+            ni_n = pre * (1 - _typ)
+            # Material, not merely different: the unusual rate has to move
+            # earnings by more than 5%. A rate-point cut-off missed Meta's
+            # latest year - a $19B tax quarter partly offset by a $5B benefit
+            # nets to 22% against a usual 18%, yet shifts earnings by $4B.
+            if abs(ni_n - ni) <= 0.05 * abs(ni) or abs(r - _typ) <= 0.02:
+                return eps, None
+            return eps * ni_n / ni, {"period": label, "tax_rate": r, "typical_rate": _typ,
+                                     "earnings_effect": ni_n - ni}
+        if growth["yoy_basis"] == "ttm":
+            _ti = _ttm.get("income") or {}
+            a = _norm(_ti.get("net_income_loss"), _ti.get("pretax_income"), _ti.get("income_tax"),
+                      _ti.get("eps_diluted"), f"12 months to {_ttm.get('flows_end')}")
+            b = _norm(_pr.get("net_income_loss"), _pr.get("pretax_income"), _pr.get("income_tax"),
+                      _pr.get("eps_diluted"), "the prior 12 months")
+        else:
+            def _fy(i):
+                return (_fin_val(inc, "net_income_loss", i), _fin_val(inc, "pretax_income", i),
+                        _fin_val(inc, "income_tax", i), _fin_val(inc, "diluted_earnings_per_share", i),
+                        f"FY ending {str(inc.iloc[i]['Period'])[:10]}" if len(inc) > i else "")
+            a = _norm(*_fy(0)) if len(inc) > 0 else (None, None)
+            b = _norm(*_fy(1)) if len(inc) > 1 else (None, None)
+        _offs = [x for x in (a[1], b[1]) if x]
+        if _offs and a[0] and b[0] and b[0] > 0:
+            growth["eps_yoy_ex_tax_one_offs"] = round((a[0] / b[0] - 1) * 100, 1)
+            growth["tax_one_offs"] = _offs
 
     valuation = {
         "pe": ratio(mcap, ni) if (mcap and ni and ni > 0) else None,
@@ -919,6 +967,15 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
 
     fv_base, detail = _fair_value(g_base)
 
+    # The same model on free cash flow AFTER stock-based pay. Operating cash
+    # flow adds stock pay back as non-cash; a shareholder is diluted by it all
+    # the same (Apple: $13.7B a year, 12% of FCF). Enterprise value is linear in
+    # base FCF for a given growth path, so this is a scaling, not a second model.
+    sbc_base = (fundamentals.get("fcf") or {}).get("sbc")
+    fv_after_sbc = None
+    if isinstance(sbc_base, (int, float)) and 0 < sbc_base < base_fcf and shares:
+        fv_after_sbc = (detail["enterprise_value"] * (1 - sbc_base / base_fcf) - net_debt) / shares
+
     def _scn(g1):
         fv, _ = _fair_value(g1)
         return {"growth": g1, "fair_value": fv,
@@ -1006,6 +1063,9 @@ def dcf_valuation(fundamentals, price, wacc=None, terminal_growth=0.025, years=1
         "caveats": caveats,
         "terminal_growth": terminal_growth, "years": years,
         "base_fcf": base_fcf, "base_fcf_basis": base_basis,
+        "sbc_base": sbc_base if fv_after_sbc is not None else None,
+        "fair_value_after_sbc": fv_after_sbc,
+        "upside_after_sbc": (fv_after_sbc / price - 1) if fv_after_sbc else None,
         "base_growth": g_base, "net_debt": net_debt,
         "shares": shares, "market_implied_growth": implied_growth,
         # Average annual growth along the fade, and where FCF ends up.

@@ -109,6 +109,20 @@ except Exception:
 # hatch for unhashable args). These take plain strings, so they must NOT be
 # underscore-prefixed — doing so leaves an empty cache key, and every ticker gets
 # served the first ticker's result. Do not rename these back.
+def _cached_suggest_peers(ticker, sector, market_cap):
+    """Peers change when the rankings do, not on every rerun - which is where
+    this 0.8s Supabase read was being paid. Size is keyed to two significant
+    figures so a moving price doesn't make every call a cache miss."""
+    mc = float(f"{market_cap:.2g}") if market_cap else 0.0
+    return _suggest_peers_cached(ticker, sector, mc)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _suggest_peers_cached(ticker, sector, market_cap):
+    return tuple(suggest_peers(ticker, sector=sector, market_cap=market_cap,
+                               api_key=POLYGON_API_KEY))
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def _cached_segments(ticker):
     """Revenue breakdowns from the latest 10-K; they change once a year."""
@@ -2041,10 +2055,9 @@ elif _page == "analysis":
                 def _peer_tickers():
                     if not _peers_box["resolved"]:
                         with _phase("suggest_peers (lazy)"):
-                            _pl = suggest_peers(
-                                ticker_input, sector=sector,
-                                market_cap=float(company_details.get("Market Cap") or 0),
-                                api_key=POLYGON_API_KEY)
+                            _pl = list(_cached_suggest_peers(
+                                ticker_input, sector or "",
+                                float(company_details.get("Market Cap") or 0)))
                         _peers_box["list"] = _pl
                         _peers_box["auto"] = bool(_pl)
                         _peers_box["resolved"] = True
@@ -2468,7 +2481,7 @@ elif _page == "analysis":
                             # on screen. Export is an explicit action and a few
                             # seconds here is the right trade; a thinner file
                             # would not be.
-                            if _kind == "excel" and not is_crypto:
+                            if not is_crypto:
                                 # Peers, news, the sector ETF, segments, the
                                 # valuation history and each peer's filings are
                                 # independent fetches that ran one after another.
@@ -2485,14 +2498,34 @@ elif _page == "analysis":
                                     _pp = (_peer_tickers() or [])[:4]
                                     # The slow network-bound ones first; the
                                     # filings parses queue behind them.
-                                    _jobs = [_load_peers, _load_news, _load_sector,
-                                             lambda: _cached_segments(ticker_input),
-                                             lambda: _cached_valuation(ticker_input)]
-                                    _jobs += [(lambda _q: (lambda: cached_fetch_sec_financials(_q)))(_p)
+                                    _jobs = [("peers", _load_peers), ("news", _load_news),
+                                             ("fundamentals", _fund),
+                                             # openpyxl / python-pptx / python-docx +
+                                             # matplotlib, ~2s cold
+                                             ("import builder", lambda: __import__(
+                                                 {"excel": "excel_builder", "pptx": "pptx_builder"}
+                                                 .get(_kind, "docx_builder"))),
+                                             ("sector", _load_sector),
+                                             ("segments", lambda: _cached_segments(ticker_input)),
+                                             ("valuation history",
+                                              lambda: _cached_valuation(ticker_input))]
+                                    _jobs += [(f"filings {_p}",
+                                               (lambda _q: (lambda: cached_fetch_sec_financials(_q)))(_p))
                                               for _p in _pp]
-                                    with _TPE(max_workers=3, initializer=lambda: _add_ctx(
-                                            _thr.current_thread(), _ctx)) as _ex:
-                                        for _fut in [_ex.submit(_fn) for _fn in _jobs]:
+
+                                    def _timed(_name, _fn):
+                                        _t0 = _time.perf_counter()
+                                        try:
+                                            return _fn()
+                                        finally:
+                                            if _QW_PROFILE:
+                                                print(f"[export] {_name:22} "
+                                                      f"{(_time.perf_counter() - _t0) * 1000:7.0f} ms",
+                                                      flush=True)
+                                    with _phase("export prefetch (parallel)"), _TPE(
+                                            max_workers=3, initializer=lambda: _add_ctx(
+                                                _thr.current_thread(), _ctx)) as _ex:
+                                        for _fut in [_ex.submit(_timed, _n, _fn) for _n, _fn in _jobs]:
                                             try:
                                                 _fut.result(timeout=60)
                                             except Exception:
@@ -2515,24 +2548,28 @@ elif _page == "analysis":
                                 _cd_rpt["Sector"] = _ss
                             try:
                                 if _kind == "excel":
-                                    from excel_builder import build_excel
-                                    st.session_state[_buf_key] = build_excel(
-                                        ticker_input, _rdf, _rlabel,
-                                        company_details=_cd_rpt, sector_df=sector_df,
-                                        mc_sim_df=mc_sim_df, mc_summary=mc_summary,
-                                        news_list=news_list, peer_df=peer_df,
-                                        corr_matrix=corr_matrix,
-                                        resistance_levels=resistance, support_levels=support,
-                                        summary_text=_summary_win,
-                                        bar_size=bar_size, fundamentals=_fund(),
-                                        analyst_data=_analyst_report, dcf=_dcf(),
-                                        peer_fund=_peer_funds(),
-                                        segments=_cached_segments(ticker_input),
-                                        valuation_data=_cached_valuation(ticker_input),
-                                        peer_group=(peer_group_for(ticker_input)
-                                                    or ("same sector, nearest in size",))[0]
-                                        if _peers_are_auto() else "your peers",
-                                    )
+                                    with _phase("import excel_builder"):
+                                        from excel_builder import build_excel
+                                    with _phase("peer fundamentals"):
+                                        _pf_rows = _peer_funds()
+                                    with _phase("build_excel"):
+                                        st.session_state[_buf_key] = build_excel(
+                                            ticker_input, _rdf, _rlabel,
+                                            company_details=_cd_rpt, sector_df=sector_df,
+                                            mc_sim_df=mc_sim_df, mc_summary=mc_summary,
+                                            news_list=news_list, peer_df=peer_df,
+                                            corr_matrix=corr_matrix,
+                                            resistance_levels=resistance, support_levels=support,
+                                            summary_text=_summary_win,
+                                            bar_size=bar_size, fundamentals=_fund(),
+                                            analyst_data=_analyst_report, dcf=_dcf(),
+                                            peer_fund=_pf_rows,
+                                            segments=_cached_segments(ticker_input),
+                                            valuation_data=_cached_valuation(ticker_input),
+                                            peer_group=(peer_group_for(ticker_input)
+                                                        or ("same sector, nearest in size",))[0]
+                                            if _peers_are_auto() else "your peers",
+                                            )
                                 elif _kind == "pptx":
                                     # dcf= was missing here while Excel and Word
                                     # both passed it, so the deck's valuation
@@ -2544,6 +2581,12 @@ elif _page == "analysis":
                                         mc_sim_df=mc_sim_df, mc_summary=mc_summary,
                                         news_list=news_list, summary_text=_summary_win,
                                         fundamentals=_fund(), dcf=_dcf(),
+                                        segments=_cached_segments(ticker_input),
+                                        peer_fund=_peer_funds(),
+                                        peer_group=(peer_group_for(ticker_input)
+                                                    or ("same sector, nearest in size",))[0]
+                                        if _peers_are_auto() else "your peers",
+                                        valuation_data=_cached_valuation(ticker_input),
                                     )
                                 else:
                                     from docx_builder import build_stock_docx
@@ -2555,6 +2598,12 @@ elif _page == "analysis":
                                         fundamentals=_fund(),
                                         analyst_data=_analyst_report, dcf=_dcf(),
                                         sector_df=sector_df, peer_df=peer_df,
+                                        segments=_cached_segments(ticker_input),
+                                        peer_fund=_peer_funds(),
+                                        peer_group=(peer_group_for(ticker_input)
+                                                    or ("same sector, nearest in size",))[0]
+                                        if _peers_are_auto() else "your peers",
+                                        valuation_data=_cached_valuation(ticker_input),
                                     )
                             except Exception as _rep_err:
                                 # Logged: the page shows only that no file was
@@ -3695,6 +3744,12 @@ elif _page == "analysis":
                             "Shareholder Yield": "Dividends plus share buybacks over the last twelve months ÷ market cap — all the cash returned to owners.",
                             "YoY": ("Latest twelve months against the twelve before." if _yl == "TTM"
                                     else "Latest fiscal year against the one before."),
+                            "TaxOneOff": "; ".join(
+                                f"{_o['period']} was taxed at {_o['tax_rate'] * 100:.0f}% against a "
+                                f"usual {_o['typical_rate'] * 100:.0f}%, moving earnings "
+                                f"{_o['earnings_effect'] / 1e9:+.1f}B"
+                                for _o in (_g.get("tax_one_offs") or []))
+                                + ". Re-taxed at the usual rate, as filed otherwise.",
                         }
 
 
@@ -3722,6 +3777,9 @@ elif _page == "analysis":
                             ("Growth", [
                                 (f"Revenue Growth ({_yl} YoY)", _mv(_g["revenue_yoy"], "%"), _dir(_g["revenue_yoy"]), _qtips["YoY"]),
                                 (f"EPS Growth ({_yl} YoY)",     _mv(_g["eps_yoy"], "%"),     _dir(_g["eps_yoy"]), _qtips["YoY"]),
+                                *([("EPS Growth ex tax one-offs", _mv(_g["eps_yoy_ex_tax_one_offs"], "%"),
+                                    _dir(_g["eps_yoy_ex_tax_one_offs"]), _qtips["TaxOneOff"])]
+                                  if _g.get("eps_yoy_ex_tax_one_offs") is not None else []),
                             ]),
                             ("Financial Health", [
                                 ("Current Ratio", _mv(_l["current_ratio"]), "", ""),
@@ -4153,6 +4211,10 @@ color:var(--muted);background:var(--surface2)}
                                     ("Equity value",          _wpi_mag(_eqv)),
                                     ("Equity value / share",
                                      _wpi_usd(_eqv / _shares) if (_eqv is not None and _shares) else "—"),
+                                    ("Stock-based pay (not deducted)", _wpi_mag(_dcfr.get("sbc_base"))),
+                                    ("Value / share after stock pay",
+                                     _wpi_usd(_dcfr["fair_value_after_sbc"])
+                                     if _dcfr.get("fair_value_after_sbc") is not None else "—"),
                                 ]),
                             ):
                                 _wpi.append(f'<tr class="grp"><td colspan="4">{_grp}</td></tr>')

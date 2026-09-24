@@ -18,7 +18,7 @@ SECTOR_ETF_MAP = {
 }
 
 
-def _get(endpoint, api_key, params=None, raise_on_error=False):
+def _get(endpoint, api_key, params=None, raise_on_error=False, max_attempts=3):
     if params is None:
         params = {}
     params["apiKey"] = api_key
@@ -29,13 +29,15 @@ def _get(endpoint, api_key, params=None, raise_on_error=False):
     if cached and (time.time() - cached["ts"]) < _API_CACHE_TTL:
         return cached["data"]
 
-    for attempt in range(3):
+    for attempt in range(max_attempts):
         r = requests.get(f"{POLYGON_BASE}{endpoint}", params=params, timeout=30)
         if r.status_code == 200:
             result = r.json()
             _API_CACHE[cache_key] = {"ts": time.time(), "data": result}
             return result
         if r.status_code == 429:
+            if attempt + 1 >= max_attempts:
+                break
             wait = (attempt + 1) * 12   # 12s, 24s, 36s
             time.sleep(wait)
             continue
@@ -455,6 +457,12 @@ _SEC_TAGS = {
     # Capital allocation and the cost free cash flow leaves out: stock pay is a
     # real expense that operating cash flow adds back (Apple FY2025: $12.9B).
     "sbc": ["ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"],
+    # For one-off tax items: a year whose effective rate sits far from the
+    # company's usual one had something non-recurring in it (Apple FY2024:
+    # 24.1% against ~16%, the $10.2B EU State Aid charge).
+    "pretax_income": ["IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+                      "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"],
+    "income_tax": ["IncomeTaxExpenseBenefit"],
     "buybacks": ["PaymentsForRepurchaseOfCommonStock"],
     "dividends_paid": ["PaymentsOfDividends", "PaymentsOfDividendsCommonStock"],
 }
@@ -655,7 +663,8 @@ def key_filings(filings, forms=None):
 # quarter, including Q4 as the full year less nine months - for income and cash
 # flow alike. Dollar amounts need no split adjustment.
 _TTM_INCOME = ("revenues", "cost_of_revenue", "gross_profit", "operating_income_loss",
-               "net_income_loss", "research_and_development", "depreciation_amortization")
+               "net_income_loss", "research_and_development", "depreciation_amortization",
+               "pretax_income", "income_tax")
 _TTM_CASH   = ("net_cash_flow_from_operating_activities", "capex", "sbc", "buybacks",
                "dividends_paid")
 _BAL_FIELDS = ("assets", "current_assets", "liabilities", "current_liabilities", "equity",
@@ -790,7 +799,9 @@ def _sec_ttm(facts, fy_end):
     if prior_ends:
         prior = {"revenues": _sum4(rev_q, prior_ends),
                  "net_income_loss": _sum4(_q("net_income_loss"), prior_ends),
-                 "eps_diluted": _sum4(_eps_q, prior_ends)}
+                 "eps_diluted": _sum4(_eps_q, prior_ends),
+                 "pretax_income": _sum4(_q("pretax_income"), prior_ends),
+                 "income_tax": _sum4(_q("income_tax"), prior_ends)}
     if income.get("gross_profit") is None and income.get("revenues") is not None \
             and income.get("cost_of_revenue") is not None:
         income["gross_profit"] = income["revenues"] - income["cost_of_revenue"]
@@ -892,6 +903,8 @@ def fetch_sec_financials(ticker, years=10, log=print):
             "net_income_loss": col("net_income_loss", fy),
             "research_and_development": col("research_and_development", fy),
             "depreciation_amortization": _da(fy),
+            "pretax_income": col("pretax_income", fy),
+            "income_tax": col("income_tax", fy),
             "diluted_earnings_per_share": eps_map.get(fy, (None, None))[1],
             "diluted_shares": shares_map.get(fy, (None, None))[1],
         })
@@ -1013,29 +1026,54 @@ def fetch_news(ticker, api_key, company_name=None, log=print, limit=30):
 
 
 def fetch_peer_comparison(ticker, peer_tickers, api_key, log=print):
+    """Name, exchange, market cap, headcount and country for the subject and
+    up to four peers.
+
+    This was five sequential Polygon reference calls, and it was the whole cost
+    of an Excel export: by the time a reader clicks Export the page has spent
+    the free tier's five calls a minute, so every call here sat in 12s, 24s and
+    36s back-offs - 43s of a 57s export, measured. Yahoo is asked for all five
+    at once instead; Polygon gets one attempt, with no back-off, for any Yahoo
+    misses. A row is never dropped: a peer with no profile still appears, so
+    the table and the peer fundamentals beside it list the same companies."""
     if not peer_tickers:
         return None
-    all_tickers = [ticker] + peer_tickers[:4]
+    from concurrent.futures import ThreadPoolExecutor
+    all_tickers = [ticker] + list(peer_tickers)[:4]
     log(f"Fetching peer comparison: {all_tickers}...")
+
+    def _one(t):
+        d = _company_details_yf(t, log=lambda *a, **k: None)
+        if not d:
+            data = _get(f"/v3/reference/tickers/{t}", api_key, max_attempts=1)
+            r = (data or {}).get("results") or {}
+            if r:
+                d = {"Name": r.get("name"), "Exchange": r.get("primary_exchange"),
+                     "Market Cap": r.get("market_cap"), "Employees": r.get("total_employees"),
+                     "Country": (r.get("locale") or "").upper() or None}
+        return t, d or {}
+
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        got = dict(ex.map(_one, all_tickers))
+    try:
+        from analysis import exchange_name as _xn
+    except Exception:
+        _xn = None
     rows = []
     for t in all_tickers:
-        try:
-            data = _get(f"/v3/reference/tickers/{t}", api_key)
-            if data and data.get("results"):
-                r  = data["results"]
-                mc = r.get("market_cap")
-                rows.append({
-                    "Ticker":          t,
-                    "Company":         r.get("name", t),
-                    "Exchange":        r.get("primary_exchange", "N/A"),
-                    "Market Cap ($B)": round(mc / 1e9, 2) if mc else "N/A",
-                    "Employees":       r.get("total_employees", "N/A"),
-                    "Country":         r.get("locale", "N/A"),
-                })
-                log(f"   {t} OK")
-            time.sleep(0.2)
-        except Exception as e:
-            log(f"   {t} skipped: {e}")
+        d = got.get(t) or {}
+        mc = d.get("Market Cap")
+        ex_code = d.get("Exchange")
+        rows.append({
+            "Ticker":          t,
+            "Company":         (d.get("Name") if d.get("Name") not in (None, "N/A") else t),
+            "Exchange":        ((_xn(ex_code) if (_xn and ex_code not in (None, "N/A")) else None)
+                                or ex_code or "N/A"),
+            "Market Cap ($B)": round(mc / 1e9, 2) if isinstance(mc, (int, float)) and mc else "N/A",
+            "Employees":       d.get("Employees") if d.get("Employees") not in (None, "N/A") else "N/A",
+            "Country":         d.get("Country") or "N/A",
+        })
+        log(f"   {t} {'OK' if d else 'no profile'}")
     return pd.DataFrame(rows) if rows else None
 
 
