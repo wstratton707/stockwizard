@@ -405,7 +405,8 @@ def _valuation_history(wb, R, vhist):
         _put(ws, "B16", None)
         _put(ws, "D16", None)
         _put(ws, "A17", "Average P/E")
-    return bool(rows)
+    # A P/E range needs a few years behind it.
+    return sum(1 for h in rows if _num(h.get("pe_avg"))) >= 3
 
 
 def _capital_returns(wb, R):
@@ -489,6 +490,8 @@ def _segments(wb, R, F):
         _note(ws["I6"], f"House assumption: {mult:.0f}x — the peer-median EV/EBITDA used as each profitable "
                         "segment's EV/EBIT multiple (conservative, since EV/EBIT exceeds EV/EBITDA). "
                         "Loss-making segments at 0x; corporate costs at the same multiple. Edit freely.")
+        # A sum-of-the-parts needs segment profits; revenue alone values nothing.
+        ok = any(_num(x[4]) and x[4] != 0 for x in out if not x[0].startswith("Corporate"))
     else:
         _put(ws, "A6", "No segment disclosure in the latest filing's XBRL.")
     if basis == "year":
@@ -578,6 +581,7 @@ def _dcf(wb, R, price_source):
                     "nearest half point. Assumption; edit to test." if n_cx else
                     "Trailing capex share of revenue. Assumption; edit to test.")
     _put(ws, "C38", "(CFO − capex) ÷ revenue, trailing twelve months.")
+    _put(ws, "C40", "Starting point for the capex path; moves to the long-run level (B19) over B11 years.")
     _put(ws, "C41", "D&A share of revenue, trailing twelve months.")
     _put(ws, "C44", f"Cash + marketable securities − debt, {_d(fb.get('bal_end'))}.")
     _put(ws, "A37", f"Base revenue — TTM to {_d(fb.get('flows_end'), '%b-%Y')} ($B)")
@@ -1111,7 +1115,8 @@ def build_report(ticker, df, financials=None, fundamentals=None, company_details
     _methodology(wb, R, P, price_source)
     _sources(wb, R, F, P, price_source, bool(R.get("consensus")))
     _valuation_log(wb, log_history)
-    has_peer_pe = any(_num(p.get("pe")) for p in R["peers"])
+    # A range needs at least two points; one peer P/E drew a zero-width bar.
+    has_peer_pe = sum(1 for p in R["peers"] if _num(p.get("pe")) and p["pe"] > 0) >= 2
     _blank_football(wb, has_peer_pe, has_hist, has_seg)
     if not R.get("dcf_ok"):
         _no_dcf(wb, R)

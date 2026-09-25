@@ -1193,10 +1193,14 @@ def _cached_movers(_api_key):
 
 # ── Report carousel (client-side: images baked into the iframe → instant, no rerun) ──
 _REPORT_SLIDES = [
-    ("assets/rep_dashboard.png",    "Dashboard — metrics, risk & sparklines"),
-    ("assets/rep_charts.png",       "Charts — price, volume, Bollinger & RSI"),
-    ("assets/rep_fundamentals.png", "Fundamentals — valuation, margins, growth & quality"),
-    ("assets/rep_monte_carlo.png",  "Monte Carlo — forecast summary & simulations"),
+    # Real renders of the NKE sample the page offers for download (Excel) and
+    # the deck built from the same report (static/rep_v2_*.webp).
+    ("assets/rep_v2_summary.png",        "Excel · Summary — verdict, fair-value range, football field"),
+    ("assets/rep_v2_dcf.png",            "Excel · DCF — live inputs, WACC build, 10-year projection"),
+    ("assets/rep_v2_scenarios.png",      "Excel · Scenarios — bear / base / bull and sensitivity grids"),
+    ("assets/rep_v2_deck_summary.png",   "PowerPoint · Executive summary"),
+    ("assets/rep_v2_deck_valuation.png", "PowerPoint · What the price implies"),
+    ("assets/rep_v2_deck_range.png",     "PowerPoint · Valuation range and sensitivity"),
 ]
 
 @st.cache_data(show_spinner=False)
@@ -1420,10 +1424,11 @@ if _page == "home":
     with _hero_r:
         st.markdown(
             '<div class="hero-shot">'
-            '<img class="hero-shot-back" src="app/static/hero_excel.webp" '
-            'alt="The Excel research dashboard QuantWizard generates">'
-            '<img class="hero-shot-front" src="app/static/hero_chart.webp" '
-            'alt="Price against earnings-justified fair value, with the annual table">'
+            '<img class="hero-shot-back" src="app/static/hero_excel_v2.webp" '
+            'alt="The Excel valuation workbook QuantWizard generates: verdict, fair-value range '
+            'and football field">'
+            '<img class="hero-shot-front" src="app/static/hero_deck_v2.webp" '
+            'alt="A slide from the PowerPoint deck: DCF value against the share price">'
             '</div>', unsafe_allow_html=True)
 
     # Quick start lived here: three cards reading "Start with analysis",
@@ -1471,9 +1476,9 @@ if _page == "home":
     st.markdown("""
     <div class="home-spotlight-lead">
       <h3>A full analyst report on any stock — in ~30 seconds.</h3>
-      <p>Every analysis exports to a polished multi-sheet <b>Excel</b> workbook (plus a
-      <b>PowerPoint</b> deck) — the kind of report that takes an analyst hours. Flip through
-      a few pages below.</p>
+      <p>Every analysis exports to a live <b>Excel</b> valuation model you can edit and a
+      <b>PowerPoint</b> deck ready to present — the kind of report that takes an analyst
+      hours. Flip through pages from both below.</p>
     </div>
     """, unsafe_allow_html=True)
 

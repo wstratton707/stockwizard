@@ -70,17 +70,21 @@ FORMULAS = {
                         '&TEXT(Financials!C56,"0.00")&"B vs "&TEXT(Financials!B56,"0.00")&"B at "&Financials!K5'
                         '&" — buybacks are shrinking the base.","• Share count steady at "'
                         '&TEXT(Financials!C56,"0.00")&"B; "&Data!$Q$11&"."))',
-    ("Summary", "A38"): '=IFERROR("• Gross margin "&IF(Multiples!C28>=Multiples!B28,"widened","narrowed")&" to "'
-                        '&TEXT(Multiples!C28,"0.0%")&" TTM from "&TEXT(Multiples!B28,"0.0%")&" in "'
-                        '&Financials!K5&"; operating margin is "&TEXT(Financials!F23,"0.0%")&".",'
+    ("Summary", "A38"): '=IFERROR("• Gross margin "&IF(ABS(Multiples!C28-Multiples!B28)<0.001,"is "'
+                        '&TEXT(Multiples!C28,"0.0%"),IF(Multiples!C28>Multiples!B28,"widened","narrowed")&" to "'
+                        '&TEXT(Multiples!C28,"0.0%")&" TTM from "&TEXT(Multiples!B28,"0.0%")&" in "&Financials!K5)'
+                        '&"; operating margin is "&TEXT(Financials!F23,"0.0%")&".",'
                         '"• Operating margin is "&TEXT(Financials!F23,"0.0%")&" over the last twelve months.")',
     ("Summary", "D38"): '="• Capex runs at "&TEXT(DCF!B40,"0%")&" of revenue"&IF(Data!$Q$12="",""," ("&Data!$Q$12'
-                        '&")")&"; the TTM FCF margin is "&TEXT(DCF!B38,"0.0%")&" vs "&TEXT(Financials!K11,"0.0%")'
-                        '&" in "&Financials!K5&"."',
-    ("Summary", "A39"): '="• $"&TEXT(Financials!C35,"#,##0")&"B of cash and securities ("&IF(Financials!C39>=0,'
-                        '"net cash $"&TEXT(Financials!C39,"#,##0")&"B","net debt $"&TEXT(-Financials!C39,"#,##0")'
-                        '&"B")&")"&IF(Financials!C54>0," plus $"&TEXT(Financials!C54,"#,##0")&"B of private '
-                        'equity stakes not captured by FCF","")&"."',
+                        '&")")&IF(ABS(DCF!B38-Financials!K11)<0.001,"; the FCF margin is "&TEXT(DCF!B38,"0.0%"),'
+                        '"; the TTM FCF margin is "&TEXT(DCF!B38,"0.0%")&" vs "&TEXT(Financials!K11,"0.0%")'
+                        '&" in "&Financials!K5)&"."',
+    ("Summary", "A39"): '="• $"&TEXT(Financials!C35,IF(ABS(Financials!C35)<10,"#,##0.0","#,##0"))&"B of cash and '
+                        'securities ("&IF(Financials!C39>=0,"net cash $"&TEXT(Financials!C39,IF(ABS(Financials!C39)'
+                        '<10,"#,##0.0","#,##0"))&"B","net debt $"&TEXT(-Financials!C39,IF(ABS(Financials!C39)<10,'
+                        '"#,##0.0","#,##0"))&"B")&")"&IF(Financials!C54>0," plus $"&TEXT(Financials!C54,'
+                        'IF(Financials!C54<10,"#,##0.0","#,##0"))&"B of private equity stakes not captured by '
+                        'FCF","")&"."',
     ("Summary", "B52"): '="Valuation vs "&Data!$Q$7',
     ("Multiples", "D15"): '="Market cap ÷ net income (FY) · price ÷ diluted EPS, last 4 qtrs (TTM)."'
                           '&IF(Financials!F26>0.005," TTM is flattered by $"&TEXT(Financials!F26,"0.00")'
@@ -260,6 +264,9 @@ def _export_charts():
         x = re.sub(r"<c:externalData[^>]*>.*?</c:externalData>", "", x, flags=re.S)
         if "<c:lineChart>" in x:
             x = re.sub(r"(<a:t>)[^<]*price[^<]*(</a:t>)", r"\g<1>{TITLE}\g<2>", x, count=1)
+            # The reference fixed the price axis at $50 (Alphabet's range); a
+            # stock trading below it fell off the chart. Let Excel scale it.
+            x = re.sub(r"<c:(min|max) val=\"[^\"]*\"/>", "", x)
             out = "price_line.xml"
         else:
             out = "football.xml"

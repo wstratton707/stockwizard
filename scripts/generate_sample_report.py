@@ -160,16 +160,16 @@ def main():
     # report context, the live valuation workbook built from it.
     import excel_valuation
     import report_inputs
+    street = fetch_street_view(tk, log=log)
     R = report_inputs.build(tk, df, fin, fundamentals, company_details=details, peer_rows=peer_fund,
                             latest_xbrl=fetch_sec_latest_xbrl(tk, log=log),
-                            consensus=fetch_street_view(tk, log=log), sector=details.get("Sector"),
-                            log=log)
+                            consensus=street, sector=details.get("Sector"), log=log)
     print(f"  model: {report_inputs.site_dcf(R).get('fair_value') or R.get('dcf_reason')}")
     buf = excel_valuation.build_report(
         tk, df, fin, fundamentals, company_details=details, news_rows=news, peer_fund=peer_fund,
         peer_group=(peer_group_for(tk) or ("same sector, nearest in size",))[0],
         valuation_data=vdata, filings=fetch_sec_filings(tk, log=log),
-        price_source=market_data.price_source(tk), R=R)
+        price_source=market_data.price_source(tk), street=street, R=R)
 
     out_dir = ROOT / "static"
     out_dir.mkdir(exist_ok=True)

@@ -936,10 +936,18 @@ def slide_valuation(dk, c):
         sc, rv, W_ = c["model"]["scenarios"], c["model"]["reverse"], c["R"]["wacc"]
         ig = rv.get("growth")
         if _num(ig):
-            ratio = ig / A["g1"] if A["g1"] > 0.005 else None
-            rel = (f"over {int(ratio)} times" if ratio and ratio >= 2 else "above" if ig > A["g1"] else "below")
-            title = (f"Today's {_usd(p)} price requires {_pct(ig, 0)} year-one revenue growth, {rel} the model's "
-                     f"{_pct(A['g1'], 1)} base case")
+            # "Over 3 times" a 0.8% base case is true and says little: below 3%
+            # the gap reads better in points.
+            ratio = ig / A["g1"] if A["g1"] >= 0.03 else None
+            if ratio and ratio >= 2:
+                rel = f"over {int(ratio)} times"
+            elif A["g1"] < 0.03 and abs(ig - A["g1"]) >= 0.001:
+                rel = f"{abs(ig - A['g1']) * 100:.1f} points {'above' if ig > A['g1'] else 'below'}"
+            else:
+                rel = "above" if ig > A["g1"] else "below"
+            # Small rates get a decimal, so "2.8%, 2.0 points above 0.8%" adds up.
+            title = (f"Today's {_usd(p)} price requires {_pct(ig, 1 if A['g1'] < 0.03 else 0)} year-one "
+                     f"revenue growth, {rel} the model's {_pct(A['g1'], 1)} base case")
         else:
             title = f"Today's {_usd(p)} price sits outside what the model can reach on growth alone"
         src = (f"Source: QuantWizard revenue-driven DCF: {_pct(W_['wacc'], 1)} discount rate, 10-year explicit "
