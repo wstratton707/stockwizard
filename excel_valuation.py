@@ -1068,6 +1068,11 @@ def build_report(ticker, df, financials=None, fundamentals=None, company_details
     R["fb"]["name"] = P["name"] + " "
     vhist = valuation_history(valuation_data, fundamentals) if valuation_data else None
 
+    # The label says what the prices cover, not what was asked for: when the
+    # price feed can only supply ~2 years, the workbook must not say 5Y.
+    _span = (pd.Timestamp(R["win"]["Date"].iloc[-1]) - pd.Timestamp(R["win"]["Date"].iloc[0])).days / 365.25
+    if len(R["win"]) < RI.DATA_ROWS - 5:
+        period_label = f"{max(1, round(_span))}Y" if _span >= 0.9 else f"{max(1, round(_span * 12))}M"
     wb = load_workbook(TEMPLATE)
     last = _data(wb, R, P, Q, price_source)
     _rewrite_rows(wb, last)

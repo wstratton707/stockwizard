@@ -219,6 +219,7 @@ def test_short_price_history_rewrites_every_data_reference():
     assert wb["Risk"]["B6"].value == "=MAX(Data!A2:A601)"
     assert "Data!E601" in wb["DCF"]["B5"].value
     assert wb["Data"]["E602"].value is None and wb["Data"]["H700"].value is None
+    assert wb["Risk"]["C7"].value == "Report period: 2Y"          # says what the data covers
     assert "$601" in zipfile.ZipFile(io.BytesIO(raw)).read("xl/charts/chart1.xml").decode()
 
 
