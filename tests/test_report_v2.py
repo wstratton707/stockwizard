@@ -259,6 +259,17 @@ def test_template_carries_no_reference_values():
     assert all("B18" not in str(d.sqref) and "B19" not in str(d.sqref) for d in dv)
 
 
+def test_every_tab_opens_at_the_top_with_only_summary_selected():
+    raw, _ = _book()
+    wb = load_workbook(io.BytesIO(raw))
+    for i, ws in enumerate(wb.worksheets):
+        v = ws.sheet_view
+        assert bool(v.tabSelected) == (i == 0), ws.title
+        assert v.selection[0].activeCell == "A1", ws.title
+        if v.pane is not None and v.pane.state == "frozen":
+            assert v.pane.topLeftCell == f"A{int(v.pane.ySplit) + 1}", (ws.title, v.pane.topLeftCell)
+
+
 def test_files_are_signed_quantwizard_not_a_person():
     raw, _ = _book()
     core = zipfile.ZipFile(io.BytesIO(raw)).read("docProps/core.xml").decode()

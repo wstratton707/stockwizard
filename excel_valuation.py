@@ -942,6 +942,29 @@ def _blank_football(wb, has_peers_pe, has_hist, has_segments):
             s[f"D{r}"].value = f'=IFERROR(C{r}-B{r},"")'
 
 
+def open_at_top(wb):
+    """Every tab opens scrolled to the top, cursor on A1, and only the first
+    tab selected. A sheet remembers where it was scrolled when last saved; the
+    reference was saved with its frozen panes scrolled to row 50 (Scenarios),
+    36 (Financials) and so on, and with a second tab selected - which Excel
+    opens as grouped sheets, where typing on one tab edits both."""
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.views import Selection
+    for i, ws in enumerate(wb.worksheets):
+        v = ws.sheet_view
+        v.topLeftCell = "A1"
+        v.tabSelected = (i == 0)
+        p = v.pane
+        if p is not None and p.state in ("frozen", "frozenSplit"):
+            row = int(p.ySplit or 0) + 1
+            col = int(p.xSplit or 0) + 1
+            p.topLeftCell = f"{get_column_letter(col)}{row}"
+            v.selection = [Selection(pane=p.activePane or "bottomLeft", activeCell="A1", sqref="A1")]
+        else:
+            v.selection = [Selection(activeCell="A1", sqref="A1")]
+    wb.active = 0
+
+
 # ── charts & post-processing ─────────────────────────────────────────────────
 def _charts(wb, last):
     ws = wb["Summary"]
@@ -1098,7 +1121,7 @@ def build_report(ticker, df, financials=None, fundamentals=None, company_details
             if side.text and "{COMPANY}" in side.text:
                 side.text = side.text.replace("{COMPANY}", f"{P['short']} ({t})")
     _charts(wb, last)
-    wb.active = 0
+    open_at_top(wb)
     try:
         wb.calculation.fullCalcOnLoad = True
     except Exception:

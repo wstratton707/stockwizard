@@ -224,6 +224,8 @@ def main():
     guide.add("B22")
     dcf.data_validations.append(guide)
 
+    from excel_valuation import open_at_top
+    open_at_top(wb)
     __import__("doc_props").stamp(wb)
     wb.save(OUT)
     # Nothing company-specific may survive.

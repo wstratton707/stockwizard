@@ -1883,7 +1883,8 @@ def build_report(ticker, df, financials=None, fundamentals=None, dcf=None,
     wb._sheets.sort(key=lambda s: pos.get(s.title, 999))
     for n in ("Raw_Fundamentals", "Price_Data", "Raw_News", "Raw_Peers", "Monte_Carlo"):
         wb[n].sheet_properties.tabColor = GREY_TAB
-    wb.active = 0
+    from excel_valuation import open_at_top
+    open_at_top(wb)
     try:
         wb.calculation.fullCalcOnLoad = True
     except Exception:
