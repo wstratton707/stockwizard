@@ -40,7 +40,7 @@ from data import (fetch_stock_data, fetch_company_details, fetch_financials,
                   fetch_sec_financials, fetch_peer_comparison)
 from analysis import compute_fundamentals, dcf_valuation, run_monte_carlo, market_beta
 from market_data import get_financials_supplement
-from excel_report import build_report
+
 
 BENCHMARKS = ["SPY", "QQQ"]
 PEERS = {"NKE": ["ADDYY", "UAA", "LULU"], "PEP": ["KO", "MDLZ", "GIS"]}
@@ -60,7 +60,8 @@ def log(msg):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ticker", default="NKE")
-    ap.add_argument("--period", default="5y")
+    # Ten years of prices, as the app pulls: the workbook uses the last five.
+    ap.add_argument("--period", default="10y")
     args = ap.parse_args()
     tk = args.ticker.upper()
 
@@ -149,20 +150,26 @@ def main():
             log(f"peer {p} skipped: {e}")
     peer_fund = [r for r in peer_fund if r]
 
-    from data import fetch_sec_segments, fetch_sec_filings
+    from data import fetch_sec_filings, fetch_sec_latest_xbrl, fetch_street_view
     try:
         from valuation import get_valuation_data
         vdata = get_valuation_data(tk)
     except Exception:
         vdata = None
-    buf = build_report(
-        tk, df, financials=fin, fundamentals=fundamentals, dcf=dcf,
-        company_details=details, mc_summary=mc_summary, mc_sim_df=mc_sim_df,
-        news_rows=news, peer_fund=peer_fund,
+    # The same pipeline as the site's Excel export (app.py, REPORT_V2): one
+    # report context, the live valuation workbook built from it.
+    import excel_valuation
+    import report_inputs
+    R = report_inputs.build(tk, df, fin, fundamentals, company_details=details, peer_rows=peer_fund,
+                            latest_xbrl=fetch_sec_latest_xbrl(tk, log=log),
+                            consensus=fetch_street_view(tk, log=log), sector=details.get("Sector"),
+                            log=log)
+    print(f"  model: {report_inputs.site_dcf(R).get('fair_value') or R.get('dcf_reason')}")
+    buf = excel_valuation.build_report(
+        tk, df, fin, fundamentals, company_details=details, news_rows=news, peer_fund=peer_fund,
         peer_group=(peer_group_for(tk) or ("same sector, nearest in size",))[0],
-        peer_df=peers, segments=fetch_sec_segments(tk, log=log), valuation_data=vdata,
-        filings=fetch_sec_filings(tk, log=log), period_label=args.period.upper(),
-        price_source=market_data.price_source(tk))
+        valuation_data=vdata, filings=fetch_sec_filings(tk, log=log),
+        price_source=market_data.price_source(tk), R=R)
 
     out_dir = ROOT / "static"
     out_dir.mkdir(exist_ok=True)

@@ -19,6 +19,7 @@ from openpyxl import load_workbook
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
 REF = os.path.join(ROOT, "assets", "AAPL_5Y_Analysis (6).xlsx")
 OUT = os.path.join(ROOT, "assets", "report_template.xlsx")
 
@@ -77,6 +78,7 @@ def main():
     for name in DYNAMIC:
         if name in wb.sheetnames:
             wb[name].conditional_formatting = type(wb[name].conditional_formatting)()
+    __import__("doc_props").stamp(wb)
     wb.save(OUT)
     print("wrote", OUT, "sheets:", wb.sheetnames)
     _export_charts()

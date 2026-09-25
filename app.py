@@ -159,6 +159,56 @@ def _cached_valuation(ticker):
         return None
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def _cached_latest_xbrl(ticker):
+    """Cover-page shares (all classes) and segment results from the latest
+    10-Q / 10-K's own XBRL - what companyfacts leaves out."""
+    try:
+        from data import fetch_sec_latest_xbrl
+        return fetch_sec_latest_xbrl(ticker, log=lambda *a, **k: None)
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def _cached_street(ticker):
+    """Next earnings date and revenue consensus (Yahoo, unofficial)."""
+    try:
+        from data import fetch_street_view
+        return fetch_street_view(ticker, log=lambda *a, **k: None)
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_spy_bars(start, end):
+    try:
+        import market_data as _mdd
+        return _mdd.get_bars("SPY", start, end)
+    except Exception:
+        return None
+
+
+def _with_spy(frame):
+    """`frame` with SPY daily returns aligned to its dates. The valuation's
+    beta is a regression on SPY, so it is fetched when the reader did not pick
+    SPY as a benchmark."""
+    if "SPY_Return" in frame.columns and frame["SPY_Return"].notna().sum() > 20:
+        return frame
+    d = pd.to_datetime(frame["Date"])
+    spy = _cached_spy_bars(str((d.min() - pd.Timedelta(days=10)).date()), str(d.max().date()))
+    if spy is None or not len(spy):
+        return frame
+    s = spy.assign(Date=pd.to_datetime(spy["Date"]).dt.normalize()).set_index("Date")["Close"]
+    s = s[~s.index.duplicated()].sort_index()
+    out = frame.copy()
+    out["SPY_Return"] = s.reindex(d.dt.normalize().values).pct_change().values
+    return out
+
+
+REPORT_V2 = os.getenv("REPORT_V2", "1") != "0"
+
+
 # ── News research (multi-source + AI brief) — all cached to bound API/LLM cost ─
 @st.cache_data(ttl=900, show_spinner=False)
 def _cached_news(ticker, company):
@@ -2331,28 +2381,46 @@ elif _page == "analysis":
                           f"{(_time.perf_counter()-_RUN_T0)*1000:7.0f} ms", flush=True)
                 _dcf_box = {}
 
+                _rctx_box = {}
+
+                def _report_ctx(with_peers=False):
+                    """report_inputs.build(): the numbers behind the site's DCF and
+                    every export - the workbook's own model, run in Python. Built
+                    once per run; again with peers for the exports (their Peers
+                    tab), or when a loss-maker needs the peer margin as its anchor."""
+                    _k = "peers" if with_peers else "base"
+                    if _k not in _rctx_box:
+                        import report_inputs as _RI
+                        _cdx = company_details or {}
+                        _sec = " ".join(str(x) for x in (_std_sector(ticker_input), _cdx.get("Sector"),
+                                                         _cdx.get("Industry")) if x)
+                        _R = _RI.build(
+                            ticker_input, _with_spy(df), cached_fetch_sec_financials(ticker_input) or {},
+                            _fund(), company_details=_cdx,
+                            peer_rows=(_peer_funds() if with_peers else None),
+                            latest_xbrl=_cached_latest_xbrl(ticker_input),
+                            consensus=_cached_street(ticker_input), sector=_sec)
+                        if (not with_peers and not _R.get("dcf_ok")
+                                and "no profitable peers" in str(_R.get("dcf_reason"))
+                                and _peer_tickers()):
+                            _R = _report_ctx(True)
+                        _rctx_box[_k] = _R
+                    return _rctx_box[_k]
+
                 def _dcf():
-                    """The DCF, built the first time something asks for it."""
+                    """The DCF the page shows - report_inputs.site_dcf over the
+                    same context the exports use, so page and files agree."""
                     if "v" not in _dcf_box:
                         _v = {"ok": False}
                         _f = _fund()
                         if not is_crypto and _f.get("ok"):
-                            _beta = None
-                            for _bt in ("SPY", "QQQ"):
-                                if f"{_bt}_Return" in df.columns:
-                                    _beta = market_beta(df["Daily_Return"], df[f"{_bt}_Return"])
-                                    if _beta is not None:
-                                        break
                             try:
                                 with _phase("DCF (lazy)"):
-                                    _v = dcf_valuation(
-                                        _f, float(df["Close"].iloc[-1]),
-                                        beta=_beta,
-                                        # Lets the model say when an unlevered FCF
-                                        # DCF is the wrong instrument for the filer
-                                        # — banks and brokers.
-                                        sector=(company_details or {}).get("Sector"))
+                                    import report_inputs as _RI
+                                    _v = _RI.site_dcf(_report_ctx())
                             except Exception:
+                                import traceback as _tb
+                                print(f"[dcf] {ticker_input}: {_tb.format_exc(limit=3)}", flush=True)
                                 _v = {"ok": False}
                         _dcf_box["v"] = _v
                     return _dcf_box["v"]
@@ -2527,10 +2595,12 @@ elif _page == "analysis":
                                              # openpyxl / python-pptx / python-docx +
                                              # matplotlib, ~2s cold
                                              ("import builder", lambda: __import__(
-                                                 {"excel": "excel_report", "pptx": "pptx_builder"}
+                                                 {"excel": "excel_valuation", "pptx": "pptx_report"}
                                                  .get(_kind, "docx_builder"))),
                                              ("sector", _load_sector),
                                              ("filings", lambda: _cached_sec_filings(ticker_input)),
+                                             ("latest filing", lambda: _cached_latest_xbrl(ticker_input)),
+                                             ("street", lambda: _cached_street(ticker_input)),
                                              ("segments", lambda: _cached_segments(ticker_input)),
                                              ("valuation history",
                                               lambda: _cached_valuation(ticker_input))]
@@ -2572,7 +2642,42 @@ elif _page == "analysis":
                                 _cd_rpt["Industry"] = _cd_rpt.get("Sector")
                                 _cd_rpt["Sector"] = _ss
                             try:
-                                if _kind == "excel":
+                                if _kind == "excel" and REPORT_V2:
+                                    # The live valuation model in the layout of the
+                                    # reference workbook - see excel_valuation.
+                                    with _phase("import excel_valuation"):
+                                        import excel_valuation as _XV
+                                        import report_inputs as _RI
+                                        import market_data as _md
+                                        import database as _dbm
+                                    with _phase("report context"):
+                                        _Rx = _report_ctx(True)
+                                    _hist = []
+                                    try:
+                                        _hist = _dbm.load_valuation_log(
+                                            ticker_input, before=str(pd.Timestamp(_Rx["generated"]).date()))
+                                    except Exception:
+                                        _hist = []
+                                    with _phase("build_excel"):
+                                        st.session_state[_buf_key] = _XV.build_report(
+                                            ticker_input, df,
+                                            financials=cached_fetch_sec_financials(ticker_input),
+                                            fundamentals=_fund(), company_details=_cd_rpt,
+                                            news_rows=news_list, peer_fund=_peer_funds(),
+                                            peer_group=((peer_group_for(ticker_input)
+                                                         or ("same sector, nearest in size",))[0]
+                                                        if _peers_are_auto() else "your peers"),
+                                            valuation_data=_cached_valuation(ticker_input),
+                                            filings=_cached_sec_filings(ticker_input),
+                                            price_source=_md.price_source(ticker_input),
+                                            latest_xbrl=_cached_latest_xbrl(ticker_input),
+                                            street=_cached_street(ticker_input),
+                                            log_history=_hist, R=_Rx)
+                                    try:
+                                        _dbm.save_valuation_snapshot(_RI.snapshot(_Rx))
+                                    except Exception:
+                                        pass
+                                elif _kind == "excel":
                                     # The workbook in the layout of the reference report
                                     # (assets/AAPL_5Y_Analysis (6).xlsx) - see excel_report.
                                     with _phase("import excel_report"):
@@ -2597,6 +2702,30 @@ elif _page == "analysis":
                                             filings=_cached_sec_filings(ticker_input),
                                             period_label=_rlabel,
                                             price_source=_md.price_source(ticker_input))
+                                elif _kind == "pptx" and REPORT_V2:
+                                    # The equity review in the reference deck's design -
+                                    # see pptx_report.
+                                    import pptx_report as _PR
+                                    import report_inputs as _RI
+                                    import market_data as _md
+                                    from analysis import valuation_history as _vh_fn
+                                    _Rp = _report_ctx(True)
+                                    try:
+                                        _vhist = _vh_fn(_cached_valuation(ticker_input), _fund())
+                                    except Exception:
+                                        _vhist = None
+                                    st.session_state[_buf_key] = _PR.build_deck(
+                                        ticker_input, _with_spy(_rdf), _Rp,
+                                        company_details=_cd_rpt, mc_summary=mc_summary,
+                                        mc_sim_df=mc_sim_df, news_rows=news_list,
+                                        fundamentals=_fund(), period_label=_rlabel,
+                                        price_source=_md.price_source(ticker_input),
+                                        vhist=_vhist, filings=_cached_sec_filings(ticker_input))
+                                    try:
+                                        import database as _dbm
+                                        _dbm.save_valuation_snapshot(_RI.snapshot(_Rp))
+                                    except Exception:
+                                        pass
                                 elif _kind == "pptx":
                                     # dcf= was missing here while Excel and Word
                                     # both passed it, so the deck's valuation
@@ -2657,10 +2786,12 @@ elif _page == "analysis":
                                 "pptx":  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                 "word":  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                             }[_kind]
+                            _fname = (f"{ticker_input}_Valuation_{pd.Timestamp.today():%Y-%m-%d}{_ext}"
+                                      if (_kind == "excel" and REPORT_V2) else
+                                      f"{ticker_input}_{_rlabel.replace(' ', '')}_Analysis{_ext}")
                             st.download_button(
                                 f"Download {_name} ({_ext})", data=_buf,
-                                file_name=f"{ticker_input}_{_rlabel.replace(' ', '')}"
-                                          f"_Analysis{_ext}",
+                                file_name=_fname,
                                 mime=_mime, use_container_width=True,
                                 key=f"dl_{_kind}_{suffix}",
                             )
@@ -3963,7 +4094,7 @@ elif _page == "analysis":
                             f'{_sec_id("sec-priced-in", "What’s Priced In")}>What&rsquo;s Priced In '
                             '<span style="font-weight:500;color:var(--dim);letter-spacing:0;'
                             'text-transform:none;font-size:0.7rem">'
-                            '· two-stage discounted free cash flow</span></div>',
+                            '· revenue-driven discounted cash flow</span></div>',
                             unsafe_allow_html=True)
 
                         # Scoped styles. Colour, radius and rules all come from the
@@ -4030,74 +4161,52 @@ color:var(--muted);background:var(--surface2)}
                                 f'place.</p>',
                                 unsafe_allow_html=True)
                         else:
-                            # The average rate along the fade, not the year-one
-                            # rate: that is the like-for-like figure against the
-                            # historical CAGR below. The start rate is quoted too.
-                            _mig  = _dcfr.get("market_implied_cagr")
-                            _mig1 = _dcfr.get("market_implied_growth")
-                            _mfin = _dcfr.get("market_implied_fcf_final")
+                            # The revenue-driven model the workbook ships
+                            # (report_inputs / valuation_model): what the price
+                            # implies is year-one REVENUE growth and a long-run
+                            # operating MARGIN, set against what the company has
+                            # actually delivered.
+                            _ig   = _dcfr.get("market_implied_growth")
+                            _icg  = _dcfr.get("market_implied_cagr")
+                            _im   = _dcfr.get("implied_margin")
                             _bg   = _dcfr.get("base_growth")
+                            _bm   = _dcfr.get("target_margin")
+                            _m0   = _dcfr.get("current_margin")
                             _wacc = _dcfr.get("wacc")
                             _tg   = _dcfr.get("terminal_growth")
                             _yrs  = _dcfr.get("years")
                             _px   = _dcfr.get("price")
                             _fv   = _dcfr.get("fair_value")
                             _up   = _dcfr.get("upside")
-                            _hist = _g.get("eps_cagr")
+                            _hist = _g.get("revenue_cagr")
                             _hzn  = f"{_yrs} years" if _yrs else "the forecast horizon"
-                            # Compared like for like: the base case's AVERAGE along
-                            # the same fade, not its year-one rate - otherwise the
-                            # sentence set a 19.6% average beside a 7.1% start.
-                            _bavg = _dcfr.get("base_cagr")
-                            _base_clause = (f" The model&rsquo;s own base case averages "
-                                            f"<b>{_wpi_pct(_bavg if _bavg is not None else _bg)}</b>."
-                                            if (_bavg is not None or _bg is not None) else "")
 
-                            # 1 ── Headline. Same three-way tone as before, restated
-                            # for free cash flow: the DCF projects FCF, so comparing
-                            # it to delivered EPS growth is the honest framing.
-                            if _mig is None:
-                                _tone = "na"
-                                _big  = "—"
+                            # 1 ── Headline: the growth the price needs, against
+                            # the revenue growth the company has delivered.
+                            if _ig is None:
+                                _tone, _big = "na", "—"
                                 _read = ("Today&rsquo;s price sits outside the growth range this model can "
-                                         "solve, so there is no single implied rate to quote."
-                                         + _base_clause)
+                                         "solve, so there is no single implied rate to quote. "
+                                         + (f"On growth alone it would need a <b>{_wpi_pct(_im)}</b> long-run "
+                                            "operating margin." if _im is not None else ""))
                             else:
-                                _migp = _mig * 100
-                                _big  = f"{_migp:.1f}%"
-                                _path = (f" (starting near {_mig1 * 100:.1f}% and slowing to "
-                                         f"{_wpi_pct(_tg)}"
-                                         + (f", which takes FCF to about ${_mfin / 1e9:,.0f}B "
-                                            f"by the final year" if _mfin else "")
-                                         + ")") if _mig1 is not None else ""
-                                if _hist is not None and _migp > _hist + 3:
-                                    _tone = "hot"
-                                    _read = (f"To justify today&rsquo;s price, free cash flow has to grow "
-                                             f"about <b>{_migp:.1f}%</b> a year on average over {_hzn}{_path} "
-                                             f"— well above the <b>{_hist:.1f}%</b> earnings growth it has actually "
-                                             f"delivered. The price assumes growth accelerates from "
-                                             f"here.{_base_clause}")
-                                elif _hist is not None and _migp < _hist - 3:
-                                    _tone = "cool"
-                                    _read = (f"To justify today&rsquo;s price, free cash flow only has to grow "
-                                             f"about <b>{_migp:.1f}%</b> a year on average over {_hzn}{_path} — below "
-                                             f"the <b>{_hist:.1f}%</b> earnings growth it has delivered. "
-                                             f"Expectations look conservative.{_base_clause}")
-                                elif _hist is not None:
-                                    _tone = ""
-                                    _read = (f"To justify today&rsquo;s price, free cash flow has to grow "
-                                             f"about <b>{_migp:.1f}%</b> a year on average over {_hzn}{_path} — roughly in "
-                                             f"line with the <b>{_hist:.1f}%</b> earnings growth it has "
-                                             f"delivered.{_base_clause}")
-                                else:
-                                    _tone = ""
-                                    _read = (f"To justify today&rsquo;s price, free cash flow has to grow "
-                                             f"about <b>{_migp:.1f}%</b> a year on average over {_hzn}{_path}, discounted "
-                                             f"at <b>{_wpi_pct(_wacc)}</b> with a <b>{_wpi_pct(_tg)}</b> "
-                                             f"terminal rate.{_base_clause}")
+                                _big = _wpi_pct(_ig)
+                                _cmp = _hist / 100 if _hist is not None else None
+                                _tone = ("hot" if (_cmp is not None and _ig > _cmp + 0.03) else
+                                         "cool" if (_cmp is not None and _ig < _cmp - 0.03) else "")
+                                _read = (f"To justify today&rsquo;s price, revenue has to grow about "
+                                         f"<b>{_wpi_pct(_ig)}</b> in year one, fading to "
+                                         f"{_wpi_pct(_tg)} by year {_yrs or 10} &mdash; about "
+                                         f"<b>{_wpi_pct(_icg)}</b> a year on average"
+                                         + (f", against <b>{_hist:.1f}%</b> a year over the filed history"
+                                            if _hist is not None else "")
+                                         + f". The model&rsquo;s base case assumes <b>{_wpi_pct(_bg)}</b>."
+                                         + (f" Holding growth at the base case instead, the price needs a "
+                                            f"<b>{_wpi_pct(_im)}</b> long-run operating margin, against "
+                                            f"{_wpi_pct(_m0)} today." if _im is not None else ""))
 
                             _wpi = ['<div class="wpi">', '<div class="wpi-head">',
-                                    '<div><div class="wpi-lbl">Market-implied FCF growth, average per year</div>',
+                                    '<div><div class="wpi-lbl">Market-implied revenue growth, year one</div>',
                                     f'<div class="wpi-big {_tone}">{_big}</div></div>',
                                     f'<div class="wpi-read">{_read}</div>', '</div>']
 
@@ -4105,47 +4214,47 @@ color:var(--muted);background:var(--surface2)}
                             _up_cls = "" if _up is None else ("pos" if _up >= 0 else "neg")
                             _up_lbl = "Downside to fair value" if (_up is not None and _up < 0) \
                                       else "Upside to fair value"
+                            _pw = _dcfr.get("prob_weighted")
                             _wpi.append(
                                 '<div class="wpi-fv">'
-                                '<div class="wpi-fv-c"><div class="wpi-lbl">DCF fair value</div>'
+                                '<div class="wpi-fv-c"><div class="wpi-lbl">DCF fair value (base)</div>'
                                 f'<div class="wpi-fv-v">{_wpi_usd(_fv)}</div></div>'
+                                '<div class="wpi-fv-c"><div class="wpi-lbl">Probability-weighted</div>'
+                                f'<div class="wpi-fv-v">{_wpi_usd(_pw)}</div></div>'
                                 '<div class="wpi-fv-c"><div class="wpi-lbl">Current price</div>'
                                 f'<div class="wpi-fv-v">{_wpi_usd(_px)}</div></div>'
                                 f'<div class="wpi-fv-c"><div class="wpi-lbl">{_up_lbl}</div>'
                                 f'<div class="wpi-fv-v {_up_cls}">{_wpi_pct(_up, 1, sign=True)}</div>'
                                 '</div></div>')
 
-                            # 3 ── Scenarios. Reuses .fund-table so the row rhythm
-                            # matches the fundamentals grid directly above.
+                            # 3 ── Scenarios: growth, margin, discount rate and
+                            # terminal growth move together.
                             _scn = _dcfr.get("scenarios") or {}
                             _wpi.append(
                                 '<table class="fund-table">'
-                                '<tr class="grp"><td>Scenario</td><td class="v">FCF growth</td>'
+                                '<tr class="grp"><td>Scenario</td><td class="v">Yr-1 growth</td>'
+                                '<td class="v">Op. margin</td><td class="v">WACC</td>'
                                 '<td class="v">Fair value</td><td class="v">Upside</td></tr>')
                             for _sk, _sn in (("bear", "Bear"), ("base", "Base"), ("bull", "Bull")):
                                 _s   = _scn.get(_sk) or {}
                                 _sup = _s.get("upside")
                                 _scl = "" if _sup is None else ("pos" if _sup >= 0 else "neg")
                                 _wpi.append(
-                                    f'<tr><td class="k">{_sn}</td>'
+                                    f'<tr><td class="k">{_sn} &middot; {_wpi_pct(_s.get("probability"), 0)}</td>'
                                     f'<td class="v">{_wpi_pct(_s.get("growth"))}</td>'
+                                    f'<td class="v">{_wpi_pct(_s.get("margin"))}</td>'
+                                    f'<td class="v">{_wpi_pct(_s.get("wacc"))}</td>'
                                     f'<td class="v">{_wpi_usd(_s.get("fair_value"))}</td>'
                                     f'<td class="v {_scl}">{_wpi_pct(_sup, 1, sign=True)}</td></tr>')
                             _wpi.append('</table>')
 
-                            # 4 ── Sensitivity. An HTML table, not a heatmap: the
-                            # point of this grid is that you can read the numbers.
-                            # The tint is a low-alpha mix of the semantic tokens so
-                            # the figure on top of it stays legible.
+                            # 4 ── Sensitivity (WACC x terminal growth).
                             _sen  = _dcfr.get("sensitivity") or {}
                             _wax  = _sen.get("wacc_axis") or []
                             _tax  = _sen.get("tg_axis") or []
                             _grid = _sen.get("grid") or []
                             if _wax and _tax and _grid:
-                                _wmid = next((i for i, w in enumerate(_wax)
-                                              if _wacc is not None and abs(w - _wacc) < 5e-5), None)
-                                _tmid = next((i for i, t in enumerate(_tax)
-                                              if _tg is not None and abs(t - _tg) < 5e-5), None)
+                                _wmid, _tmid = len(_wax) // 2, len(_tax) // 2
                                 _hdr  = "".join(f'<th>{_wpi_pct(_t)}</th>' for _t in _tax)
                                 _body = []
                                 for _ri, _w in enumerate(_wax):
@@ -4177,71 +4286,47 @@ color:var(--muted);background:var(--surface2)}
                                     f'today&rsquo;s price of {_wpi_usd(_px)}, red below it; the outlined '
                                     'cell is the base case above.</p>')
 
-                            # 5 ── Assumptions. The section is only as credible as
-                            # the inputs it will show you, so they are shown.
-                            _pvx, _pvt = _dcfr.get("pv_explicit"), _dcfr.get("pv_terminal")
-                            _tshare = (_pvt / (_pvx + _pvt)
-                                       if (_pvx is not None and _pvt is not None and (_pvx + _pvt))
-                                       else None)
-                            _shares = _dcfr.get("shares")
-                            _eqv    = _dcfr.get("equity_value")
-
-                            # Where the discount rate came from. This is the single
-                            # most load-bearing assumption in the section — the same
-                            # financials priced at a 0.55 beta vs a 1.35 beta imply
-                            # -1.6% vs +13.8% growth — so it is shown, not asserted.
-                            # A fallback rate is labelled as one rather than passed
-                            # off as company-specific.
+                            # 5 ── Assumptions, the discount-rate build and the
+                            # value bridge - the same cells as the workbook's DCF tab.
                             _wb = _dcfr.get("wacc_basis") or {}
-                            if _wb.get("beta") is not None:
-                                # The estimation window is part of the assumption:
-                                # beta over 1y and over 5y are different numbers for
-                                # the same company, so quoting one without saying
-                                # which is incomplete.
-                                _rate_basis = (f"CAPM &middot; &beta; {_wb['beta']:.2f} "
-                                               f"({'selected range' if custom_range else period_label}"
-                                               f" vs benchmark) &middot; "
-                                               f"Rf {_wpi_pct(_wb.get('risk_free'), 2)} &middot; "
-                                               f"ERP {_wpi_pct(_wb.get('erp'), 1)}")
-                                _rate_extra = [
-                                    ("Cost of equity", _wpi_pct(_wb.get("cost_of_equity"), 2)),
-                                    ("Cost of debt (assumed)", _wpi_pct(_wb.get("cost_of_debt"), 2)),
-                                    ("Equity / debt weight",
-                                     f"{_wpi_pct(_wb.get('equity_weight'))} / {_wpi_pct(_wb.get('debt_weight'))}"),
-                                ]
-                            else:
-                                _rate_basis = ("Default rate &mdash; no benchmark selected, "
-                                               "so no beta could be estimated")
-                                _rate_extra = []
-
+                            _rate_basis = (f"CAPM &middot; raw &beta; {_wb['beta']:.2f} over 5 years vs SPY, "
+                                           f"Blume-adjusted to {_wb.get('beta_adj', 0):.2f} &middot; "
+                                           f"10-yr Treasury {_wpi_pct(_wb.get('rf'), 2)} &middot; "
+                                           f"ERP {_wpi_pct(_wb.get('erp'), 1)}"
+                                           if _wb.get("beta") is not None else "CAPM with beta 1.0 (not estimable)")
+                            _anchor = _dcfr.get("margin_anchor") or "TTM"
                             _wpi.append('<table class="fund-table" style="margin-top:1.5rem">')
                             for _grp, _items in (
                                 ("Assumptions, stated openly", [
                                     ("Discount rate (WACC)", _wpi_pct(_wacc, 2)),
                                     ("How the rate was set", _rate_basis),
-                                    *_rate_extra,
-                                    ("Terminal growth",      _wpi_pct(_tg, 2)),
-                                    ("Forecast horizon",     f"{_yrs} years" if _yrs else "—"),
-                                    ("Base-case FCF growth", _wpi_pct(_bg, 2)),
-                                    ("Base free cash flow",  _wpi_mag(_dcfr.get("base_fcf"))),
-                                    ("Net debt",             _wpi_mag(_dcfr.get("net_debt"))),
-                                    ("Shares outstanding",   _wpi_cnt(_shares)),
-                                    ("Terminal share of value", _wpi_pct(_tshare)),
+                                    ("Cost of equity", _wpi_pct(_wb.get("cost_of_equity"), 2)),
+                                    ("Cost of debt", _wpi_pct(_wb.get("cost_of_debt"), 2)),
+                                    ("Equity / debt weight",
+                                     f"{_wpi_pct(_wb.get('weight_equity'))} / {_wpi_pct(_wb.get('weight_debt'))}"),
+                                    ("Terminal growth", _wpi_pct(_tg, 2)),
+                                    ("Year-1 revenue growth", _wpi_pct(_bg, 1)),
+                                    ("Long-run operating margin", f"{_wpi_pct(_bm, 1)} ({_anchor})"),
+                                    ("Operating margin today", _wpi_pct(_m0, 1)),
+                                    ("Long-run capex / revenue", f"{_wpi_pct(_dcfr.get('lr_capex'), 1)} "
+                                                                 f"(today {_wpi_pct(_dcfr.get('capex_now'), 1)})"),
+                                    ("Revenue, last 12 months", _wpi_mag(_dcfr.get("revenue_ttm"))),
+                                    ("Shares outstanding", _wpi_cnt(_dcfr.get("shares"))),
                                 ]),
                                 ("Value bridge", [
                                     (f"PV of years 1&ndash;{_yrs}" if _yrs else "PV of forecast years",
-                                     _wpi_mag(_pvx)),
-                                    ("PV of terminal value",  _wpi_mag(_pvt)),
-                                    ("Terminal value (undiscounted)",
-                                     _wpi_mag(_dcfr.get("terminal_value"))),
-                                    ("Enterprise value",      _wpi_mag(_dcfr.get("enterprise_value"))),
-                                    ("Equity value",          _wpi_mag(_eqv)),
-                                    ("Equity value / share",
-                                     _wpi_usd(_eqv / _shares) if (_eqv is not None and _shares) else "—"),
-                                    ("Stock-based pay (not deducted)", _wpi_mag(_dcfr.get("sbc_base"))),
-                                    ("Value / share after stock pay",
+                                     _wpi_mag(_dcfr.get("pv_explicit"))),
+                                    ("PV of terminal value", _wpi_mag(_dcfr.get("pv_terminal"))),
+                                    ("Enterprise value", _wpi_mag(_dcfr.get("enterprise_value"))),
+                                    ("Net cash", _wpi_mag(_dcfr.get("net_cash"))),
+                                    ("Less preferred stock", _wpi_mag(_dcfr.get("preferred"))),
+                                    ("Private stakes (after haircut)", _wpi_mag(_dcfr.get("nonmkt"))),
+                                    ("Equity value", _wpi_mag(_dcfr.get("equity_value"))),
+                                    ("Terminal share of value", _wpi_pct(_dcfr.get("tv_share"))),
+                                    ("Value / share with stock pay as a cost",
                                      _wpi_usd(_dcfr["fair_value_after_sbc"])
                                      if _dcfr.get("fair_value_after_sbc") is not None else "—"),
+                                    ("Model checks", str(_dcfr.get("integrity") or "—")),
                                 ]),
                             ):
                                 _wpi.append(f'<tr class="grp"><td colspan="4">{_grp}</td></tr>')
@@ -4258,12 +4343,14 @@ color:var(--muted);background:var(--surface2)}
                             _wpi.append('</table></div>')
                             st.markdown("".join(_wpi), unsafe_allow_html=True)
                             st.caption(
-                                "Two-stage DCF on free cash flow: stage-one growth fades linearly to "
-                                "the terminal rate over the horizon, discounted at the company's own "
-                                "CAPM cost of capital, then bridged from enterprise value to equity "
-                                "with net debt. Market-implied growth is the same model solved "
-                                "backwards from today's price. A lens on expectations, not a price "
-                                "target — always do your own research.")
+                                "Revenue-driven DCF: revenue growth fades from year one to the terminal "
+                                "rate over ten years while the operating margin, capex and D&A move in a "
+                                "straight line to their long-run levels; free cash flow = after-tax "
+                                "operating profit + D&A − capex (+ stock pay, added back as reported). "
+                                "Discounted at the company's own CAPM cost of capital and bridged to equity "
+                                "with net cash, preferred stock and private stakes. The Excel report carries "
+                                "the same model with every input editable. A lens on expectations, not a "
+                                "price target — always do your own research.")
 
             if _show("Valuation"):
 

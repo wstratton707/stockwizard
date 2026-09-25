@@ -470,6 +470,29 @@ _SEC_TAGS = {
     "income_tax": ["IncomeTaxExpenseBenefit"],
     "buybacks": ["PaymentsForRepurchaseOfCommonStock"],
     "dividends_paid": ["PaymentsOfDividends", "PaymentsOfDividendsCommonStock"],
+    # The report workbook's capital-structure block and clean-EPS rows.
+    # Preferred stock is a claim senior to the common: Alphabet's $18.0B
+    # mandatory convertible (June 2026) is tagged with the convertible tag.
+    "preferred": ["ConvertiblePreferredStockNonredeemableOrRedeemableIssuerOptionValue",
+                  "PreferredStockValue", "TemporaryEquityCarryingAmountAttributableToParent"],
+    # Private stakes carried at cost-less-impairment ("measurement alternative")
+    # and equity-method investments - value free cash flow does not capture.
+    "nonmkt_securities": ["EquitySecuritiesWithoutReadilyDeterminableFairValueAmount"],
+    "equity_method": ["EquityMethodInvestments"],
+    # Mark-to-market gains on equity holdings run through net income; Alphabet's
+    # added $9.44 to trailing EPS. NVIDIA files its under the broader tag.
+    "equity_gains": ["EquitySecuritiesFvNiGainLoss", "GainLossOnInvestments",
+                     "EquitySecuritiesFvNiUnrealizedGainLoss"],
+    "other_income": ["NonoperatingIncomeExpense"],
+    # For filers with no operating-income line (Nike reports pre-tax income
+    # straight after its expenses): operating income = pre-tax income less
+    # these non-operating items.
+    "nonop_interest": ["InterestIncomeExpenseNonoperatingNet"],
+    "nonop_other": ["OtherNonoperatingIncomeExpense"],
+    # Operating drivers the Segments tab shows when the company tags them.
+    "rpo": ["RevenueRemainingPerformanceObligation"],
+    "deferred_revenue": ["ContractWithCustomerLiabilityCurrent"],
+    "inventory": ["InventoryNet"],
 }
 _SEC_TAGS_EPS    = ["EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted"]
 _SEC_TAGS_SHARES = ["WeightedAverageNumberOfDilutedSharesOutstanding",
@@ -675,7 +698,9 @@ _TTM_CASH   = ("net_cash_flow_from_operating_activities", "capex", "sbc", "buyba
 _BAL_FIELDS = ("assets", "current_assets", "liabilities", "current_liabilities", "equity",
                "long_term_debt", "debt_current", "debt_total_incl_current",
                "debt_current_total", "commercial_paper", "short_term_borrowings",
-               "cash", "short_term_investments", "retained_earnings", "lt_securities")
+               "cash", "short_term_investments", "retained_earnings", "lt_securities",
+               "preferred", "nonmkt_securities", "equity_method", "rpo", "deferred_revenue",
+               "inventory")
 
 
 def _sec_quarterly_flow(facts, tags, unit="USD"):
@@ -739,6 +764,23 @@ def _sec_latest_balance(facts):
     return d, {f: (per_field[f][d][0] if d in per_field[f] else None) for f in _BAL_FIELDS}
 
 
+def _sec_instant_series(facts, field):
+    """{date: value} for a balance-sheet (instant) field, first tag with data
+    at each date winning, latest filing at that date winning."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    vals = {}
+    for tag in _SEC_TAGS.get(field, []):
+        for e in (gaap.get(tag, {}).get("units", {}).get("USD") or []):
+            if e.get("start") or not e.get("end") or e.get("val") is None:
+                continue
+            d = pd.Timestamp(e["end"])
+            f = e.get("filed", "")
+            cur = vals.get(d)
+            if cur is None or (cur[2] == tag and f >= cur[1]):
+                vals[d] = (float(e["val"]), f, tag)
+    return {d: v[0] for d, v in sorted(vals.items())}
+
+
 def _sec_cover_shares(facts):
     """(date, shares outstanding) from the latest filing's cover page.
 
@@ -781,12 +823,16 @@ def fiscal_quarter_label(end, fy_end_month):
     return f"Q{q}", fy
 
 
-def _sec_quarter_table(facts, rev_q, gp_q, fy_end, pre_q=None, tax_q=None):
+def _sec_quarter_table(facts, rev_q, gp_q, fy_end, pre_q=None, tax_q=None, extra=None):
     """The latest four quarters: revenue, diluted EPS, gross profit and growth
     on the same quarter a year earlier, oldest first.
 
     EPS prefers the 3-month fact the filing states; a fourth quarter has none
-    (10-Ks report the year), so it is the full year less nine months."""
+    (10-Ks report the year), so it is the full year less nine months.
+
+    `extra` is {name: {quarter_end: value}} - net income, operating income,
+    other income, equity-security gains, R&D - each read for the quarter and
+    for the same quarter a year earlier (`name_prev`)."""
     gaap = facts.get("facts", {}).get("us-gaap", {})
     exact = {}
     for tag in _SEC_TAGS_EPS:
@@ -831,16 +877,44 @@ def _sec_quarter_table(facts, rev_q, gp_q, fy_end, pre_q=None, tax_q=None):
             "prev_label": ("{} FY{}".format(*[(a, str(b)[2:]) for a, b in
                                               [fiscal_quarter_label(p, fy_month)]][0])
                            if p is not None else None),
+            "rev_prev": rev_p, "eps_prev": eps_p,
         })
+        for name, series in (extra or {}).items():
+            rows[-1][name] = near(series, d) if series else None
+            rows[-1][name + "_prev"] = (near(series, p) if (series and p is not None) else None)
     return rows
+
+
+def _derived_operating_income(pre, total, interest, other):
+    """{period: operating income} = pre-tax income less non-operating items,
+    for periods where the filer tags pre-tax income and at least one
+    non-operating line but no operating income. Banks tag neither line as
+    non-operating, so they are not given one."""
+    out = {}
+    for k, p in (pre or {}).items():
+        if total and k in total:
+            out[k] = p - total[k]
+        elif (interest and k in interest) or (other and k in other):
+            out[k] = p - (interest or {}).get(k, 0.0) - (other or {}).get(k, 0.0)
+    return out
 
 
 def _sec_ttm(facts, fy_end):
     """Latest trailing-twelve-month flows, latest balance sheet, and the last
     three non-overlapping twelve-month FCF windows. None when fewer than four
     consecutive quarters exist."""
+    _cache = {}
+
     def _q(field):
-        return _sec_quarterly_flow(facts, _SEC_TAGS[field])
+        if field not in _cache:
+            s = _sec_quarterly_flow(facts, _SEC_TAGS[field])
+            if field == "operating_income_loss" and not s:
+                s = _derived_operating_income(
+                    _q("pretax_income"), _sec_quarterly_flow(facts, _SEC_TAGS["other_income"]),
+                    _sec_quarterly_flow(facts, _SEC_TAGS["nonop_interest"]),
+                    _sec_quarterly_flow(facts, _SEC_TAGS["nonop_other"]))
+            _cache[field] = s
+        return _cache[field]
 
     rev_q = _q("revenues") or _q("net_income_loss")
     all_ends = list(rev_q)
@@ -908,7 +982,14 @@ def _sec_ttm(facts, fy_end):
             break
 
     quarters = _sec_quarter_table(facts, rev_q, _q("gross_profit"), fy_end,
-                                  _q("pretax_income"), _q("income_tax"))
+                                  _q("pretax_income"), _q("income_tax"),
+                                  extra={"net_income": _q("net_income_loss"),
+                                         "operating_income": _q("operating_income_loss"),
+                                         "other_income": _q("other_income"),
+                                         "equity_gains": _q("equity_gains"),
+                                         "rnd": _q("research_and_development"),
+                                         "da": (_q("depreciation_amortization")
+                                                or _q("depreciation_only"))})
     _dps = _sec_quarterly_flow(facts, ["CommonStockDividendsPerShareDeclared",
                                        "CommonStockDividendsPerShareCashPaid"], unit="USD/shares")
     dps_latest = (list(_dps.items())[-1] if _dps else None)
@@ -916,7 +997,33 @@ def _sec_ttm(facts, fy_end):
         dps_latest = None                      # a dividend that stopped is not a yield
 
     b_end, balance = _sec_latest_balance(facts)
+    # Balance-sheet drivers now and a year earlier (backlog, deferred revenue,
+    # inventory) for the Segments tab's operating-driver table.
+    drivers_bal = {}
+    if b_end is not None:
+        for fld in ("rpo", "deferred_revenue", "inventory"):
+            ser = _sec_instant_series(facts, fld)
+            now = ser.get(b_end)
+            ago = [v for k, v in ser.items() if 350 <= (b_end - k).days <= 380]
+            if now is not None:
+                drivers_bal[fld] = {"now": now, "ago": ago[-1] if ago else None}
     sh_end, shares = _sec_cover_shares(facts)
+    # The 10-K cover count just after the fiscal year-end, for the workbook's
+    # "shares then vs now" line (None for multi-class filers, whose cover
+    # counts companyfacts omits).
+    shares_fy = None
+    try:
+        _node = facts.get("facts", {}).get("dei", {}).get("EntityCommonStockSharesOutstanding")
+        _fy_ts = pd.Timestamp(fy_end)
+        _rows = [e for e in ((_node or {}).get("units", {}).get("shares") or [])
+                 if e.get("val") and e.get("end") and str(e.get("form", "")).startswith("10-K")
+                 and 0 <= (pd.Timestamp(e["end"]) - _fy_ts).days <= 150]
+        if _rows:
+            _first = min(_rows, key=lambda e: e["end"])
+            shares_fy = sum({float(e["val"]) for e in _rows
+                             if e.get("accn") == _first.get("accn") and e["end"] == _first["end"]})
+    except Exception:
+        shares_fy = None
     # Berkshire's last companyfacts cover count is from 2011. A count that old
     # would price the company at a fraction of its value; drop it.
     if sh_end and (pd.Timestamp(sh_end) < t_end - pd.Timedelta(days=120)):
@@ -926,8 +1033,8 @@ def _sec_ttm(facts, fy_end):
             "prior": prior,
             "balance_end": str(b_end.date()) if b_end is not None else None,
             "balance": balance,
-            "shares_outstanding": shares, "shares_date": sh_end,
-            "quarters": quarters,
+            "shares_outstanding": shares, "shares_date": sh_end, "shares_fy": shares_fy,
+            "quarters": quarters, "drivers_bal": drivers_bal,
             "dps_quarter": (float(dps_latest[1]) if dps_latest else None),
             "dps_quarter_end": (str(dps_latest[0].date()) if dps_latest else None),
             "flows_q": {"cfo": {str(k.date()): v for k, v in cfo_q.items()},
@@ -1008,6 +1115,19 @@ def fetch_sec_financials(ticker, years=10, log=print):
             v = (d + (a or 0.0)) if d is not None else None
         return v
 
+    def _oi(fy):
+        v = col("operating_income_loss", fy)
+        if v is not None:
+            return v
+        pre = col("pretax_income", fy)
+        if pre is None:
+            return None
+        tot = col("other_income", fy)
+        if tot is not None:
+            return pre - tot
+        i, o = col("nonop_interest", fy), col("nonop_other", fy)
+        return (pre - (i or 0.0) - (o or 0.0)) if (i is not None or o is not None) else None
+
     inc_rows, bal_rows, cf_rows = [], [], []
     for fy in fys:
         period = end_of(fy)
@@ -1018,7 +1138,7 @@ def fetch_sec_financials(ticker, years=10, log=print):
         inc_rows.append({
             "Period": period,
             "revenues": col("revenues", fy), "cost_of_revenue": col("cost_of_revenue", fy),
-            "gross_profit": gp, "operating_income_loss": col("operating_income_loss", fy),
+            "gross_profit": gp, "operating_income_loss": _oi(fy),
             "net_income_loss": col("net_income_loss", fy),
             "research_and_development": col("research_and_development", fy),
             "depreciation_amortization": _da(fy),
@@ -1042,6 +1162,9 @@ def fetch_sec_financials(ticker, years=10, log=print):
             "short_term_investments": col("short_term_investments", fy),
             "lt_securities": col("lt_securities", fy),
             "retained_earnings": col("retained_earnings", fy),
+            "preferred": col("preferred", fy),
+            "nonmkt_securities": col("nonmkt_securities", fy),
+            "equity_method": col("equity_method", fy),
         })
         cf_rows.append({
             "Period": period,
@@ -1060,6 +1183,18 @@ def fetch_sec_financials(ticker, years=10, log=print):
     except Exception as e:
         log(f"   TTM not built for {ticker}: {type(e).__name__}")
         ttm = None
+    if ttm is not None and not ttm.get("shares_outstanding"):
+        # A multi-class filer's cover count is dimensioned, so companyfacts has
+        # none; read it from the latest filing itself (one extra request, only
+        # for these companies).
+        try:
+            lx = fetch_sec_latest_xbrl(ticker, log=log)
+            if lx.get("cover_shares"):
+                ttm["shares_outstanding"] = lx["cover_shares"]
+                ttm["shares_date"] = lx["cover_date"]
+                ttm["shares_source"] = "filing instance (all classes)"
+        except Exception as e:
+            log(f"   cover shares not read for {ticker}: {type(e).__name__}")
     return {
         "income_statement":    pd.DataFrame(inc_rows),
         "balance_sheet":       pd.DataFrame(bal_rows),
@@ -1271,6 +1406,49 @@ def fetch_sector_data(ticker, api_key, sector, log=print,
     except Exception as e:
         log(f"   Sector ETF failed: {e}")
         return None
+
+
+def fetch_street_view(ticker, log=print):
+    """Next earnings date and revenue consensus from Yahoo Finance, for the
+    report's catalyst calendar and its 'Street vs model' block.
+
+    {"earnings_date": Timestamp | None, "fy0": $, "fy1": $, "q0": $, "q1": $,
+     "analysts": int, "as_of": date, "source": str} - fields None when absent;
+    {} when Yahoo returns nothing. Unofficial, and labelled so wherever shown."""
+    out = {}
+    try:
+        import yfinance as yf
+        tk = yf.Ticker(ticker)
+        try:
+            cal = tk.calendar or {}
+            ed = cal.get("Earnings Date") if isinstance(cal, dict) else None
+            if isinstance(ed, (list, tuple)) and ed:
+                ed = ed[0]
+            out["earnings_date"] = pd.Timestamp(ed) if ed is not None else None
+        except Exception:
+            out["earnings_date"] = None
+        try:
+            est = tk.revenue_estimate
+            if est is not None and len(est):
+                def _g(period):
+                    try:
+                        v = est.loc[period, "avg"]
+                        return float(v) if v == v else None
+                    except Exception:
+                        return None
+                out.update({"fy0": _g("0y"), "fy1": _g("+1y"), "q0": _g("0q"), "q1": _g("+1q")})
+                try:
+                    out["analysts"] = int(est.loc["0y", "numberOfAnalysts"])
+                except Exception:
+                    out["analysts"] = None
+        except Exception:
+            pass
+        out["as_of"] = pd.Timestamp.today().normalize()
+        out["source"] = "Yahoo Finance analyst estimates (unofficial)"
+    except Exception as e:
+        log(f"   street view unavailable for {ticker}: {type(e).__name__}")
+        return {}
+    return out
 
 
 def fetch_next_earnings(ticker, api_key):
@@ -1582,6 +1760,163 @@ def _seg_labels(lab_bytes):
                 rank = {"terseLabel": 0, "label": 1}.get(role, 9)
                 if cid and text and rank < pri.get(cid, 99):
                     out[cid], pri[cid] = text, rank
+    return out
+
+
+_LATEST_XBRL = {}
+_SEG_OI_TAGS = ["OperatingIncomeLoss", "SegmentReportingInformationOperatingIncomeLoss"]
+
+
+def fetch_sec_latest_xbrl(ticker, log=print):
+    """What only the latest 10-Q / 10-K's own XBRL instance carries.
+
+    companyfacts drops every dimensioned fact, which removes two things the
+    report needs: the cover-page share count of a multi-class filer (Alphabet
+    files Class A, B and C separately and companyfacts shows none of them) and
+    each business segment's revenue and operating income. Returns
+      {"form", "period", "filed", "url",
+       "cover_shares", "cover_date",            # all classes summed, or None
+       "segments": {"basis": "quarter"|"year", "cur_end", "prev_end",
+                    "rows": [{"name", "rev", "rev_prev", "oi", "oi_prev"}],
+                    "total_rev", "total_rev_prev", "total_oi", "total_oi_prev"} | None}
+    or {} when the instance can't be read. Cached per filing."""
+    import xml.etree.ElementTree as ET
+    try:
+        periodic = [f for f in fetch_sec_filings(ticker, log=log)
+                    if f.get("form") in ("10-Q", "10-K")]
+    except Exception:
+        periodic = []
+    if not periodic:
+        return {}
+    f = periodic[0]
+    key = (ticker.upper(), f.get("url"))
+    if key in _LATEST_XBRL:
+        return _LATEST_XBRL[key]
+    base, doc = f["url"].rsplit("/", 1)
+    stem = doc.rsplit(".", 1)[0]
+    try:
+        inst = requests.get(f"{base}/{stem}_htm.xml", headers=SEC_HEADERS, timeout=30)
+        if inst.status_code != 200:
+            return {}
+        root = ET.fromstring(inst.content)
+        lab = requests.get(f"{base}/{stem}_lab.xml", headers=SEC_HEADERS, timeout=30)
+        labels = _seg_labels(lab.content) if lab.status_code == 200 else {}
+    except Exception as e:
+        log(f"   latest XBRL: {type(e).__name__} for {ticker}")
+        return {}
+
+    ctx = {}
+    for c in root.iter("{%s}context" % _NS["xbrli"]):
+        p = c.find("xbrli:period", _NS)
+        s, e, i = (p.find("xbrli:startDate", _NS), p.find("xbrli:endDate", _NS),
+                   p.find("xbrli:instant", _NS))
+        dims = {_local(m.get("dimension")): (m.text or "").strip()
+                for m in c.iter("{%s}explicitMember" % _NS["xbrldi"])}
+        ctx[c.get("id")] = ((s.text if s is not None else None),
+                            (e.text if e is not None else (i.text if i is not None else None)),
+                            dims)
+
+    # Cover shares: every class's count on the latest cover date, summed. Classes
+    # of very different economic weight (Berkshire's A is worth 1,500 B) cannot
+    # be added, so a class under 1% of the largest one voids the sum.
+    cover = {}
+    for el in root:
+        if el.tag.split("}")[-1] != "EntityCommonStockSharesOutstanding":
+            continue
+        cx = ctx.get(el.get("contextRef"))
+        try:
+            v = float(el.text)
+        except (TypeError, ValueError):
+            continue
+        if cx and cx[1]:
+            cover.setdefault(cx[1], {})[el.get("contextRef")] = v
+    cover_date, cover_shares = None, None
+    if cover:
+        cover_date = max(cover)
+        vals = list(cover[cover_date].values())
+        if vals and min(vals) >= 0.01 * max(vals):
+            cover_shares = sum(vals)
+
+    # Segment results on the business-segment axis.
+    rev_tags, oi_tags = set(_SEC_TAGS["revenues"]), set(_SEG_OI_TAGS)
+    facts = {}          # (kind, start, end, member or None) -> value
+    for el in root:
+        tag = el.tag.split("}")[-1]
+        kind = "rev" if tag in rev_tags else "oi" if tag in oi_tags else None
+        if kind is None or el.get("contextRef") not in ctx:
+            continue
+        try:
+            val = float(el.text)
+        except (TypeError, ValueError):
+            continue
+        s, e, dims = ctx[el.get("contextRef")]
+        if not s or not e:
+            continue
+        seg = dims.get("StatementBusinessSegmentsAxis")
+        extra = {(a, _local(m)) for a, m in dims.items() if a != "StatementBusinessSegmentsAxis"}
+        if not extra <= _SEG_OK_EXTRA:
+            continue
+        k = (kind, s, e, seg)
+        # revenue tags in priority order: keep the first seen for a key
+        facts.setdefault(k, val)
+
+    def _days(s, e):
+        return (pd.Timestamp(e) - pd.Timestamp(s)).days
+
+    segments = None
+    period_end = f.get("period")
+    for basis, lo, hi in (("quarter", 80, 100), ("year", 350, 380)):
+        if f.get("form") == "10-K" and basis == "quarter":
+            continue
+        cur = {k: v for k, v in facts.items()
+               if k[3] and lo <= _days(k[1], k[2]) <= hi and k[2] == period_end}
+        if not any(k[0] == "rev" for k in cur):
+            continue
+        cur_end = pd.Timestamp(period_end)
+        prev_keys = {k: v for k, v in facts.items()
+                     if lo <= _days(k[1], k[2]) <= hi
+                     and 350 <= (cur_end - pd.Timestamp(k[2])).days <= 380}
+        members = sorted({k[3] for k in cur if k[0] == "rev"})
+
+        def _pick(src, kind, m):
+            for k, v in src.items():
+                if k[0] == kind and k[3] == m:
+                    return v
+            return None
+
+        def _total(src, kind):
+            for k, v in src.items():
+                if k[0] == kind and k[3] is None:
+                    return v
+            return None
+        tot_now = {k: v for k, v in facts.items()
+                   if lo <= _days(k[1], k[2]) <= hi and k[2] == period_end and k[3] is None}
+        rows = []
+        for m in members:
+            rows.append({"name": _tidy_label(labels.get(m.replace(":", "_")) or _humanize_member(m)),
+                         "member": m,
+                         "rev": _pick(cur, "rev", m), "rev_prev": _pick(prev_keys, "rev", m),
+                         "oi": _pick(cur, "oi", m), "oi_prev": _pick(prev_keys, "oi", m)})
+        total_rev = _total(tot_now, "rev")
+        if total_rev:
+            revs = {r["member"]: r["rev"] for r in rows if r["rev"]}
+            keep = _drop_subtotals(revs, total_rev)
+            rows = [r for r in rows if r["member"] in keep]
+        if len(rows) < 1:
+            continue
+        rows.sort(key=lambda r: -(r["rev"] or 0))
+        segments = {"basis": basis, "cur_end": period_end,
+                    "prev_end": max((k[2] for k in prev_keys), default=None),
+                    "rows": rows, "total_rev": total_rev,
+                    "total_rev_prev": _total(prev_keys, "rev"),
+                    "total_oi": _total(tot_now, "oi"),
+                    "total_oi_prev": _total(prev_keys, "oi")}
+        break
+
+    out = {"form": f.get("form"), "period": period_end, "filed": f.get("filed"),
+           "url": f.get("url"), "cover_shares": cover_shares, "cover_date": cover_date,
+           "segments": segments}
+    _LATEST_XBRL[key] = out
     return out
 
 

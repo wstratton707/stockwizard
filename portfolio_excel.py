@@ -544,6 +544,7 @@ def build_portfolio_excel(preferences, final_weights, stock_metrics,
         wb.move_sheet(name, offset=wb.sheetnames.index(name) - i)
 
     buf = io.BytesIO()
+    __import__("doc_props").stamp(wb)
     wb.save(buf)
     buf.seek(0)
     return buf
@@ -1217,6 +1218,7 @@ def build_tracked_portfolio_excel(portfolio_name, tracked, profiles):
     for name in wb.sheetnames:
         wb[name].sheet_properties.tabColor = DARK_BLUE
     buf = io.BytesIO()
+    __import__("doc_props").stamp(wb)
     wb.save(buf)
     buf.seek(0)
     return buf

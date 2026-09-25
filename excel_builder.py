@@ -2692,6 +2692,7 @@ def build_excel(ticker, df, period,
     wb._sheets.sort(key=lambda s: pos.get(s.title, 999))
 
     buf = io.BytesIO()
+    __import__("doc_props").stamp(wb)
     wb.save(buf)
     buf.seek(0)
     return buf

@@ -548,6 +548,7 @@ def build_portfolio_docx(portfolio_name, tracked, profiles):
     _para(doc, DISCLAIMER, size=8, color=MUTED, italic=True, after=0)
 
     buf = io.BytesIO()
+    __import__("doc_props").stamp(doc)
     doc.save(buf)
     buf.seek(0)
     return buf

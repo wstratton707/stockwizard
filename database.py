@@ -396,6 +396,62 @@ def waitlist_storage_status() -> str:
     return _table_status(_WAITLIST_TABLE)
 
 
+# ── Valuation log (the report workbook's track record) ─────────────────────────
+# One row per ticker per day: the model's bear / base / bull values, the price
+# and the verdict when a report was built, so later reports can show what
+# changed and the model's record can be judged against prices. Company-level
+# only - no user is recorded. Written with the server key; the table has RLS
+# on and no policies, so it is not readable from a browser.
+#
+#   create table if not exists public.valuation_log (
+#     ticker text not null, report_date date not null,
+#     price double precision, bear double precision, base double precision,
+#     bull double precision, pw double precision, upside double precision,
+#     verdict text, implied_cagr double precision, integrity text,
+#     model_version text default 'v2', created_at timestamptz default now(),
+#     primary key (ticker, report_date));
+#   alter table public.valuation_log enable row level security;
+_VLOG_TABLE = "valuation_log"
+
+
+def save_valuation_snapshot(row: dict) -> bool:
+    """Upsert today's snapshot for a ticker. False (and silent) when the table
+    or Supabase is unavailable - a missing track record must never block a
+    report."""
+    if not _available() or not row or not row.get("ticker"):
+        return False
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/{_VLOG_TABLE}",
+            headers={**_headers(), "Prefer": "resolution=merge-duplicates,return=minimal"},
+            params={"on_conflict": "ticker,report_date"},
+            json=row, timeout=_TIMEOUT)
+        if r.status_code in (200, 201, 204):
+            return True
+        logger.warning(f"save_valuation_snapshot: HTTP {r.status_code} {r.text[:160]}")
+    except Exception as e:
+        logger.warning(f"save_valuation_snapshot: {e}")
+    return False
+
+
+def load_valuation_log(ticker: str, before: str = None, limit: int = 20) -> list:
+    """Earlier snapshots for a ticker, newest first ([] when unavailable)."""
+    if not _available() or not ticker:
+        return []
+    params = {"ticker": f"eq.{ticker.upper()}", "select": "*", "order": "report_date.desc",
+              "limit": str(limit)}
+    if before:
+        params["report_date"] = f"lt.{before}"
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/{_VLOG_TABLE}", headers=_headers(),
+                         params=params, timeout=_TIMEOUT)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        logger.warning(f"load_valuation_log: {e}")
+    return []
+
+
 # ── Portfolio persistence ──────────────────────────────────────────────────────
 _PORT_TABLE = "saved_portfolios"
 

@@ -1269,6 +1269,7 @@ def build_stock_pptx(ticker, df, period_label,
               0.6, 6.6, 12, 0.3, font_size=9, color=C_GREY_TEXT, align=PP_ALIGN.CENTER)
 
     buf = io.BytesIO()
+    __import__("doc_props").stamp(prs)
     prs.save(buf)
     buf.seek(0)
     return buf
@@ -1621,6 +1622,7 @@ def build_portfolio_pptx(preferences, final_weights, stock_metrics,
               0.6, 6.6, 12, 0.3, font_size=9, color=C_GREY_TEXT, align=PP_ALIGN.CENTER)
 
     buf = io.BytesIO()
+    __import__("doc_props").stamp(prs)
     prs.save(buf)
     buf.seek(0)
     return buf

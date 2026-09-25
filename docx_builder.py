@@ -592,17 +592,26 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
         up = dcf.get("upside")
         up_txt = (f"{up*100:+.0f}% versus the current price of ${dcf.get('price', close_last):,.2f}"
                   if up is not None else "")
+        _sc = dcf.get("scenarios") or {}
+        _bear = (_sc.get("bear") or {}).get("fair_value")
+        _bull = (_sc.get("bull") or {}).get("fair_value")
+        _ig = dcf.get("market_implied_growth")
         _para(doc,
-              f"QuantWizard's two-stage discounted-cash-flow model estimates a fair "
-              f"value of ${dcf['fair_value']:,.2f} per share — {up_txt} "
-              f"(assuming a {dcf.get('wacc', 0)*100:.0f}% discount rate and "
-              f"{dcf.get('terminal_growth', 0)*100:.1f}% long-run growth). "
-              f"A DCF is highly sensitive to its assumptions and is one input, not a "
-              f"price target.")
+              f"QuantWizard's revenue-driven discounted-cash-flow model estimates a base-case "
+              f"fair value of ${dcf['fair_value']:,.2f} per share — {up_txt} "
+              f"(a {dcf.get('wacc', 0)*100:.1f}% discount rate, "
+              f"{(dcf.get('base_growth') or 0)*100:.0f}% year-one revenue growth fading to "
+              f"{dcf.get('terminal_growth', 0)*100:.1f}%, and a "
+              f"{(dcf.get('target_margin') or 0)*100:.0f}% long-run operating margin)."
+              + (f" Bear to bull runs ${_bear:,.0f}–${_bull:,.0f}, probability-weighted "
+                 f"${dcf['prob_weighted']:,.0f}." if (_bear and _bull and dcf.get("prob_weighted")) else "")
+              + (f" To justify today's price the market needs about {_ig*100:.0f}% year-one revenue "
+                 f"growth." if _ig is not None else "")
+              + " A DCF is highly sensitive to its assumptions and is one input, not a price target.")
         if dcf.get("fair_value_after_sbc") is not None:
             _para(doc,
-                  f"Treating stock-based pay (${dcf['sbc_base'] / 1e9:,.1f}B a year) as the "
-                  f"cost it is to shareholders lowers that to "
+                  f"Treating stock-based pay ({(dcf.get('sbc_share') or 0)*100:.1f}% of revenue) as "
+                  f"the cost it is to shareholders lowers that to "
                   f"${dcf['fair_value_after_sbc']:,.2f}.", size=10)
 
     try:
@@ -701,18 +710,21 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
         _asm.append(("Discount rate (WACC)", _pct((_d.get("wacc") or 0) * 100, 2)))
         if _wb.get("beta") is not None:
             _asm.append(("How the rate was set",
-                         f"CAPM · beta {_wb['beta']:.2f} ({period_label} vs benchmark) · "
-                         f"Rf {_pct((_wb.get('risk_free') or 0)*100, 2)} · "
+                         f"CAPM · raw beta {_wb['beta']:.2f} (5 years daily vs SPY, Blume-adjusted "
+                         f"{_wb.get('beta_adj', 0):.2f}) · 10-yr Treasury {_pct((_wb.get('rf') or 0)*100, 2)} · "
                          f"ERP {_pct((_wb.get('erp') or 0)*100, 1)}"))
             _asm.append(("Cost of debt / tax rate",
-                         f"{_pct((_wb.get('cost_of_debt') or 0)*100, 2)} assumed · "
-                         f"{_pct((_wb.get('tax_rate') or 0)*100, 0)} statutory"))
+                         f"{_pct((_wb.get('cost_of_debt') or 0)*100, 2)} (Treasury + leverage spread) · "
+                         f"{_pct((_wb.get('tax') or 0)*100, 1)} effective"))
         else:
             _asm.append(("How the rate was set",
-                         "Default rate — no benchmark available, so no beta was estimated"))
+                         "CAPM with beta 1.0 — no benchmark series to estimate it"))
         _asm.append(("Terminal growth", _pct((_d.get("terminal_growth") or 0) * 100, 2)))
         _asm.append(("Forecast horizon", f"{_d.get('years')} years" if _d.get("years") else None))
-        _asm.append(("Base free cash flow", _money(_d.get("base_fcf"))))
+        _asm.append(("Year-1 revenue growth", _pct((_d.get("base_growth") or 0) * 100, 1)))
+        _asm.append(("Long-run operating margin",
+                     f"{_pct((_d.get('target_margin') or 0) * 100, 1)} ({_d.get('margin_anchor') or 'TTM'})"))
+        _asm.append(("Long-run capex / revenue", _pct((_d.get("lr_capex") or 0) * 100, 1)))
     _asm.append(("Risk-free rate", _pct(rfr_pct, 2) + " (3-month T-bill, FRED)"))
     _kv_table(doc, _asm)
 
@@ -720,10 +732,11 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
           "Two things worth knowing about the numbers above. The discount rate is "
           "the most load-bearing assumption in any fair value — on identical "
           "financials, a low-beta rate and a high-beta rate can imply opposite "
-          "conclusions — so it is stated rather than buried. And the cost of debt "
-          "and tax rate are assumptions, not figures read from a filing: the "
-          "statement data available here carries no interest expense. Where a "
-          "figure could not be sourced it is shown as N/A rather than estimated.",
+          "conclusions — so it is stated rather than buried. The cost of debt is the "
+          "10-year Treasury plus a spread stepped by leverage and the tax rate is the "
+          "trailing effective rate; the Excel report carries the same model with every "
+          "input editable. Where a figure could not be sourced it is shown as N/A "
+          "rather than estimated.",
           size=9.5, color=MUTED, after=4)
 
     # ── Disclaimer ────────────────────────────────────────────────────────────
@@ -735,6 +748,7 @@ def build_stock_docx(ticker, df, period_label, company_details=None,
     dpr.font.color.rgb = MUTED
 
     buf = io.BytesIO()
+    __import__("doc_props").stamp(doc)
     doc.save(buf)
     buf.seek(0)
     return buf

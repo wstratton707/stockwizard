@@ -474,6 +474,7 @@ def build_portfolio_review_pptx(portfolio_name, tracked, profiles):
               0.45, 6.85, 12.4, 0.3, font_size=9, italic=True, color=C_GREY_TEXT)
 
     buf = io.BytesIO()
+    __import__("doc_props").stamp(prs)
     prs.save(buf)
     buf.seek(0)
     return buf

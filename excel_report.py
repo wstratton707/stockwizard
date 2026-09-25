@@ -1889,5 +1889,6 @@ def build_report(ticker, df, financials=None, fundamentals=None, dcf=None,
     except Exception:
         pass
     buf = io.BytesIO()
+    __import__("doc_props").stamp(wb)
     wb.save(buf)
     return io.BytesIO(_postprocess(buf.getvalue(), c))
